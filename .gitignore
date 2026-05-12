@@ -58,3 +58,5 @@ export/*
 .vscode/mcp.json
 
 local.db
+
+/repos/

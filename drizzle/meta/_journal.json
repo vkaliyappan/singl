@@ -15,6 +15,20 @@
       "when": 1747008000000,
       "tag": "0001_azure_pat_token",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778584144620,
+      "tag": "0002_lonely_vargas",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1778584225455,
+      "tag": "0003_loving_squadron_supreme",
+      "breakpoints": true
     }
   ]
 }

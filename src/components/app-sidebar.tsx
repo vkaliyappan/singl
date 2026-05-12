@@ -5,7 +5,11 @@ import { usePathname } from "next/navigation"
 import {
   IconHome,
   IconSettings,
+  IconGitBranch,
+  IconSun,
+  IconMoon,
 } from "@tabler/icons-react"
+import { useTheme } from "next-themes"
 
 import {
   Sidebar,
@@ -23,16 +27,18 @@ import {
 
 const navItems = [
   { title: "Home", href: "/", icon: IconHome },
+  { title: "Repository", href: "/repo", icon: IconGitBranch },
   { title: "Settings", href: "/settings", icon: IconSettings },
 ]
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const { resolvedTheme, setTheme } = useTheme()
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-3 px-2 py-2">
+        <div className="flex items-center gap-3 px-2 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 shadow-sm">
             <span className="text-sm font-bold text-white tracking-tight">S</span>
           </div>
@@ -65,7 +71,19 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter />
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+              tooltip={resolvedTheme === "dark" ? "Switch to light" : "Switch to dark"}
+            >
+              {resolvedTheme === "dark" ? <IconSun /> : <IconMoon />}
+              <span>{resolvedTheme === "dark" ? "Light mode" : "Dark mode"}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )

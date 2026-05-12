@@ -22,7 +22,7 @@ export default async function SettingsPage() {
   const hasAzurePatToken = !!(appSettingsRows[0]?.azurePatToken);
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-8">
+    <div className="mx-auto w-full max-w-2xl px-4 py-8 overflow-y-auto h-full">
       <div className="mb-2">
         <h1 className="text-base font-semibold">Settings</h1>
         <p className="text-xs text-muted-foreground mt-0.5">
