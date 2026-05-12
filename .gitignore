@@ -60,3 +60,4 @@ export/*
 local.db
 
 /repos/
+/repo/
