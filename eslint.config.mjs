@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // CommonJS Gulp build tool — not app code
+    "gulpfile.js",
   ]),
 ]);
 

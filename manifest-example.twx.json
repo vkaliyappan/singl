@@ -1,0 +1,46 @@
+{
+  "projects": {
+    "ITCI_CHBBOMTransformer": {
+      "projectName": "ITCI.CHBBOMTransformer",
+      "alias": "BomTransform",
+      "exports": [
+        "all"
+      ]
+    },
+    "ITCI_CHBECN": {
+      "projectName": "ITCI.CHBECN",
+      "alias": "ChangeNoticeDashboard",
+      "exports": [
+        "all"
+      ]
+    },
+    "ITCI_CHBUtils": {
+      "projectName": "ITCI.CHBUtils",
+      "alias": "InheritanceApp",
+      "exports": [
+        "all"
+      ]
+    },
+    "ITCI_BOMCostRollup": {
+      "projectName": "ITCI.BOMCostRollup",
+      "alias": "CostEstimateTool",
+      "exports": [
+        "all"
+      ]
+    },
+    "CHB_Common": {
+      "projectName": "CHB.Common",
+      "alias": "CommonUtility",
+      "exports": [
+        "all"
+      ]
+    },
+    "ITCI_CHBPR": {
+      "projectName": "ITCI.CHBPR",
+      "alias": "CreateProblemReport",
+      "exports": [
+        "all"
+      ]
+    }
+  }
+}

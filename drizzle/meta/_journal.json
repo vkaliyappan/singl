@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1778070445547,
+      "tag": "0000_crazy_doctor_faustus",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1747008000000,
+      "tag": "0001_azure_pat_token",
+      "breakpoints": true
+    }
+  ]
+}

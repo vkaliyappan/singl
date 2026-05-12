@@ -39,3 +39,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+twx-cli/dist/
+
+
+WindchillClients/**
+plans/
+.env.local
+.env
+manifest.twx.json
+pseudocodes/*
+windchill_ccd_build/**
+bkup/*
+backup/*
+.vscode/*
+.idea/*
+*.log
+export/*
+.vscode/mcp.json
+
+local.db
