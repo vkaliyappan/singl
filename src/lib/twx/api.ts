@@ -36,6 +36,26 @@ async function safeRead(res: Response): Promise<string> {
   }
 }
 
+export async function getAllProjects(
+  baseUrl: string,
+  appKey: string
+): Promise<string[]> {
+  const url = `${baseUrl.replace(/\/$/, '')}/Projects`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { appKey, Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const body = await safeRead(res);
+    throw new ApiError(
+      `GetProjects failed: ${res.status} ${res.statusText} - ${body}`,
+      res.status
+    );
+  }
+  const json = (await res.json()) as { rows?: Array<{ name: string }> };
+  return (json.rows ?? []).map((r) => r.name).filter(Boolean);
+}
+
 export async function getProjectEntities(
   baseUrl: string,
   appKey: string,

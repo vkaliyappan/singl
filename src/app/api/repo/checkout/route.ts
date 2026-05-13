@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       }
 
       send(`Fetching branch "${branch}" from remote...`);
-      await git.fetch(['origin', branch]);
+      await git.fetch(['origin', `${branch}:refs/remotes/origin/${branch}`]);
 
       send(`Switching to "${branch}"...`);
       try {

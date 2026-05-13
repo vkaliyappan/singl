@@ -1,0 +1,1 @@
+ALTER TABLE `twx_projects` ADD `folderName` text DEFAULT '' NOT NULL;

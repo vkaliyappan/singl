@@ -36,9 +36,9 @@ export default function RootLayout({
       suppressHydrationWarning
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", nunitoSans.variable, interHeading.variable)}
     >
-      <body className="min-h-full">
+      <body className="h-full overflow-hidden">
         <Providers>
-          <SidebarProvider>
+          <SidebarProvider className="h-full">
             <AppSidebar />
             <SidebarInset>
               <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">

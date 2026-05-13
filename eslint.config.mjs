@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // CommonJS Gulp build tool — not app code
     "gulpfile.js",
+    // External/generated files — not app code
+    "repos/**",
+    "twx-entities/**",
+    "drizzle/**",
   ]),
 ]);
 

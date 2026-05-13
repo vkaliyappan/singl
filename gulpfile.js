@@ -3,10 +3,20 @@ const path = require('path');
 const fs = require('fs/promises');
 const xml2js = require('xml2js');
 const { glob } = require('glob');
-const stripIndent = require('strip-indent');
+function stripIndent(str) {
+    const match = str.match(/^[ \t]*(?=\S)/mg);
+    if (!match) return str;
+    const indent = Math.min(...match.map(m => m.length));
+    return indent > 0 ? str.replace(new RegExp(`^[ \\t]{${indent}}`, 'mg'), '') : str;
+}
 
-// When `gulpfile.js` is moved up one directory, point to the ThingWorx folder
-const THINGWORX_DIR = path.join(__dirname, 'WindchillClients', 'ThingWorx');
+const THINGWORX_DIR = (() => {
+    const idx = process.argv.indexOf('--dir');
+    if (idx !== -1 && process.argv[idx + 1]) return path.resolve(process.argv[idx + 1]);
+    const eq = process.argv.find(a => a.startsWith('--dir='));
+    if (eq) return path.resolve(eq.slice(6));
+    return path.join(__dirname, 'WindchillClients', 'ThingWorx');
+})();
 const TARGET_FOLDERS = ['Mashups', 'Things', 'ThingShapes', 'ThingTemplates'];
 
 // Helper to discover projects

@@ -7,16 +7,13 @@ import { useTheme } from "next-themes";
 import {
   IconGitBranch,
   IconAlertCircle,
-  IconFolder,
-  IconFolderOpen,
   IconFile,
-  IconFileCode,
-  IconFileText,
   IconChevronRight,
-  IconLoader2,
   IconArrowDown,
   IconRefresh,
   IconX,
+  IconPackageImport,
+  IconFold,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { FileIcon, FileTreeNode, getLanguage } from "@/components/file-tree";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -42,34 +40,6 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
     </div>
   ),
 });
-
-const LANGUAGE_MAP: Record<string, string> = {
-  ts: "typescript", tsx: "typescript",
-  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-  json: "json", jsonc: "json",
-  py: "python", rb: "ruby", go: "go", rs: "rust",
-  java: "java", kt: "kotlin", scala: "scala",
-  c: "c", cpp: "cpp", h: "c", hpp: "cpp", cs: "csharp",
-  php: "php", swift: "swift",
-  html: "html", css: "css", scss: "scss", sass: "scss", less: "less",
-  md: "markdown", mdx: "markdown",
-  yaml: "yaml", yml: "yaml",
-  xml: "xml", svg: "xml",
-  sql: "sql", graphql: "graphql", gql: "graphql",
-  sh: "shell", bash: "shell", zsh: "shell",
-  ps1: "powershell", bat: "bat",
-  dockerfile: "dockerfile",
-  toml: "ini", ini: "ini", env: "ini",
-  prisma: "graphql",
-};
-
-function getLanguage(filePath: string): string {
-  const name = filePath.split("/").pop()?.toLowerCase() ?? "";
-  if (name === "dockerfile" || name === ".dockerignore") return "dockerfile";
-  if (name === ".gitignore" || name === ".gitattributes") return "ini";
-  const ext = name.split(".").pop() ?? "";
-  return LANGUAGE_MAP[ext] ?? "plaintext";
-}
 
 interface FileEntry {
   name: string;
@@ -82,61 +52,6 @@ interface RepoExplorerProps {
   savedRepoUrl: string;
   savedBranch: string;
   savedSlug: string;
-}
-
-const CODE_EXTENSIONS = new Set([
-  "ts", "tsx", "js", "jsx", "mjs", "cjs",
-  "py", "rb", "go", "rs", "java", "c", "cpp", "h", "hpp",
-  "cs", "php", "swift", "kt", "scala",
-  "json", "yaml", "yml", "toml", "xml", "html", "css", "scss", "sass",
-  "sh", "bash", "zsh", "ps1", "bat",
-  "sql", "graphql", "gql", "prisma",
-  "env", "env.example",
-]);
-
-// Per-extension icon colors matching common IDE icon themes
-const FILE_ICON_COLORS: Record<string, string> = {
-  ts: "#3178C6", tsx: "#3178C6",
-  js: "#F0DB4F", jsx: "#F0DB4F", mjs: "#F0DB4F", cjs: "#F0DB4F",
-  json: "#CBCB41", jsonc: "#CBCB41",
-  py: "#4B8BBE",
-  rs: "#DEA584",
-  go: "#00ACD7",
-  css: "#563D7C", scss: "#C76494", sass: "#C76494", less: "#1D365D",
-  html: "#E44D26",
-  md: "#519ABA", mdx: "#519ABA",
-  xml: "#F4A460", svg: "#FFB13B",
-  sql: "#DA70D6",
-  sh: "#89E051", bash: "#89E051", zsh: "#89E051",
-  ps1: "#5391FE",
-  yaml: "#CB171E", yml: "#CB171E",
-  toml: "#9C4221", ini: "#9C4221", env: "#ECD53F",
-  java: "#B07219",
-  kt: "#A97BFF",
-  rb: "#CC342D",
-  php: "#8892BF",
-  swift: "#F05138",
-  cs: "#512BD4",
-  c: "#00599C", cpp: "#00599C", h: "#A0A0A0", hpp: "#A0A0A0",
-  graphql: "#E535AB", gql: "#E535AB",
-  prisma: "#5A67D8",
-  dockerfile: "#0DB7ED",
-};
-
-function FileIcon({ name, className }: { name: string; className?: string }) {
-  const lowerName = name.toLowerCase();
-  if (lowerName === "dockerfile" || lowerName === ".dockerignore") {
-    return <IconFileCode className={className} style={{ color: "#0DB7ED" }} />;
-  }
-  const ext = lowerName.split(".").pop() ?? "";
-  const color = FILE_ICON_COLORS[ext];
-  if (["md", "txt", "log", "csv", "mdx"].includes(ext)) {
-    return <IconFileText className={className} style={{ color: color ?? "#519ABA" }} />;
-  }
-  if (CODE_EXTENSIONS.has(ext)) {
-    return <IconFileCode className={className} style={{ color: color ?? "#75BFFF" }} />;
-  }
-  return <IconFile className={className} style={{ color: color ?? "#9DA5B4" }} />;
 }
 
 function TreeNode({
@@ -160,90 +75,35 @@ function TreeNode({
   onFileClick: (path: string) => void;
   onDirToggle: (path: string) => void;
 }) {
-  const isExpanded = expandedDirs.has(entry.path);
-  const isLoading = loadingDirs.has(entry.path);
-  const loadError = dirErrors.get(entry.path);
   const children = dirContents.get(entry.path) ?? [];
-  const indent = depth * 12;
-
-  if (entry.type === "dir") {
-    return (
-      <div>
-        <button
-          onClick={() => onDirToggle(entry.path)}
-          className="flex w-full items-center gap-1.5 py-[3px] pr-2 text-left text-xs hover:bg-accent/40 transition-colors"
-          style={{ paddingLeft: `${indent + 4}px` }}
-        >
-          {isLoading ? (
-            <IconLoader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-          ) : (
-            <IconChevronRight
-              className={cn(
-                "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-100",
-                isExpanded && "rotate-90"
-              )}
-            />
-          )}
-          {isExpanded ? (
-            <IconFolderOpen className="size-3.5 shrink-0" style={{ color: "#E8AB6D" }} />
-          ) : (
-            <IconFolder className="size-3.5 shrink-0" style={{ color: "#DCB67A" }} />
-          )}
-          <span className="truncate">{entry.name}</span>
-        </button>
-
-        {isExpanded && (
-          <div className="relative">
-            {/* Indent guide line */}
-            <span
-              className="absolute top-0 bottom-0 w-px bg-border/40"
-              style={{ left: `${indent + 10}px` }}
-            />
-            {loadError ? (
-              <p
-                className="truncate text-xs text-destructive py-0.5"
-                style={{ paddingLeft: `${indent + 24}px` }}
-              >
-                {loadError}
-              </p>
-            ) : (
-              children.map((child) => (
-                <TreeNode
-                  key={child.path}
-                  entry={child}
-                  depth={depth + 1}
-                  selectedFile={selectedFile}
-                  expandedDirs={expandedDirs}
-                  dirContents={dirContents}
-                  loadingDirs={loadingDirs}
-                  dirErrors={dirErrors}
-                  onFileClick={onFileClick}
-                  onDirToggle={onDirToggle}
-                />
-              ))
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const isSelected = selectedFile === entry.path;
-
   return (
-    <button
-      onClick={() => onFileClick(entry.path)}
-      className={cn(
-        "flex w-full items-center gap-1.5 py-[3px] pr-2 text-left text-xs transition-colors",
-        isSelected
-          ? "bg-accent text-accent-foreground"
-          : "hover:bg-accent/40 text-foreground"
-      )}
-      style={{ paddingLeft: `${indent + 22}px` }}
+    <FileTreeNode
+      name={entry.name}
+      type={entry.type}
+      path={entry.path}
+      depth={depth}
+      isExpanded={expandedDirs.has(entry.path)}
+      isLoading={loadingDirs.has(entry.path)}
+      isSelected={selectedFile === entry.path}
+      loadError={dirErrors.get(entry.path)}
+      onFileClick={onFileClick}
+      onDirToggle={onDirToggle}
     >
-      <FileIcon name={entry.name} className="size-3.5 shrink-0" />
-      <span className="truncate">{entry.name}</span>
-    </button>
+      {children.map((child) => (
+        <TreeNode
+          key={child.path}
+          entry={child}
+          depth={depth + 1}
+          selectedFile={selectedFile}
+          expandedDirs={expandedDirs}
+          dirContents={dirContents}
+          loadingDirs={loadingDirs}
+          dirErrors={dirErrors}
+          onFileClick={onFileClick}
+          onDirToggle={onDirToggle}
+        />
+      ))}
+    </FileTreeNode>
   );
 }
 
@@ -331,6 +191,15 @@ export function RepoExplorer({
   const [gitMessages, setGitMessages] = useState<string[]>([]);
   const [gitError, setGitError] = useState(false);
 
+  // ── Extract state ─────────────────────────────────────────────────────────
+  const [extractStatus, setExtractStatus] = useState<"idle" | "extracting" | "done" | "error">("idle");
+  const [extractMessages, setExtractMessages] = useState<string[]>([]);
+  const extractProgressRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    extractProgressRef.current?.scrollTo(0, extractProgressRef.current.scrollHeight);
+  }, [extractMessages]);
+
   // ── File-tree state ───────────────────────────────────────────────────────
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
@@ -358,6 +227,10 @@ export function RepoExplorer({
     setSelectedFile(null);
     setFileContent(null);
     setFileContentError(null);
+  }, []);
+
+  const handleCollapseAll = useCallback(() => {
+    setExpandedDirs(new Set());
   }, []);
 
   const handleCloseFile = useCallback(() => {
@@ -498,6 +371,31 @@ export function RepoExplorer({
       ]);
     }
   };
+
+  const handleExtract = useCallback(async () => {
+    if (!clonedSlug) return;
+    setExtractStatus("extracting");
+    setExtractMessages([]);
+    try {
+      const res = await fetch("/api/twx-cli/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoSlug: clonedSlug }),
+      });
+      await readStream(
+        res,
+        (msg) => setExtractMessages((prev) => [...prev, msg]),
+        async () => { setExtractStatus("done"); },
+        (msg) => {
+          setExtractStatus("error");
+          setExtractMessages((prev) => [...prev, `Error: ${msg}`]);
+        }
+      );
+    } catch (err) {
+      setExtractStatus("error");
+      setExtractMessages((prev) => [...prev, err instanceof Error ? err.message : String(err)]);
+    }
+  }, [clonedSlug]);
 
   const handleChangeRepo = useCallback(() => {
     setCloneStatus("idle");
@@ -805,6 +703,21 @@ export function RepoExplorer({
             Pull
           </Button>
 
+          <div className="h-4 w-px bg-border mx-0.5" />
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleExtract}
+            disabled={!!gitOp || extractStatus === "extracting"}
+            className="h-7 text-xs gap-1.5"
+          >
+            {extractStatus === "extracting"
+              ? <Spinner className="size-3" />
+              : <IconPackageImport className="size-3.5" />}
+            {extractStatus === "extracting" ? "Extracting…" : "Extract"}
+          </Button>
+
           <div className="flex-1" />
 
           <span className="text-xs text-muted-foreground truncate max-w-[220px] hidden md:block font-mono">
@@ -873,6 +786,47 @@ export function RepoExplorer({
         </div>
       )}
 
+      {/* ── Extract progress ────────────────────────────────────────────────── */}
+      {extractMessages.length > 0 && (
+        <div className="shrink-0 border-b bg-muted/40 flex flex-col">
+          <div className="flex items-center justify-between px-4 py-1 border-b border-border/40">
+            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none">
+              Extract Output
+            </span>
+            <button
+              onClick={() => { setExtractMessages([]); if (extractStatus !== "extracting") setExtractStatus("idle"); }}
+              disabled={extractStatus === "extracting"}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+            >
+              <IconX className="size-3" />
+              Clear
+            </button>
+          </div>
+          <div ref={extractProgressRef} className="max-h-24 overflow-y-auto px-4 py-1.5">
+            {extractMessages.map((msg, i) => (
+              <p
+                key={i}
+                className={cn(
+                  "text-xs font-mono",
+                  msg.startsWith("[WARN]")
+                    ? "text-amber-600 dark:text-amber-400"
+                    : extractStatus === "error" && i === extractMessages.length - 1
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                )}
+              >
+                {msg}
+              </p>
+            ))}
+            {extractStatus === "done" && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                Extract complete.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── File explorer ───────────────────────────────────────────────────── */}
       {hasClone && (
         <div className="flex-1 min-h-0 flex overflow-hidden">
@@ -889,10 +843,17 @@ export function RepoExplorer({
                 style={{ width: treeWidth }}
               >
                 {/* EXPLORER header */}
-                <div className="shrink-0 px-3 py-1.5 border-b">
+                <div className="shrink-0 px-3 py-1.5 border-b flex items-center justify-between">
                   <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase select-none">
                     Explorer
                   </span>
+                  <button
+                    onClick={handleCollapseAll}
+                    title="Collapse All"
+                    className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <IconFold className="size-3.5" />
+                  </button>
                 </div>
 
                 {/* Repo root row */}
@@ -903,7 +864,7 @@ export function RepoExplorer({
                   </span>
                 </div>
 
-                <ScrollArea className="flex-1">
+                <ScrollArea className="flex-1 min-h-0">
                   <div className="py-0.5">
                     {rootEntries.map((entry) => (
                       <TreeNode

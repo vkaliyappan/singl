@@ -37,7 +37,7 @@ export async function writeEntityXml(
   dryRun: boolean,
   onProgress?: (msg: string) => void
 ): Promise<void> {
-  const dir = path.join(/*turbopackIgnore: true*/ outputDir, alias, projectName, pluralType(entityType));
+  const dir = path.join(/*turbopackIgnore: true*/ outputDir, 'WindchillClients', 'Thingworx', alias, projectName, pluralType(entityType));
   const filePath = path.join(/*turbopackIgnore: true*/ dir, `${entityName}.xml`);
   if (dryRun) {
     onProgress?.(`[${alias}] (dry-run) Would write ${filePath}`);
@@ -129,7 +129,7 @@ export async function runExport({
         onProgress?.(`[${exportLabel}] Exporting ${type}/${name}...`);
         const rawXml = await exportEntity(baseUrl, appKey, type, name);
         const xml = formatEntityXml(rawXml);
-        await writeEntityXml(outputDir, alias, projectName, type, name, xml, dryRun, onProgress);
+        await writeEntityXml(outputDir, alias, twxProjectName, type, name, xml, dryRun, onProgress);
         result.entitiesExported += 1;
       } catch (err) {
         const failedLabel = usedProjectName ?? twxProjectName ?? projectName;
