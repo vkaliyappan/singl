@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1778070445547,
+      "tag": "0000_crazy_doctor_faustus",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1747008000000,
+      "tag": "0001_azure_pat_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778584144620,
+      "tag": "0002_lonely_vargas",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1778584225455,
+      "tag": "0003_loving_squadron_supreme",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1778648739081,
+      "tag": "0004_fantastic_terrax",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1747180800000,
+      "tag": "0005_twx_project_folder_name",
+      "breakpoints": true
+    }
+  ]
+}
