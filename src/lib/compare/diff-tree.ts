@@ -157,17 +157,14 @@ export function mergeTrees(leftRoot: string, rightRoot: string): MergeResult {
   // Roll up: a dir is "modified" if any descendant file is non-identical
   function rollupDir(node: DiffNode): NodeStatus {
     if (node.type === "file") return node.status;
+    let anyNonIdentical = false;
     for (const childPath of node.children ?? []) {
       const child = nodeMap.get(childPath);
       if (!child) continue;
-      const s = rollupDir(child);
-      if (s !== "identical") {
-        node.status = "modified";
-        return "modified";
-      }
+      if (rollupDir(child) !== "identical") anyNonIdentical = true;
     }
-    node.status = "identical";
-    return "identical";
+    node.status = anyNonIdentical ? "modified" : "identical";
+    return node.status;
   }
 
   // Only roll up root-level dirs
