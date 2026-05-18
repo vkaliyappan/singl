@@ -7,6 +7,10 @@ import {
   IconFileText,
   IconChevronRight,
   IconLoader2,
+  IconFoldDown,
+  IconFoldUp,
+  IconSearch,
+  IconX,
   IconFileTypeTs,
   IconFileTypeTsx,
   IconFileTypeJs,
@@ -34,6 +38,7 @@ import {
   IconBrandPowershell,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export const LANGUAGE_MAP: Record<string, string> = {
   ts: "typescript", tsx: "typescript",
@@ -131,6 +136,156 @@ export function FileIcon({ name, className }: { name: string; className?: string
     case "less":    return <IconFileCode        className={className} style={{ color: "#1D365D" }} />;
     default:        return <IconFile            className={className} style={{ color: "#9DA5B4" }} />;
   }
+}
+
+export function OpenEditorsPanel({
+  openPaths,
+  activePath,
+  onSelect,
+  onClose,
+  onCloseAll,
+  getBadge,
+}: {
+  openPaths: string[];
+  activePath: string | null;
+  onSelect: (path: string) => void;
+  onClose: (path: string) => void;
+  onCloseAll: () => void;
+  getBadge?: (path: string) => ReactNode;
+}) {
+  if (openPaths.length === 0) return null;
+  return (
+    <div className="shrink-0 border-b">
+      <div className="px-3 py-1.5 flex items-center justify-between">
+        <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase select-none">
+          Open Editors
+        </span>
+        <button
+          onClick={onCloseAll}
+          title="Close All Editors"
+          className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          <IconX className="size-3.5" />
+        </button>
+      </div>
+      <div className="max-h-40 overflow-y-auto">
+        {openPaths.map((path) => {
+          const name = path.split("/").pop() ?? path;
+          return (
+            <div
+              key={path}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(path)}
+              onKeyDown={(e) => e.key === "Enter" && onSelect(path)}
+              className={cn(
+                "flex w-full items-center gap-1.5 py-[3px] px-3 text-xs transition-colors cursor-pointer",
+                path === activePath
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-accent/40 text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <FileIcon name={name} className="size-3.5 shrink-0" />
+              <span className="truncate flex-1 font-mono">{name}</span>
+              {getBadge?.(path)}
+              <button
+                onClick={(e) => { e.stopPropagation(); onClose(path); }}
+                className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors shrink-0"
+              >
+                <IconX className="size-3" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function FileTreePanel({
+  onCollapseAll,
+  onExpandAll,
+  header,
+  children,
+  openEditors,
+  isSearchActive,
+  onSearchToggle,
+  searchContent,
+}: {
+  onCollapseAll?: () => void;
+  onExpandAll?: () => void;
+  header?: ReactNode;
+  children: ReactNode;
+  openEditors?: ReactNode;
+  isSearchActive?: boolean;
+  onSearchToggle?: () => void;
+  searchContent?: ReactNode;
+}) {
+  if (isSearchActive) {
+    return (
+      <>
+        <div className="shrink-0 px-3 py-1.5 border-b flex items-center justify-between">
+          <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase select-none">
+            Search
+          </span>
+          <button
+            onClick={onSearchToggle}
+            title="Back to Explorer"
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          >
+            <IconX className="size-3.5" />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {searchContent}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {openEditors}
+      <div className="shrink-0 px-3 py-1.5 border-b flex items-center justify-between">
+        <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase select-none">
+          Explorer
+        </span>
+        <div className="flex items-center gap-1">
+          {onSearchToggle && (
+            <button
+              onClick={onSearchToggle}
+              title="Search (Ctrl+Shift+F)"
+              className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <IconSearch className="size-3.5" />
+            </button>
+          )}
+          {onExpandAll && (
+            <button
+              onClick={onExpandAll}
+              title="Expand All"
+              className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <IconFoldDown className="size-3.5" />
+            </button>
+          )}
+          {onCollapseAll && (
+            <button
+              onClick={onCollapseAll}
+              title="Collapse All"
+              className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <IconFoldUp className="size-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+      {header}
+      <ScrollArea className="flex-1 min-h-0">
+        {children}
+      </ScrollArea>
+    </>
+  );
 }
 
 export function FileTreeNode({

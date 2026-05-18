@@ -1,8 +1,3 @@
-CREATE TABLE `app_settings` (
-	`id` integer PRIMARY KEY NOT NULL,
-	`azurePatToken` text DEFAULT '' NOT NULL,
-	`repoUrl` text DEFAULT '' NOT NULL,
-	`clonedBranch` text DEFAULT '' NOT NULL,
-	`repoSlug` text DEFAULT '' NOT NULL,
-	`updatedAt` integer
-);
+ALTER TABLE `app_settings` ADD `repoUrl` text DEFAULT '' NOT NULL;--> statement-breakpoint
+ALTER TABLE `app_settings` ADD `clonedBranch` text DEFAULT '' NOT NULL;--> statement-breakpoint
+ALTER TABLE `app_settings` ADD `repoSlug` text DEFAULT '' NOT NULL;

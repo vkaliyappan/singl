@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/providers";
 import {
   IconRefresh,
   IconLoader2,
@@ -10,9 +10,9 @@ import {
   IconEye,
   IconEyeOff,
   IconArrowsExchange,
+  IconX,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -21,8 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { FileTreeNode } from "@/components/file-tree";
+import { FileIcon, FileTreeNode, FileTreePanel, OpenEditorsPanel } from "@/components/file-tree";
+import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
 import type { DiffNode, NodeStatus } from "@/lib/compare/diff-tree";
+import type { OnMount, DiffOnMount } from "@monaco-editor/react";
 
 const loading = () => (
   <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
@@ -45,6 +47,14 @@ interface TreeData {
   summary: { added: number; removed: number; modified: number; identical: number };
   leftRoot: string;
   rightRoot: string;
+}
+
+interface DiffTabState {
+  node: DiffNode;
+  leftContent: string | null;
+  rightContent: string | null;
+  loading: boolean;
+  error: string | null;
 }
 
 interface CompareExplorerProps {
@@ -118,13 +128,38 @@ function TreeNode({
   );
 }
 
+const STORAGE_KEY = "singl:compare";
+
+type SavedState = {
+  selectedEnv?: string;
+  baseIsRepo?: boolean;
+  hideIdentical?: boolean;
+  diffView?: "side" | "inline";
+  treeWidth?: number;
+  expandedDirs?: string[];
+  selectedPath?: string | null;
+  treeData?: TreeData | null;
+};
+
+function readSavedState(): SavedState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as SavedState) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function CompareExplorer({ envs }: CompareExplorerProps) {
   const { resolvedTheme } = useTheme();
 
+  // ── Search panel state ────────────────────────────────────────────────────
+  const [searchActive, setSearchActive] = useState(false);
+
   // ── Resize panel ────────────────────────────────────────────────────────────
   const [treeWidth, setTreeWidth] = useState(280);
-  const treeWidthRef = useRef(280);
-  // Sync ref after render so handleDragStart always reads the latest width
+  const treeWidthRef = useRef(treeWidth);
   useEffect(() => { treeWidthRef.current = treeWidth; });
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -148,32 +183,170 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
   // ── Compare state ────────────────────────────────────────────────────────────
   const [selectedEnv, setSelectedEnv] = useState<string>(envs[0] ?? "");
-  const [baseIsRepo, setBaseIsRepo] = useState(true); // true = Repo is original/left
+  const [baseIsRepo, setBaseIsRepo] = useState(true);
   const [treeData, setTreeData] = useState<TreeData | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
 
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [hideIdentical, setHideIdentical] = useState(false);
+  const [diffView, setDiffView] = useState<"side" | "inline">("side");
 
-  const [leftContent, setLeftContent] = useState<string | null>(null);
-  const [rightContent, setRightContent] = useState<string | null>(null);
-  const [contentLoading, setContentLoading] = useState(false);
-  const [contentError, setContentError] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<DiffNode | null>(null);
+  // ── Multi-tab diff state ──────────────────────────────────────────────────
+  const [openDiffTabs, setOpenDiffTabs] = useState<Map<string, DiffTabState>>(new Map());
+  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const openDiffTabsRef = useRef(openDiffTabs);
+  openDiffTabsRef.current = openDiffTabs;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
 
   const [nodeMap, setNodeMap] = useState<Map<string, DiffNode>>(new Map());
+
+  // ── Editor refs for search jump ───────────────────────────────────────────────
+  const pendingJumpRef = useRef<{ line: number; col: number } | null>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const diffEditorRef = useRef<Parameters<DiffOnMount>[0] | null>(null);
+
+  // ── Persistence ──────────────────────────────────────────────────────────────
+  const hasMountedRef = useRef(false);
+  const pendingRestorePathRef = useRef<string | null>(null);
+
+  // Restore persisted state after mount (must be default values above to match SSR)
+  useEffect(() => {
+    const saved = readSavedState();
+    if (saved.treeWidth !== undefined) setTreeWidth(saved.treeWidth);
+    if (saved.selectedEnv) setSelectedEnv(saved.selectedEnv);
+    if (saved.baseIsRepo !== undefined) setBaseIsRepo(saved.baseIsRepo);
+    if (saved.hideIdentical !== undefined) setHideIdentical(saved.hideIdentical);
+    if (saved.diffView) setDiffView(saved.diffView);
+    if (saved.expandedDirs) setExpandedDirs(new Set(saved.expandedDirs));
+    if (saved.treeData) {
+      setTreeData(saved.treeData);
+      const map = new Map<string, DiffNode>();
+      for (const n of saved.treeData.nodes) map.set(n.path, n);
+      setNodeMap(map);
+      if (saved.selectedPath) {
+        pendingRestorePathRef.current = saved.selectedPath;
+        setActiveTab(saved.selectedPath);
+      }
+    }
+  }, []);
+
+  const selectedEnvRef = useRef(selectedEnv);
+  useEffect(() => { selectedEnvRef.current = selectedEnv; });
+
+  const handleFileClick = useCallback(async (path: string, node: DiffNode) => {
+    if (openDiffTabsRef.current.has(path)) {
+      setActiveTab(path);
+      return;
+    }
+    setOpenDiffTabs((prev) => new Map(prev).set(path, {
+      node,
+      leftContent: null,
+      rightContent: null,
+      loading: true,
+      error: null,
+    }));
+    setActiveTab(path);
+
+    try {
+      const res = await fetch(
+        `/api/compare/content?env=${encodeURIComponent(selectedEnvRef.current)}&path=${encodeURIComponent(path)}`
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load content");
+      setOpenDiffTabs((prev) => {
+        const next = new Map(prev);
+        next.set(path, {
+          node,
+          leftContent: data.leftContent ?? "",
+          rightContent: data.rightContent ?? "",
+          loading: false,
+          error: (data.leftTooLarge || data.rightTooLarge) ? "File too large to display (> 1 MB)" : null,
+        });
+        return next;
+      });
+    } catch (e) {
+      setOpenDiffTabs((prev) => {
+        const next = new Map(prev);
+        next.set(path, {
+          node,
+          leftContent: null,
+          rightContent: null,
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        return next;
+      });
+    }
+  }, []);
+
+  // Re-fetch file content after restore once nodeMap is populated
+  useEffect(() => {
+    const path = pendingRestorePathRef.current;
+    if (!path || nodeMap.size === 0) return;
+    pendingRestorePathRef.current = null;
+    const node = nodeMap.get(path);
+    if (node) handleFileClick(path, node);
+  }, [nodeMap, handleFileClick]);
+
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          selectedEnv,
+          baseIsRepo,
+          hideIdentical,
+          diffView,
+          treeWidth,
+          expandedDirs: Array.from(expandedDirs),
+          selectedPath: activeTab,
+          treeData,
+        })
+      );
+    } catch {}
+  }, [selectedEnv, baseIsRepo, hideIdentical, diffView, treeWidth, expandedDirs, activeTab, treeData]);
+
+  const handleCloseTab = useCallback((path: string) => {
+    const tabs = Array.from(openDiffTabsRef.current.keys());
+    const idx = tabs.indexOf(path);
+    setOpenDiffTabs((prev) => {
+      const next = new Map(prev);
+      next.delete(path);
+      return next;
+    });
+    setActiveTab((prev) => {
+      if (prev !== path) return prev;
+      return tabs[idx + 1] ?? tabs[idx - 1] ?? null;
+    });
+  }, []);
+
+  const handleCloseAllTabs = useCallback(() => {
+    setOpenDiffTabs(new Map());
+    setActiveTab(null);
+  }, []);
+
+  // Escape key closes the active tab
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && activeTabRef.current) handleCloseTab(activeTabRef.current);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleCloseTab]);
 
   const loadTree = useCallback(async (env: string) => {
     if (!env) return;
     setTreeLoading(true);
     setTreeError(null);
     setTreeData(null);
-    setSelectedPath(null);
-    setLeftContent(null);
-    setRightContent(null);
-    setSelectedNode(null);
+    setOpenDiffTabs(new Map());
+    setActiveTab(null);
     setExpandedDirs(new Set());
 
     try {
@@ -191,32 +364,6 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
     }
   }, []);
 
-  const handleFileClick = useCallback(async (path: string, node: DiffNode) => {
-    setSelectedPath(path);
-    setSelectedNode(node);
-    setContentLoading(true);
-    setContentError(null);
-    setLeftContent(null);
-    setRightContent(null);
-
-    try {
-      const res = await fetch(
-        `/api/compare/content?env=${encodeURIComponent(selectedEnv)}&path=${encodeURIComponent(path)}`
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load content");
-      if (data.leftTooLarge || data.rightTooLarge) {
-        setContentError("File too large to display (> 1 MB)");
-      }
-      setLeftContent(data.leftContent ?? "");
-      setRightContent(data.rightContent ?? "");
-    } catch (e) {
-      setContentError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setContentLoading(false);
-    }
-  }, [selectedEnv]);
-
   const handleDirToggle = useCallback((path: string) => {
     setExpandedDirs((prev) => {
       const next = new Set(prev);
@@ -226,15 +373,62 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
     });
   }, []);
 
+  const handleCollapseAll = useCallback(() => {
+    setExpandedDirs(new Set());
+  }, []);
+
+  const handleExpandAll = useCallback(() => {
+    const allDirs = new Set<string>();
+    for (const [path, node] of nodeMap) {
+      if (node.type === "dir") allDirs.add(path);
+    }
+    setExpandedDirs(allDirs);
+  }, [nodeMap]);
+
+  // ── Search handlers ───────────────────────────────────────────────────────
+  const handleSearch = useCallback(async (query: string, opts: SearchOptions): Promise<SearchFileResult[]> => {
+    if (!selectedEnv) return [];
+    const params = new URLSearchParams({
+      env: selectedEnv,
+      q: query,
+      side: "both",
+      case: opts.caseSensitive ? "1" : "0",
+      word: opts.wholeWord ? "1" : "0",
+      regex: opts.useRegex ? "1" : "0",
+      filename: opts.matchFilename ? "1" : "0",
+    });
+    const res = await fetch(`/api/compare/search?${params}`);
+    const data = await res.json() as { results?: SearchFileResult[]; error?: string; warnings?: string[] };
+    if (!res.ok) throw new Error(data.error ?? "Search failed");
+    const results = data.results ?? [];
+    if (results.length === 0 && data.warnings?.length) throw new Error(data.warnings.join("\n"));
+    return results;
+  }, [selectedEnv]);
+
+  const handleSearchResultClick = useCallback((filePath: string, lineNumber: number, col: number) => {
+    pendingJumpRef.current = { line: lineNumber, col };
+    const node = nodeMap.get(filePath) ?? {
+      path: filePath,
+      name: filePath.split("/").pop() ?? filePath,
+      type: "file" as const,
+      status: "identical" as const,
+      leftExists: true,
+      rightExists: true,
+    };
+    handleFileClick(filePath, node);
+  }, [nodeMap, handleFileClick]);
+
   const rootNodes = treeData
     ? treeData.nodes
         .filter((n) => !n.path.includes("/"))
         .filter((n) => !hideIdentical || n.status !== "identical")
     : [];
 
-  const language = selectedPath
+  const activeTabData = activeTab ? openDiffTabs.get(activeTab) : null;
+
+  const language = activeTab
     ? (() => {
-        const ext = selectedPath.split(".").pop()?.toLowerCase() ?? "";
+        const ext = activeTab.split(".").pop()?.toLowerCase() ?? "";
         const map: Record<string, string> = {
           ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
           json: "json", py: "python", xml: "xml", html: "html", css: "css",
@@ -354,26 +548,51 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
           className="shrink-0 flex flex-col overflow-hidden border-r"
           style={{ width: treeWidth }}
         >
-          {treeData && (
-            <div className="flex flex-col px-2 py-1.5 border-b gap-1 shrink-0">
-              <div
-                className="text-[10px] truncate cursor-help"
-                title={`Full path: ${treeData.leftRoot}`}
-              >
-                <span className="font-semibold text-foreground">Repo</span>{" "}
-                <span className="text-muted-foreground font-mono">{treeData.leftRoot}</span>
+          <FileTreePanel
+            onCollapseAll={treeData ? handleCollapseAll : undefined}
+            onExpandAll={treeData ? handleExpandAll : undefined}
+            isSearchActive={searchActive}
+            onSearchToggle={() => setSearchActive((v) => !v)}
+            searchContent={
+              <SearchPanel
+                onSearch={handleSearch}
+                onResultClick={handleSearchResultClick}
+              />
+            }
+            openEditors={
+              openDiffTabs.size > 0 ? (
+                <OpenEditorsPanel
+                  openPaths={Array.from(openDiffTabs.keys())}
+                  activePath={activeTab}
+                  onSelect={setActiveTab}
+                  onClose={handleCloseTab}
+                  onCloseAll={handleCloseAllTabs}
+                  getBadge={(path) => {
+                    const tab = openDiffTabs.get(path);
+                    return tab ? <StatusBadge status={tab.node.status} /> : null;
+                  }}
+                />
+              ) : undefined
+            }
+            header={treeData && (
+              <div className="flex flex-col px-2 py-1.5 border-b gap-1 shrink-0">
+                <div
+                  className="text-[10px] truncate cursor-help"
+                  title={`Full path: ${treeData.leftRoot}`}
+                >
+                  <span className="font-semibold text-foreground">Repo</span>{" "}
+                  <span className="text-muted-foreground font-mono">{treeData.leftRoot}</span>
+                </div>
+                <div
+                  className="text-[10px] truncate cursor-help"
+                  title={`Full path: ${treeData.rightRoot}`}
+                >
+                  <span className="font-semibold text-foreground">TWX</span>{" "}
+                  <span className="text-muted-foreground font-mono">{treeData.rightRoot}</span>
+                </div>
               </div>
-              <div
-                className="text-[10px] truncate cursor-help"
-                title={`Full path: ${treeData.rightRoot}`}
-              >
-                <span className="font-semibold text-foreground">TWX</span>{" "}
-                <span className="text-muted-foreground font-mono">{treeData.rightRoot}</span>
-              </div>
-            </div>
-          )}
-
-          <ScrollArea className="flex-1 min-h-0">
+            )}
+          >
             {treeError && (
               <p className="text-xs text-destructive px-3 py-2">{treeError}</p>
             )}
@@ -395,13 +614,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                 depth={0}
                 nodeMap={nodeMap}
                 expandedDirs={expandedDirs}
-                selectedPath={selectedPath}
+                selectedPath={activeTab}
                 hideIdentical={hideIdentical}
                 onFileClick={handleFileClick}
                 onDirToggle={handleDirToggle}
               />
             ))}
-          </ScrollArea>
+          </FileTreePanel>
         </div>
 
         {/* Drag handle */}
@@ -412,74 +631,177 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
         {/* Diff editor panel */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {selectedNode && (
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b text-xs shrink-0">
-              <span className="font-mono text-muted-foreground truncate">{selectedPath}</span>
-              <StatusBadge status={selectedNode.status} />
-              <div className="ml-auto flex items-center gap-1.5 text-[10px] text-muted-foreground shrink-0">
-                <span className={baseIsRepo ? "text-foreground font-medium" : ""}>Repo</span>
-                <IconArrowsExchange className="size-3" />
-                <span className={!baseIsRepo ? "text-foreground font-medium" : ""}>TWX</span>
-                <span className="ml-1 opacity-60">(base ← left)</span>
+          {openDiffTabs.size > 0 ? (
+            <>
+              {/* Tab bar */}
+              <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
+                {Array.from(openDiffTabs.entries()).map(([path, tab]) => {
+                  const fileName = path.split("/").pop() ?? "";
+                  const isActive = path === activeTab;
+                  return (
+                    <div
+                      key={path}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setActiveTab(path)}
+                      onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
+                        isActive
+                          ? "border-t-2 border-t-primary bg-background text-foreground"
+                          : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+                      )}
+                    >
+                      <FileIcon name={fileName} className="size-3.5 shrink-0" />
+                      <span className="font-mono">{fileName}</span>
+                      <StatusBadge status={tab.node.status} />
+                      {tab.loading && <IconLoader2 className="size-3 animate-spin shrink-0 ml-0.5" />}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
+                        title="Close"
+                        className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                      >
+                        <IconX className="size-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+                <button
+                  onClick={handleCloseAllTabs}
+                  title="Close All Editors"
+                  className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
+                >
+                  <IconX className="size-3" />
+                  Close All
+                </button>
               </div>
-            </div>
-          )}
 
-          {contentError && (
-            <div className="flex items-center justify-center flex-1 text-xs text-destructive px-4">
-              {contentError}
-            </div>
-          )}
+              {/* Active tab content */}
+              {activeTab && activeTabData && (
+                <>
+                  {/* Breadcrumb */}
+                  <div className="shrink-0 px-3 py-0.5 border-b bg-muted/10 flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground font-mono truncate">{activeTab}</span>
+                    <div className="flex items-center gap-3 shrink-0 ml-2">
+                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                        <span className={baseIsRepo ? "text-foreground font-medium" : ""}>Repo</span>
+                        <IconArrowsExchange className="size-3" />
+                        <span className={!baseIsRepo ? "text-foreground font-medium" : ""}>TWX</span>
+                        <span className="ml-1 opacity-60">(base ← left)</span>
+                      </div>
+                      {activeTabData.node.status !== "identical" && (
+                        <div className="flex items-center rounded border overflow-hidden text-[10px]">
+                          <button
+                            onClick={() => setDiffView("side")}
+                            className={cn(
+                              "px-2 py-0.5 transition-colors",
+                              diffView === "side"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-accent/40"
+                            )}
+                            title="Side by side diff"
+                          >
+                            Side by side
+                          </button>
+                          <button
+                            onClick={() => setDiffView("inline")}
+                            className={cn(
+                              "px-2 py-0.5 transition-colors",
+                              diffView === "inline"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-accent/40"
+                            )}
+                            title="Inline diff"
+                          >
+                            Inline
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-          {contentLoading && (
-            <div className="flex items-center justify-center flex-1 gap-2 text-xs text-muted-foreground">
-              <IconLoader2 className="size-4 animate-spin" />
-              Loading diff…
-            </div>
-          )}
+                  {activeTabData.error && (
+                    <div className="flex items-center justify-center flex-1 text-xs text-destructive px-4">
+                      {activeTabData.error}
+                    </div>
+                  )}
 
-          {!selectedPath && !contentLoading && (
+                  {activeTabData.loading && (
+                    <div className="flex items-center justify-center flex-1 gap-2 text-xs text-muted-foreground">
+                      <IconLoader2 className="size-4 animate-spin" />
+                      Loading diff…
+                    </div>
+                  )}
+
+                  {!activeTabData.error && !activeTabData.loading && activeTabData.leftContent !== null && (
+                    <div className="flex-1 min-h-0">
+                      {activeTabData.node.status === "identical" ? (
+                        <MonacoEditor
+                          key={activeTab}
+                          height="100%"
+                          language={language}
+                          value={activeTabData.leftContent ?? ""}
+                          theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+                          options={{
+                            readOnly: true,
+                            automaticLayout: true,
+                            fontSize: 12,
+                            minimap: { enabled: true },
+                            scrollBeyondLastLine: false,
+                          }}
+                          onMount={(editor) => {
+                            editorRef.current = editor;
+                            const jump = pendingJumpRef.current;
+                            if (jump) {
+                              pendingJumpRef.current = null;
+                              editor.revealLineInCenter(jump.line);
+                              editor.setPosition({ lineNumber: jump.line, column: jump.col });
+                              editor.focus();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <MonacoDiffEditor
+                          key={`${activeTab}-${diffView}`}
+                          height="100%"
+                          language={language}
+                          original={baseIsRepo ? activeTabData.leftContent : (activeTabData.rightContent ?? "")}
+                          modified={baseIsRepo ? (activeTabData.rightContent ?? "") : activeTabData.leftContent}
+                          theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+                          options={{
+                            readOnly: true,
+                            originalEditable: false,
+                            renderSideBySide: diffView === "side",
+                            automaticLayout: true,
+                            fontSize: 12,
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            renderOverviewRuler: false,
+                          }}
+                          onMount={(editor) => {
+                            diffEditorRef.current = editor;
+                            if (diffView === "inline") {
+                              editor.getModifiedEditor().updateOptions({ minimap: { enabled: true } });
+                            }
+                            const jump = pendingJumpRef.current;
+                            if (jump) {
+                              pendingJumpRef.current = null;
+                              const target = editor.getModifiedEditor();
+                              target.revealLineInCenter(jump.line);
+                              target.setPosition({ lineNumber: jump.line, column: jump.col });
+                              target.focus();
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          ) : (
             <div className="flex items-center justify-center flex-1 text-xs text-muted-foreground">
               Select a file from the tree to view its diff.
-            </div>
-          )}
-
-          {!contentError && !contentLoading && selectedPath && leftContent !== null && (
-            <div className="flex-1 min-h-0">
-              {selectedNode?.status === "identical" ? (
-                // Plain editor for identical files — no double line numbers
-                <MonacoEditor
-                  height="100%"
-                  language={language}
-                  value={leftContent ?? ""}
-                  theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-                  options={{
-                    readOnly: true,
-                    automaticLayout: true,
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                  }}
-                />
-              ) : (
-                <MonacoDiffEditor
-                  height="100%"
-                  language={language}
-                  original={baseIsRepo ? leftContent : (rightContent ?? "")}
-                  modified={baseIsRepo ? (rightContent ?? "") : leftContent}
-                  theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-                  options={{
-                    readOnly: true,
-                    originalEditable: false,
-                    renderSideBySide: true,
-                    automaticLayout: true,
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    renderOverviewRuler: false,
-                  }}
-                />
-              )}
             </div>
           )}
         </div>

@@ -342,7 +342,7 @@ export function ExistingEnvCard({
           <div className="flex flex-col gap-2 pl-3">
             {setting.projects.map((p) => (
               <ProjectCard
-                key={p.id}
+                key={`${p.id}:${p.projectName}:${p.alias}:${p.folderName}:${p.exports.join(",")}`}
                 project={p}
                 environment={setting.environment}
                 onSuccess={onSuccess}
@@ -533,7 +533,7 @@ export function SettingsForm({ settings }: Props) {
   return (
     <div className="flex flex-col gap-3">
       {settings.map((s) => (
-        <ExistingEnvCard key={s.environment} setting={s} />
+        <ExistingEnvCard key={`${s.environment}:${s.twxBaseUrl}:${s.hasAppKey}`} setting={s} />
       ))}
 
       {showNew && <NewEnvCard onCancel={() => setShowNew(false)} />}

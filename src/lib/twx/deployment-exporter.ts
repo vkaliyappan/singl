@@ -1,11 +1,11 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import { exportProjectToZip, downloadRepositoryFile } from './api';
-import type { Manifest, DeploymentExportResult } from './types';
+import type { DeploymentExportResult } from './types';
 
-function formatDateStr(date: Date): string {
-  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  return `${String(date.getDate()).padStart(2, '0')}-${MONTHS[date.getMonth()]}-${date.getFullYear()}`;
+export interface DeploymentProject {
+  key: string;
+  twxName: string;
 }
 
 function formatTimestamp(date: Date): string {
@@ -16,9 +16,8 @@ function formatTimestamp(date: Date): string {
 export interface RunDeploymentExportOptions {
   baseUrl: string;
   appKey: string;
-  manifest: Manifest;
+  projects: DeploymentProject[];
   outputDir: string;
-  projectFilter: string | null;
   parent: string | null;
   suffix: string | null;
   dryRun: boolean;
@@ -28,31 +27,25 @@ export interface RunDeploymentExportOptions {
 export async function runDeploymentExport({
   baseUrl,
   appKey,
-  manifest,
+  projects,
   outputDir,
-  projectFilter,
   parent,
   suffix,
   dryRun,
   onProgress,
 }: RunDeploymentExportOptions): Promise<DeploymentExportResult> {
-  const result: DeploymentExportResult = { projectsProcessed: 0, zipsSaved: 0, errors: [] };
   const now = new Date();
-  const dateStr = formatDateStr(now);
   const parentDir = parent ?? formatTimestamp(now);
+  const result: DeploymentExportResult = {
+    projectsProcessed: 0,
+    zipsSaved: 0,
+    savedFiles: [],
+    exportedDir: path.join(outputDir, parentDir),
+    errors: [],
+  };
 
-  for (const [projectKey, proj] of Object.entries(manifest.projects)) {
-    if (
-      projectFilter &&
-      projectFilter !== projectKey &&
-      projectFilter !== proj.alias &&
-      projectFilter !== proj.projectName
-    ) {
-      continue;
-    }
-
-    const twxProjectName = proj.projectName ?? projectKey;
-    const folderName = suffix ? `${projectKey}_${dateStr}_${suffix}` : `${projectKey}_${dateStr}`;
+  for (const { key: projectKey, twxName: twxProjectName } of projects) {
+    const folderName = suffix ? `${projectKey}_${suffix}` : projectKey;
     const fileName = `${folderName}.zip`;
     const remoteDirPath = `${parentDir}/${folderName}`;
     const localDir = path.join(outputDir, parentDir, folderName);
@@ -95,6 +88,7 @@ export async function runDeploymentExport({
     await fs.mkdir(localDir, { recursive: true });
     await fs.writeFile(zipPath, buffer);
     onProgress?.(`[${projectKey}] Saved ${zipPath}`);
+    result.savedFiles.push(zipPath);
     result.zipsSaved += 1;
     result.projectsProcessed += 1;
   }

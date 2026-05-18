@@ -1,11 +1,11 @@
 import { db } from "@/db";
 import { environmentSettings, twxProjects } from "@/db/schema";
-import { TwxExplorer } from "./twx-explorer";
+import { DeploymentExportExplorer } from "./deployment-export-explorer";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "TWX Entities" };
+export const metadata = { title: "Deployment Export" };
 
-export default async function TwxEntitiesPage() {
+export default async function DeploymentExportPage() {
   const [envRows, projectRows] = await Promise.all([
     db.select().from(environmentSettings).catch(() => []),
     db.select().from(twxProjects).catch(() => []),
@@ -26,5 +26,5 @@ export default async function TwxEntitiesPage() {
       })),
   }));
 
-  return <TwxExplorer initialEnvs={envs} />;
+  return <DeploymentExportExplorer initialEnvs={envs} />;
 }

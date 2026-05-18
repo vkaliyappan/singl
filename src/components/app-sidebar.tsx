@@ -10,8 +10,9 @@ import {
   IconSun,
   IconMoon,
   IconBoxMultiple,
+  IconCloudUpload,
 } from "@tabler/icons-react"
-import { useTheme } from "next-themes"
+import { useTheme } from "@/components/providers"
 
 import {
   Sidebar,
@@ -31,6 +32,7 @@ const navItems = [
   { title: "Home", href: "/", icon: IconHome },
   { title: "Repository", href: "/repo", icon: IconGitBranch },
   { title: "TWX Entities", href: "/twx-entities", icon: IconBoxMultiple },
+  { title: "Deployment Export", href: "/deployment-export", icon: IconCloudUpload },
   { title: "Compare", href: "/compare", icon: IconGitCompare },
   { title: "Settings", href: "/settings", icon: IconSettings },
 ]

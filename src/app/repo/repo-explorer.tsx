@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/providers";
 import {
   IconGitBranch,
   IconAlertCircle,
@@ -13,14 +13,13 @@ import {
   IconRefresh,
   IconX,
   IconPackageImport,
-  IconFold,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
@@ -30,7 +29,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { FileIcon, FileTreeNode, getLanguage } from "@/components/file-tree";
+import { FileIcon, FileTreeNode, FileTreePanel, OpenEditorsPanel, getLanguage } from "@/components/file-tree";
+import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -45,6 +46,12 @@ interface FileEntry {
   name: string;
   type: "file" | "dir";
   path: string;
+}
+
+interface TabState {
+  content: string | null;
+  error: string | null;
+  loading: boolean;
 }
 
 interface RepoExplorerProps {
@@ -140,6 +147,20 @@ async function readStream(
   }
 }
 
+function fmtTimestamp(iso: string | null): string {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  const diffMs = Date.now() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function RepoExplorer({
   hasPatToken,
   savedRepoUrl,
@@ -172,6 +193,11 @@ export function RepoExplorer({
     e.preventDefault();
   }, []);
 
+  // ── Search panel state ────────────────────────────────────────────────────
+  const [searchActive, setSearchActive] = useState(false);
+  const editorRef = useRef<{ revealLineInCenter: (n: number) => void; setPosition: (p: { lineNumber: number; column: number }) => void; focus: () => void } | null>(null);
+  const pendingJumpRef = useRef<{ line: number; col: number } | null>(null);
+
   // ── Initial-panel state ───────────────────────────────────────────────────
   const [repoUrl, setRepoUrl] = useState(savedRepoUrl);
   const [branches, setBranches] = useState<string[]>([]);
@@ -200,6 +226,10 @@ export function RepoExplorer({
     extractProgressRef.current?.scrollTo(0, extractProgressRef.current.scrollHeight);
   }, [extractMessages]);
 
+  // ── Timestamps ────────────────────────────────────────────────────────────
+  const [lastPulled, setLastPulled] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
   // ── File-tree state ───────────────────────────────────────────────────────
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
@@ -213,10 +243,51 @@ export function RepoExplorer({
   const dirContentsRef = useRef(dirContents);
   dirContentsRef.current = dirContents;
 
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState<string | null>(null);
-  const [fileContentError, setFileContentError] = useState<string | null>(null);
-  const [loadingContent, setLoadingContent] = useState(false);
+  // ── Multi-tab editor state ────────────────────────────────────────────────
+  const [openTabs, setOpenTabs] = useState<Map<string, TabState>>(new Map());
+  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const openTabsRef = useRef(openTabs);
+  openTabsRef.current = openTabs;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  // ── Persistence ───────────────────────────────────────────────────────────
+  const hasMountedRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("singl:repo");
+      if (!raw) return;
+      const s = JSON.parse(raw) as { treeWidth?: number; activeTab?: string | null; selectedFile?: string | null };
+      if (typeof s.treeWidth === "number") {
+        setTreeWidth(s.treeWidth);
+        treeWidthRef.current = s.treeWidth;
+      }
+      const fileToRestore = s.activeTab ?? s.selectedFile ?? null;
+      if (fileToRestore) handleFileClick(fileToRestore);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    try {
+      localStorage.setItem("singl:repo", JSON.stringify({ treeWidth, activeTab }));
+    } catch {}
+  }, [treeWidth, activeTab]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("singl:repo:ts");
+      if (!raw) return;
+      const s = JSON.parse(raw) as { lastPulled?: string; lastUpdated?: string };
+      if (s.lastPulled) setLastPulled(s.lastPulled);
+      if (s.lastUpdated) setLastUpdated(s.lastUpdated);
+    } catch {}
+  }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const resetFileTree = useCallback(() => {
@@ -224,29 +295,45 @@ export function RepoExplorer({
     setExpandedDirs(new Set());
     setDirContents(new Map());
     setDirErrors(new Map());
-    setSelectedFile(null);
-    setFileContent(null);
-    setFileContentError(null);
+    setOpenTabs(new Map());
+    setActiveTab(null);
   }, []);
 
   const handleCollapseAll = useCallback(() => {
     setExpandedDirs(new Set());
   }, []);
 
-  const handleCloseFile = useCallback(() => {
-    setSelectedFile(null);
-    setFileContent(null);
-    setFileContentError(null);
+  const handleExpandAll = useCallback(() => {
+    setExpandedDirs(new Set(dirContentsRef.current.keys()));
   }, []);
 
-  // Escape key closes the open file
+  const handleCloseTab = useCallback((path: string) => {
+    const tabs = Array.from(openTabsRef.current.keys());
+    const idx = tabs.indexOf(path);
+    setOpenTabs((prev) => {
+      const next = new Map(prev);
+      next.delete(path);
+      return next;
+    });
+    setActiveTab((prev) => {
+      if (prev !== path) return prev;
+      return tabs[idx + 1] ?? tabs[idx - 1] ?? null;
+    });
+  }, []);
+
+  const handleCloseAllTabs = useCallback(() => {
+    setOpenTabs(new Map());
+    setActiveTab(null);
+  }, []);
+
+  // Escape key closes the active tab
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && selectedFile) handleCloseFile();
+      if (e.key === "Escape" && activeTabRef.current) handleCloseTab(activeTabRef.current);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedFile, handleCloseFile]);
+  }, [handleCloseTab]);
 
   const loadDir = useCallback(async (dirPath: string, isRoot = false) => {
     if (isRoot) {
@@ -354,6 +441,9 @@ export function RepoExplorer({
             setCloneStatus("done");
             setClonedSlug(payload.slug);
             setCurrentBranch(selectedBranch);
+            const cloneNow = new Date().toISOString();
+            setLastUpdated(cloneNow);
+            try { localStorage.setItem("singl:repo:ts", JSON.stringify({ lastPulled, lastUpdated: cloneNow })); } catch {}
             await loadDir(payload.slug, true);
           } else if (line.startsWith("[ERROR]")) {
             setCloneStatus("error");
@@ -455,6 +545,10 @@ export function RepoExplorer({
         async () => {
           resetFileTree();
           await loadDir(clonedSlug, true);
+          const pullNow = new Date().toISOString();
+          setLastPulled(pullNow);
+          setLastUpdated(pullNow);
+          try { localStorage.setItem("singl:repo:ts", JSON.stringify({ lastPulled: pullNow, lastUpdated: pullNow })); } catch {}
         },
         (msg) => { setGitError(true); setGitMessages((prev) => [...prev, msg]); },
       );
@@ -508,21 +602,66 @@ export function RepoExplorer({
   );
 
   const handleFileClick = useCallback(async (filePath: string) => {
-    setSelectedFile(filePath);
-    setFileContent(null);
-    setFileContentError(null);
-    setLoadingContent(true);
+    if (openTabsRef.current.has(filePath)) {
+      setActiveTab(filePath);
+      return;
+    }
+    setOpenTabs((prev) => new Map(prev).set(filePath, { content: null, error: null, loading: true }));
+    setActiveTab(filePath);
     try {
       const res = await fetch(`/api/repo/content?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setFileContent(data.content as string);
+      setOpenTabs((prev) => {
+        const next = new Map(prev);
+        next.set(filePath, { content: data.content as string, error: null, loading: false });
+        return next;
+      });
     } catch (err) {
-      setFileContentError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoadingContent(false);
+      setOpenTabs((prev) => {
+        const next = new Map(prev);
+        next.set(filePath, { content: null, error: err instanceof Error ? err.message : String(err), loading: false });
+        return next;
+      });
     }
   }, []);
+
+  // ── Search handlers ───────────────────────────────────────────────────────
+  const handleSearch = useCallback(async (query: string, opts: SearchOptions): Promise<SearchFileResult[]> => {
+    if (!clonedSlug) return [];
+    const params = new URLSearchParams({
+      root: clonedSlug,
+      q: query,
+      case: opts.caseSensitive ? "1" : "0",
+      word: opts.wholeWord ? "1" : "0",
+      regex: opts.useRegex ? "1" : "0",
+      filename: opts.matchFilename ? "1" : "0",
+    });
+    const res = await fetch(`/api/repo/search?${params}`);
+    const data = await res.json() as { results?: SearchFileResult[]; error?: string };
+    if (!res.ok) throw new Error(data.error ?? "Search failed");
+    return data.results ?? [];
+  }, [clonedSlug]);
+
+  const handleSearchResultClick = useCallback(async (filePath: string, lineNumber: number, col: number) => {
+    const fullPath = clonedSlug ? `${clonedSlug}/${filePath}` : filePath;
+    pendingJumpRef.current = { line: lineNumber, col };
+    if (openTabsRef.current.has(fullPath)) {
+      setActiveTab(fullPath);
+      requestAnimationFrame(() => {
+        const ed = editorRef.current;
+        const jump = pendingJumpRef.current;
+        if (ed && jump) {
+          pendingJumpRef.current = null;
+          ed.revealLineInCenter(jump.line);
+          ed.setPosition({ lineNumber: jump.line, column: jump.col });
+          ed.focus();
+        }
+      });
+    } else {
+      await handleFileClick(fullPath);
+    }
+  }, [clonedSlug, handleFileClick]);
 
   const hasClone = cloneStatus === "done" && !!clonedSlug;
   const canFetchBranches = repoUrl.trim().length > 0 && !fetchingBranches;
@@ -532,7 +671,7 @@ export function RepoExplorer({
     ? (repoUrl.split("/").pop()?.replace(/\.git$/, "") ?? "repository")
     : "repository";
 
-  const openFileName = selectedFile?.split("/").pop() ?? "";
+  const activeTabState = activeTab ? openTabs.get(activeTab) : null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -724,6 +863,20 @@ export function RepoExplorer({
             {repoUrl.replace(/^https?:\/\//, "").split("/").slice(-2).join("/")}
           </span>
 
+          <Tooltip>
+            <TooltipTrigger className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors shrink-0">
+              <IconInfoCircle className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-left">
+                <span className="opacity-70">Last pulled</span>
+                <span>{fmtTimestamp(lastPulled)}</span>
+                <span className="opacity-70">Last updated</span>
+                <span>{fmtTimestamp(lastUpdated)}</span>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+
           <Button
             size="sm"
             variant="ghost"
@@ -842,36 +995,42 @@ export function RepoExplorer({
                 className="shrink-0 flex flex-col overflow-hidden border-r"
                 style={{ width: treeWidth }}
               >
-                {/* EXPLORER header */}
-                <div className="shrink-0 px-3 py-1.5 border-b flex items-center justify-between">
-                  <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase select-none">
-                    Explorer
-                  </span>
-                  <button
-                    onClick={handleCollapseAll}
-                    title="Collapse All"
-                    className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                  >
-                    <IconFold className="size-3.5" />
-                  </button>
-                </div>
-
-                {/* Repo root row */}
-                <div className="shrink-0 flex items-center gap-1 px-2 py-1 border-b select-none">
-                  <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground rotate-90" />
-                  <span className="text-xs font-semibold text-foreground uppercase tracking-wider truncate">
-                    {repoName}
-                  </span>
-                </div>
-
-                <ScrollArea className="flex-1 min-h-0">
+                <FileTreePanel
+                  onCollapseAll={handleCollapseAll}
+                  onExpandAll={handleExpandAll}
+                  isSearchActive={searchActive}
+                  onSearchToggle={() => setSearchActive((v) => !v)}
+                  searchContent={
+                    <SearchPanel
+                      onSearch={handleSearch}
+                      onResultClick={handleSearchResultClick}
+                    />
+                  }
+                  openEditors={
+                    <OpenEditorsPanel
+                      openPaths={Array.from(openTabs.keys())}
+                      activePath={activeTab}
+                      onSelect={setActiveTab}
+                      onClose={handleCloseTab}
+                      onCloseAll={handleCloseAllTabs}
+                    />
+                  }
+                  header={
+                    <div className="shrink-0 flex items-center gap-1 px-2 py-1 border-b select-none">
+                      <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground rotate-90" />
+                      <span className="text-xs font-semibold text-foreground uppercase tracking-wider truncate">
+                        {repoName}
+                      </span>
+                    </div>
+                  }
+                >
                   <div className="py-0.5">
                     {rootEntries.map((entry) => (
                       <TreeNode
                         key={entry.path}
                         entry={entry}
                         depth={0}
-                        selectedFile={selectedFile}
+                        selectedFile={activeTab}
                         expandedDirs={expandedDirs}
                         dirContents={dirContents}
                         loadingDirs={loadingDirs}
@@ -881,7 +1040,7 @@ export function RepoExplorer({
                       />
                     ))}
                   </div>
-                </ScrollArea>
+                </FileTreePanel>
               </div>
 
               {/* Resize handle */}
@@ -892,61 +1051,104 @@ export function RepoExplorer({
 
               {/* ── Editor panel ── */}
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-                {selectedFile ? (
+                {openTabs.size > 0 ? (
                   <>
                     {/* Tab bar */}
-                    <div className="shrink-0 flex items-stretch border-b bg-muted/20 overflow-x-auto">
-                      <div className="flex items-center gap-1.5 px-3 py-1 border-r border-t-2 border-t-primary bg-background text-xs whitespace-nowrap">
-                        <FileIcon name={openFileName} className="size-3.5 shrink-0" />
-                        <span className="font-mono text-foreground">{openFileName}</span>
-                        <button
-                          onClick={handleCloseFile}
-                          title="Close (Esc)"
-                          className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                        >
-                          <IconX className="size-3" />
-                        </button>
-                      </div>
-                      <div className="flex-1 bg-muted/10" />
+                    <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
+                      {Array.from(openTabs.entries()).map(([path, tab]) => {
+                        const fileName = path.split("/").pop() ?? "";
+                        const isActive = path === activeTab;
+                        return (
+                          <div
+                            key={path}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveTab(path)}
+                            onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
+                              isActive
+                                ? "border-t-2 border-t-primary bg-background text-foreground"
+                                : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+                            )}
+                          >
+                            <FileIcon name={fileName} className="size-3.5 shrink-0" />
+                            <span className="font-mono">{fileName}</span>
+                            {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
+                              title="Close"
+                              className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                            >
+                              <IconX className="size-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <button
+                        onClick={handleCloseAllTabs}
+                        title="Close All Editors"
+                        className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
+                      >
+                        <IconX className="size-3" />
+                        Close All
+                      </button>
                     </div>
 
-                    {/* Breadcrumb path */}
-                    <div className="shrink-0 px-3 py-0.5 border-b bg-muted/10">
-                      <span className="text-[11px] text-muted-foreground font-mono truncate">
-                        {selectedFile}
-                      </span>
-                    </div>
+                    {activeTab && activeTabState && (
+                      <>
+                        {/* Breadcrumb path */}
+                        <div className="shrink-0 px-3 py-0.5 border-b bg-muted/10">
+                          <span className="text-[11px] text-muted-foreground font-mono truncate">
+                            {activeTab}
+                          </span>
+                        </div>
 
-                    {/* Content */}
-                    <div className="flex-1 min-h-0">
-                      {loadingContent ? (
-                        <div className="flex items-center justify-center h-full">
-                          <Spinner className="size-5" />
+                        {/* Content */}
+                        <div className="flex-1 min-h-0">
+                          {activeTabState.loading ? (
+                            <div className="flex items-center justify-center h-full">
+                              <Spinner className="size-5" />
+                            </div>
+                          ) : activeTabState.error ? (
+                            <div className="p-4">
+                              <p className="text-xs text-destructive">{activeTabState.error}</p>
+                            </div>
+                          ) : (
+                            <MonacoEditor
+                              key={activeTab}
+                              height="100%"
+                              language={getLanguage(activeTab)}
+                              value={activeTabState.content ?? ""}
+                              theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+                              options={{
+                                readOnly: true,
+                                minimap: { enabled: true },
+                                scrollBeyondLastLine: false,
+                                wordWrap: "on",
+                                fontSize: 13,
+                                lineNumbers: "on",
+                                folding: true,
+                                renderLineHighlight: "line",
+                                automaticLayout: true,
+                              }}
+                              onMount={(ed) => {
+                                editorRef.current = ed;
+                                const jump = pendingJumpRef.current;
+                                if (jump) {
+                                  pendingJumpRef.current = null;
+                                  setTimeout(() => {
+                                    ed.revealLineInCenter(jump.line);
+                                    ed.setPosition({ lineNumber: jump.line, column: jump.col });
+                                    ed.focus();
+                                  }, 50);
+                                }
+                              }}
+                            />
+                          )}
                         </div>
-                      ) : fileContentError ? (
-                        <div className="p-4">
-                          <p className="text-xs text-destructive">{fileContentError}</p>
-                        </div>
-                      ) : (
-                        <MonacoEditor
-                          height="100%"
-                          language={getLanguage(selectedFile)}
-                          value={fileContent ?? ""}
-                          theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-                          options={{
-                            readOnly: true,
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            wordWrap: "on",
-                            fontSize: 13,
-                            lineNumbers: "on",
-                            folding: true,
-                            renderLineHighlight: "line",
-                            automaticLayout: true,
-                          }}
-                        />
-                      )}
-                    </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">

@@ -34,11 +34,21 @@ function isTextFile(filePath: string): boolean {
   return TEXT_EXTENSIONS.has(ext);
 }
 
-/** Hash file content; for text files normalizes CRLF→LF so Windows checkouts match Unix exports. */
+/** Hash file content normalised to match what Monaco's diff engine sees:
+ *  - CRLF → LF
+ *  - trim leading + trailing whitespace per line  (ignoreTrimWhitespace: true)
+ *  - strip trailing blank lines at EOF */
 function sha256(filePath: string): string {
   const data = fs.readFileSync(filePath);
   if (isTextFile(filePath)) {
-    const normalized = data.toString("utf-8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const normalized = data.toString("utf-8")
+      .replace(/^﻿/, "")        // strip BOM
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())    // leading + trailing (matches Monaco's ignoreTrimWhitespace)
+      .join("\n")
+      .trimEnd();                    // trailing blank lines at EOF
     return crypto.createHash("sha256").update(normalized).digest("hex");
   }
   return crypto.createHash("sha256").update(data).digest("hex");
@@ -157,17 +167,14 @@ export function mergeTrees(leftRoot: string, rightRoot: string): MergeResult {
   // Roll up: a dir is "modified" if any descendant file is non-identical
   function rollupDir(node: DiffNode): NodeStatus {
     if (node.type === "file") return node.status;
+    let anyNonIdentical = false;
     for (const childPath of node.children ?? []) {
       const child = nodeMap.get(childPath);
       if (!child) continue;
-      const s = rollupDir(child);
-      if (s !== "identical") {
-        node.status = "modified";
-        return "modified";
-      }
+      if (rollupDir(child) !== "identical") anyNonIdentical = true;
     }
-    node.status = "identical";
-    return "identical";
+    node.status = anyNonIdentical ? "modified" : "identical";
+    return node.status;
   }
 
   // Only roll up root-level dirs

@@ -3,12 +3,13 @@ import { environmentSettings, appSettings, twxProjects } from "@/db/schema";
 import { SettingsForm, AzurePatForm, ComparePathsForm } from "./settings-form";
 import { Separator } from "@/components/ui/separator";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const [envRows, projectRows, appRows] = await Promise.all([
-    db.select().from(environmentSettings),
-    db.select().from(twxProjects),
+    db.select().from(environmentSettings).catch(() => []),
+    db.select().from(twxProjects).catch(() => []),
     db.select().from(appSettings).limit(1).catch(() => []),
   ]);
 
@@ -32,7 +33,8 @@ export default async function SettingsPage() {
   const repoRootSubpath = appRows[0]?.repoRootSubpath ?? "";
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-8 overflow-y-auto h-full">
+    <div className="flex flex-col flex-1 overflow-y-auto">
+    <div className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="mb-2">
         <h1 className="text-base font-semibold">Settings</h1>
         <p className="text-xs text-muted-foreground mt-0.5">
@@ -69,6 +71,7 @@ export default async function SettingsPage() {
         </p>
         <ComparePathsForm twxRootPrefix={twxRootPrefix} repoRootSubpath={repoRootSubpath} />
       </div>
+    </div>
     </div>
   );
 }

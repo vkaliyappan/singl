@@ -121,7 +121,16 @@ async function main(): Promise<void> {
       process.exit(1);
     });
 
-    const result = await runDeploymentExport({ baseUrl, appKey, manifest, outputDir, projectFilter, parent, suffix, dryRun, onProgress: console.log });
+    const projects = Object.entries(manifest.projects)
+      .filter(([key, proj]) =>
+        !projectFilter ||
+        projectFilter === key ||
+        projectFilter === proj.alias ||
+        projectFilter === proj.projectName
+      )
+      .map(([key, proj]) => ({ key, twxName: proj.projectName ?? key }));
+
+    const result = await runDeploymentExport({ baseUrl, appKey, projects, outputDir, parent, suffix, dryRun, onProgress: console.log });
     console.log('\nExport deployment files summary:');
     console.log(`  projectsProcessed: ${result.projectsProcessed}`);
     console.log(`  zipsSaved:         ${result.zipsSaved}`);
@@ -142,7 +151,16 @@ async function main(): Promise<void> {
       process.exit(1);
     });
 
-    const result = await runDeploymentExtract({ manifest, inputDir, outputDir, projectFilter, dryRun, onProgress: console.log })
+    const extractProjects = Object.entries(manifest.projects)
+      .filter(([key, proj]) =>
+        !projectFilter ||
+        projectFilter === key ||
+        projectFilter === proj.alias ||
+        projectFilter === proj.projectName
+      )
+      .map(([key, proj]) => ({ key, alias: proj.alias ?? key }));
+
+    const result = await runDeploymentExtract({ projects: extractProjects, inputDir, outputDir, dryRun, onProgress: console.log })
       .catch(err => { console.error(err instanceof Error ? err.message : String(err)); process.exit(1); });
 
     console.log('\nExtract deployment files summary:');
