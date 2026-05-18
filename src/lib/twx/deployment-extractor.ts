@@ -2,7 +2,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import AdmZip from 'adm-zip';
 import { formatEntityXml } from './xmlformat';
-import type { Manifest, DeploymentExtractResult } from './types';
+import type { DeploymentExtractResult } from './types';
 
 const ENTITY_TYPE_FOLDERS = new Set([
   'Things', 'Mashups', 'DataShapes', 'ThingShapes', 'ThingTemplates',
@@ -10,22 +10,23 @@ const ENTITY_TYPE_FOLDERS = new Set([
   'StateDefinitions', 'StyleDefinitions',
 ]);
 
-const FOLDER_NAME_RE = /^([A-Za-z0-9_]+?)_\d{2}-[A-Z]{3}-\d{4}$/;
+export interface DeploymentExtractProject {
+  key: string;
+  alias: string;
+}
 
 export interface RunDeploymentExtractOptions {
-  manifest: Manifest;
+  projects: DeploymentExtractProject[];
   inputDir: string;
   outputDir: string;
-  projectFilter: string | null;
   dryRun: boolean;
   onProgress?: (msg: string) => void;
 }
 
 export async function runDeploymentExtract({
-  manifest,
+  projects,
   inputDir,
   outputDir,
-  projectFilter,
   dryRun,
   onProgress,
 }: RunDeploymentExtractOptions): Promise<DeploymentExtractResult> {
@@ -44,27 +45,17 @@ export async function runDeploymentExtract({
     const errMsg = err instanceof Error ? err.message : String(err);
     throw new Error(
       `Failed to read input directory "${inputDir}": ${errMsg}. ` +
-      `Use --input to point to the directory that contains the project folders (e.g. ./export/20260421-143000)`
+      `Point to the directory that contains the project folders (e.g. ./export/20260518-120000)`
     );
   }
 
   for (const folderName of subfolders) {
-    const match = FOLDER_NAME_RE.exec(folderName);
-    if (!match) continue;
-
-    const projectKey = match[1];
-    const proj = manifest.projects[projectKey];
+    // Match folder to a project: folder name is exactly {key} or {key}_{suffix}
+    const proj = projects.find(
+      p => folderName === p.key || folderName.startsWith(`${p.key}_`)
+    );
     if (!proj) {
-      onProgress?.(`[${folderName}] No manifest entry for project key "${projectKey}", skipping.`);
-      continue;
-    }
-
-    if (
-      projectFilter &&
-      projectFilter !== projectKey &&
-      projectFilter !== proj.alias &&
-      projectFilter !== proj.projectName
-    ) {
+      onProgress?.(`[${folderName}] No matching project found, skipping.`);
       continue;
     }
 
@@ -72,18 +63,18 @@ export async function runDeploymentExtract({
     try {
       await fs.access(zipPath);
     } catch {
-      onProgress?.(`[${projectKey}] ZIP not found at ${zipPath}, skipping.`);
+      onProgress?.(`[${proj.key}] ZIP not found at ${zipPath}, skipping.`);
       continue;
     }
 
-    onProgress?.(`[${projectKey}] Extracting ${zipPath}...`);
+    onProgress?.(`[${proj.key}] Extracting ${zipPath}...`);
     let zip: AdmZip;
     try {
       zip = new AdmZip(zipPath);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      onProgress?.(`[${projectKey}] Failed to open ZIP: ${errMsg}`);
-      result.errors.push(`${projectKey}: failed to open ZIP - ${errMsg}`);
+      onProgress?.(`[${proj.key}] Failed to open ZIP: ${errMsg}`);
+      result.errors.push(`${proj.key}: failed to open ZIP - ${errMsg}`);
       continue;
     }
 
@@ -106,17 +97,16 @@ export async function runDeploymentExtract({
         entityTypeFolder = parts[1];
         entityFileName = parts.slice(2).join('/');
       } else {
-        onProgress?.(`[${projectKey}] Unrecognised entry "${entry.entryName}", skipping.`);
+        onProgress?.(`[${proj.key}] Unrecognised entry "${entry.entryName}", skipping.`);
         result.entitiesSkipped += 1;
         continue;
       }
 
-      const alias = proj.alias ?? projectKey;
-      const outDir = path.join(outputDir, alias, projectKey, entityTypeFolder);
+      const outDir = path.join(outputDir, proj.alias, proj.key, entityTypeFolder);
       const outFile = path.join(outDir, entityFileName);
 
       if (dryRun) {
-        onProgress?.(`[${projectKey}] (dry-run) Would write ${outFile}`);
+        onProgress?.(`[${proj.key}] (dry-run) Would write ${outFile}`);
         result.entitiesExtracted += 1;
         continue;
       }
@@ -129,14 +119,14 @@ export async function runDeploymentExtract({
         result.entitiesExtracted += 1;
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        onProgress?.(`[${projectKey}] Failed to write ${outFile}: ${errMsg}`);
-        result.errors.push(`${projectKey}/${entry.entryName}: ${errMsg}`);
+        onProgress?.(`[${proj.key}] Failed to write ${outFile}: ${errMsg}`);
+        result.errors.push(`${proj.key}/${entry.entryName}: ${errMsg}`);
         result.entitiesSkipped += 1;
       }
     }
 
     result.zipFilesProcessed += 1;
-    onProgress?.(`[${projectKey}] Done.`);
+    onProgress?.(`[${proj.key}] Done.`);
   }
 
   return result;

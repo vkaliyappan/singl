@@ -25,10 +25,11 @@ export async function GET(request: NextRequest) {
 
     const twxRootPrefix = app?.twxRootPrefix ?? "WindchillClients/Thingworx";
     const repoRootSubpath = app?.repoRootSubpath ?? "";
+    const safeEnv = env.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
     const cwd = process.cwd();
     const leftRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "repos", repo.repoSlug, repoRootSubpath);
-    const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "twx-entities", env, twxRootPrefix);
+    const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "twx-entities", safeEnv, twxRootPrefix);
 
     const reposBase = path.resolve(cwd, "repos");
     const twxBase = path.resolve(cwd, "twx-entities");

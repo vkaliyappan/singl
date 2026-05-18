@@ -303,6 +303,10 @@ export function RepoExplorer({
     setExpandedDirs(new Set());
   }, []);
 
+  const handleExpandAll = useCallback(() => {
+    setExpandedDirs(new Set(dirContentsRef.current.keys()));
+  }, []);
+
   const handleCloseTab = useCallback((path: string) => {
     const tabs = Array.from(openTabsRef.current.keys());
     const idx = tabs.indexOf(path);
@@ -993,6 +997,7 @@ export function RepoExplorer({
               >
                 <FileTreePanel
                   onCollapseAll={handleCollapseAll}
+                  onExpandAll={handleExpandAll}
                   isSearchActive={searchActive}
                   onSearchToggle={() => setSearchActive((v) => !v)}
                   searchContent={

@@ -13,7 +13,7 @@ const BINARY_EXTS = new Set([
 
 const MAX_FILE_SIZE = 512 * 1024;
 const MAX_RESULTS = 500;
-const MAX_FILES = 300;
+const MAX_FILES = 2000;
 
 function isBinary(name: string): boolean {
   return BINARY_EXTS.has(name.split(".").pop()?.toLowerCase() ?? "");

@@ -7,7 +7,8 @@ import {
   IconFileText,
   IconChevronRight,
   IconLoader2,
-  IconFold,
+  IconFoldDown,
+  IconFoldUp,
   IconSearch,
   IconX,
   IconFileTypeTs,
@@ -203,6 +204,7 @@ export function OpenEditorsPanel({
 
 export function FileTreePanel({
   onCollapseAll,
+  onExpandAll,
   header,
   children,
   openEditors,
@@ -211,6 +213,7 @@ export function FileTreePanel({
   searchContent,
 }: {
   onCollapseAll?: () => void;
+  onExpandAll?: () => void;
   header?: ReactNode;
   children: ReactNode;
   openEditors?: ReactNode;
@@ -257,13 +260,22 @@ export function FileTreePanel({
               <IconSearch className="size-3.5" />
             </button>
           )}
+          {onExpandAll && (
+            <button
+              onClick={onExpandAll}
+              title="Expand All"
+              className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <IconFoldDown className="size-3.5" />
+            </button>
+          )}
           {onCollapseAll && (
             <button
               onClick={onCollapseAll}
               title="Collapse All"
               className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
-              <IconFold className="size-3.5" />
+              <IconFoldUp className="size-3.5" />
             </button>
           )}
         </div>

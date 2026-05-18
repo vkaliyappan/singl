@@ -44,6 +44,8 @@ export interface ExportResult {
 export interface DeploymentExportResult {
   projectsProcessed: number;
   zipsSaved: number;
+  savedFiles: string[];
+  exportedDir: string;
   errors: string[];
 }
 

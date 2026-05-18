@@ -15,7 +15,7 @@ const BINARY_EXTS = new Set([
 
 const MAX_FILE_SIZE = 512 * 1024;
 const MAX_RESULTS = 500;
-const MAX_FILES = 300;
+const MAX_FILES = 2000;
 
 function isBinary(name: string): boolean {
   return BINARY_EXTS.has(name.split(".").pop()?.toLowerCase() ?? "");
@@ -106,9 +106,10 @@ async function handleSearch({
 
   const twxRootPrefix = app?.twxRootPrefix ?? "WindchillClients/Thingworx";
   const repoRootSubpath = app?.repoRootSubpath ?? "";
+  const safeEnv = env.replace(/[^a-zA-Z0-9_\-]/g, "_");
   const cwd = process.cwd();
   const leftRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "repos", repo.repoSlug, repoRootSubpath);
-  const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "twx-entities", env, twxRootPrefix);
+  const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "twx-entities", safeEnv, twxRootPrefix);
 
   let pattern: RegExp;
   try { pattern = buildPattern(q, caseSensitive, wholeWord, useRegex); }
@@ -116,12 +117,21 @@ async function handleSearch({
 
   const leftResults: Result[] = [];
   const rightResults: Result[] = [];
+  const warnings: string[] = [];
 
-  if ((side === "left" || side === "both") && fs.existsSync(leftRoot)) {
-    walk(leftRoot, leftRoot, pattern, matchFilename, leftResults, { n: 0 });
+  if (side === "left" || side === "both") {
+    if (fs.existsSync(leftRoot)) {
+      walk(leftRoot, leftRoot, pattern, matchFilename, leftResults, { n: 0 });
+    } else {
+      warnings.push(`Repo path not found: ${leftRoot}`);
+    }
   }
-  if ((side === "right" || side === "both") && fs.existsSync(rightRoot)) {
-    walk(rightRoot, rightRoot, pattern, matchFilename, rightResults, { n: 0 });
+  if (side === "right" || side === "both") {
+    if (fs.existsSync(rightRoot)) {
+      walk(rightRoot, rightRoot, pattern, matchFilename, rightResults, { n: 0 });
+    } else {
+      warnings.push(`TWX entities path not found: ${rightRoot}`);
+    }
   }
 
   const merged = new Map<string, Result>();
@@ -130,5 +140,8 @@ async function handleSearch({
     if (!merged.has(r.filePath)) merged.set(r.filePath, r);
   }
 
-  return NextResponse.json({ results: Array.from(merged.values()) });
+  return NextResponse.json({
+    results: Array.from(merged.values()),
+    ...(warnings.length ? { warnings } : {}),
+  });
 }

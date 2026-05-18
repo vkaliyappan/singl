@@ -11,9 +11,9 @@ const BINARY_EXTS = new Set([
   "db","sqlite","sqlite3",
 ]);
 
-const MAX_FILE_SIZE = 512 * 1024; // 512 KB per file
+const MAX_FILE_SIZE = 512 * 1024;
 const MAX_RESULTS = 500;
-const MAX_FILES = 300;
+const MAX_FILES = 2000;
 
 function isBinary(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";

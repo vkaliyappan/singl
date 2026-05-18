@@ -1,11 +1,19 @@
 import path from 'path';
-import { resolveConnection } from '@/lib/twx/config';
-import { readManifest } from '@/lib/twx/manifest';
+import { db } from '@/db';
+import { environmentSettings, twxProjects } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import { runDeploymentExport } from '@/lib/twx/deployment-exporter';
-import type { ParsedFlags } from '@/lib/twx/types';
+import type { DeploymentProject } from '@/lib/twx/deployment-exporter';
 
 export async function POST(request: Request) {
-  const flags = (await request.json()) as ParsedFlags;
+  const { envName, projectName, parent, suffix, output, dryRun } = (await request.json()) as {
+    envName: string;
+    projectName?: string;
+    parent?: string;
+    suffix?: string;
+    output?: string;
+    dryRun?: boolean;
+  };
 
   const stream = new TransformStream<Uint8Array, Uint8Array>();
   const writer = stream.writable.getWriter();
@@ -15,32 +23,62 @@ export async function POST(request: Request) {
 
   (async () => {
     try {
-      const { baseUrl, appKey } = await resolveConnection(flags);
+      if (!envName?.trim()) {
+        send('[ERROR] Environment name is required');
+        return;
+      }
 
-      const manifestPath = path.resolve(
-        /*turbopackIgnore: true*/ process.cwd(),
-        (flags.manifest as string | undefined) ?? './manifest.twx.json'
-      );
+      const [envRows, dbProjects] = await Promise.all([
+        db.select().from(environmentSettings).where(eq(environmentSettings.environment, envName)),
+        db.select().from(twxProjects).where(eq(twxProjects.environment, envName)),
+      ]);
+
+      const env = envRows[0];
+      if (!env) {
+        send(`[ERROR] Environment "${envName}" not found`);
+        return;
+      }
+      if (!env.twxBaseUrl?.trim()) {
+        send(`[ERROR] No TWX Base URL configured for "${envName}"`);
+        return;
+      }
+      if (!env.twxAppKey?.trim()) {
+        send(`[ERROR] No App Key configured for "${envName}"`);
+        return;
+      }
+
+      let projects: DeploymentProject[];
+
+      if (projectName?.trim()) {
+        const dbMatch = dbProjects.find((p) => p.projectName === projectName.trim());
+        projects = [{
+          key: dbMatch?.folderName?.trim() || projectName.trim(),
+          twxName: projectName.trim(),
+        }];
+      } else if (dbProjects.length > 0) {
+        projects = dbProjects.map((p) => ({
+          key: p.folderName?.trim() || p.projectName,
+          twxName: p.projectName,
+        }));
+        send(`Exporting ${projects.length} configured project(s): ${projects.map((p) => p.twxName).join(', ')}`);
+      } else {
+        send(`[ERROR] No projects configured for "${envName}". Add projects in Settings.`);
+        return;
+      }
+
       const outputDir = path.resolve(
         /*turbopackIgnore: true*/ process.cwd(),
-        (flags.output as string | undefined) ?? './export'
+        output?.trim() || './export'
       );
-      const projectFilter = (flags.project as string | undefined) ?? null;
-      const parent = (flags.parent as string | undefined) ?? null;
-      const suffix = (flags.suffix as string | undefined) ?? null;
-      const dryRun = !!flags['dry-run'] || !!flags.dryRun;
-
-      const manifest = await readManifest(manifestPath);
 
       const result = await runDeploymentExport({
-        baseUrl,
-        appKey,
-        manifest,
+        baseUrl: env.twxBaseUrl,
+        appKey: env.twxAppKey,
+        projects,
         outputDir,
-        projectFilter,
-        parent,
-        suffix,
-        dryRun,
+        parent: parent?.trim() || null,
+        suffix: suffix?.trim() || null,
+        dryRun: !!dryRun,
         onProgress: send,
       });
 

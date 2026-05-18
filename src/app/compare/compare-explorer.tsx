@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { FileIcon, FileTreeNode, FileTreePanel, OpenEditorsPanel } from "@/components/file-tree";
 import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
 import type { DiffNode, NodeStatus } from "@/lib/compare/diff-tree";
+import type { OnMount, DiffOnMount } from "@monaco-editor/react";
 
 const loading = () => (
   <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
@@ -201,6 +202,11 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
   const [nodeMap, setNodeMap] = useState<Map<string, DiffNode>>(new Map());
 
+  // ── Editor refs for search jump ───────────────────────────────────────────────
+  const pendingJumpRef = useRef<{ line: number; col: number } | null>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const diffEditorRef = useRef<Parameters<DiffOnMount>[0] | null>(null);
+
   // ── Persistence ──────────────────────────────────────────────────────────────
   const hasMountedRef = useRef(false);
   const pendingRestorePathRef = useRef<string | null>(null);
@@ -371,6 +377,14 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
     setExpandedDirs(new Set());
   }, []);
 
+  const handleExpandAll = useCallback(() => {
+    const allDirs = new Set<string>();
+    for (const [path, node] of nodeMap) {
+      if (node.type === "dir") allDirs.add(path);
+    }
+    setExpandedDirs(allDirs);
+  }, [nodeMap]);
+
   // ── Search handlers ───────────────────────────────────────────────────────
   const handleSearch = useCallback(async (query: string, opts: SearchOptions): Promise<SearchFileResult[]> => {
     if (!selectedEnv) return [];
@@ -384,12 +398,15 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
       filename: opts.matchFilename ? "1" : "0",
     });
     const res = await fetch(`/api/compare/search?${params}`);
-    const data = await res.json() as { results?: SearchFileResult[]; error?: string };
+    const data = await res.json() as { results?: SearchFileResult[]; error?: string; warnings?: string[] };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
-    return data.results ?? [];
+    const results = data.results ?? [];
+    if (results.length === 0 && data.warnings?.length) throw new Error(data.warnings.join("\n"));
+    return results;
   }, [selectedEnv]);
 
-  const handleSearchResultClick = useCallback((filePath: string) => {
+  const handleSearchResultClick = useCallback((filePath: string, lineNumber: number, col: number) => {
+    pendingJumpRef.current = { line: lineNumber, col };
     const node = nodeMap.get(filePath) ?? {
       path: filePath,
       name: filePath.split("/").pop() ?? filePath,
@@ -533,12 +550,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
         >
           <FileTreePanel
             onCollapseAll={treeData ? handleCollapseAll : undefined}
+            onExpandAll={treeData ? handleExpandAll : undefined}
             isSearchActive={searchActive}
             onSearchToggle={() => setSearchActive((v) => !v)}
             searchContent={
               <SearchPanel
                 onSearch={handleSearch}
-                onResultClick={(filePath) => handleSearchResultClick(filePath)}
+                onResultClick={handleSearchResultClick}
               />
             }
             openEditors={
@@ -731,6 +749,16 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                             minimap: { enabled: true },
                             scrollBeyondLastLine: false,
                           }}
+                          onMount={(editor) => {
+                            editorRef.current = editor;
+                            const jump = pendingJumpRef.current;
+                            if (jump) {
+                              pendingJumpRef.current = null;
+                              editor.revealLineInCenter(jump.line);
+                              editor.setPosition({ lineNumber: jump.line, column: jump.col });
+                              editor.focus();
+                            }
+                          }}
                         />
                       ) : (
                         <MonacoDiffEditor
@@ -751,8 +779,17 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                             renderOverviewRuler: false,
                           }}
                           onMount={(editor) => {
+                            diffEditorRef.current = editor;
                             if (diffView === "inline") {
                               editor.getModifiedEditor().updateOptions({ minimap: { enabled: true } });
+                            }
+                            const jump = pendingJumpRef.current;
+                            if (jump) {
+                              pendingJumpRef.current = null;
+                              const target = editor.getModifiedEditor();
+                              target.revealLineInCenter(jump.line);
+                              target.setPosition({ lineNumber: jump.line, column: jump.col });
+                              target.focus();
                             }
                           }}
                         />
