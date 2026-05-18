@@ -15,6 +15,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "env and path are required" }, { status: 400 });
   }
 
+  try {
+    return await handleRequest(env, relPath);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal error" },
+      { status: 500 }
+    );
+  }
+}
+
+async function handleRequest(env: string, relPath: string) {
   const [appRows, repoRows] = await Promise.all([
     db.select().from(appSettings).limit(1),
     db.select().from(repoSettings).limit(1),
@@ -48,9 +59,16 @@ export async function GET(request: NextRequest) {
       const stats = fs.statSync(filePath);
       if (stats.isDirectory()) return { content: null };
       if (stats.size > MAX_SIZE) return { content: null, size: stats.size, tooLarge: true };
-      // Normalize CRLF so the diff editor doesn't show phantom line-ending changes
+      // Normalize for display: strip BOM, normalize CRLF, strip trailing whitespace per line
       const raw = fs.readFileSync(filePath, "utf-8");
-      return { content: raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), size: stats.size };
+      const content = raw
+        .replace(/^﻿/, "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .join("\n");
+      return { content, size: stats.size };
     } catch {
       return { content: null };
     }

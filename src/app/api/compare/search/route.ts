@@ -69,7 +69,6 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const env = searchParams.get("env");
   const q = searchParams.get("q");
-  // "left" = repo side, "right" = twx side, "both" = combined (default)
   const side = searchParams.get("side") ?? "both";
   const caseSensitive = searchParams.get("case") === "1";
   const wholeWord = searchParams.get("word") === "1";
@@ -78,6 +77,22 @@ export async function GET(req: NextRequest) {
 
   if (!env || !q?.trim()) return NextResponse.json({ results: [] });
 
+  try {
+    return await handleSearch({ env, q, side, caseSensitive, wholeWord, useRegex, matchFilename });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal error" },
+      { status: 500 }
+    );
+  }
+}
+
+async function handleSearch({
+  env, q, side, caseSensitive, wholeWord, useRegex, matchFilename,
+}: {
+  env: string; q: string; side: string;
+  caseSensitive: boolean; wholeWord: boolean; useRegex: boolean; matchFilename: boolean;
+}) {
   const [appRows, repoRows] = await Promise.all([
     db.select().from(appSettings).limit(1),
     db.select().from(repoSettings).limit(1),
@@ -109,13 +124,11 @@ export async function GET(req: NextRequest) {
     walk(rightRoot, rightRoot, pattern, matchFilename, rightResults, { n: 0 });
   }
 
-  // Merge: deduplicate by filePath, keeping first occurrence
   const merged = new Map<string, Result>();
   for (const r of leftResults) merged.set(r.filePath, r);
   for (const r of rightResults) {
     if (!merged.has(r.filePath)) merged.set(r.filePath, r);
   }
 
-  const results = Array.from(merged.values());
-  return NextResponse.json({ results });
+  return NextResponse.json({ results: Array.from(merged.values()) });
 }

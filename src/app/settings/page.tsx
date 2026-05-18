@@ -3,12 +3,13 @@ import { environmentSettings, appSettings, twxProjects } from "@/db/schema";
 import { SettingsForm, AzurePatForm, ComparePathsForm } from "./settings-form";
 import { Separator } from "@/components/ui/separator";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const [envRows, projectRows, appRows] = await Promise.all([
-    db.select().from(environmentSettings),
-    db.select().from(twxProjects),
+    db.select().from(environmentSettings).catch(() => []),
+    db.select().from(twxProjects).catch(() => []),
     db.select().from(appSettings).limit(1).catch(() => []),
   ]);
 

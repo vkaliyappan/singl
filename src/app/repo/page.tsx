@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { appSettings, repoSettings } from "@/db/schema";
 import { RepoExplorer } from "./repo-explorer";
 
+export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Repository",
 };

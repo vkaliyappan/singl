@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/providers";
 import {
   IconGitBranch,
   IconAlertCircle,
@@ -13,6 +13,7 @@ import {
   IconRefresh,
   IconX,
   IconPackageImport,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FileIcon, FileTreeNode, FileTreePanel, OpenEditorsPanel, getLanguage } from "@/components/file-tree";
 import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -145,6 +147,20 @@ async function readStream(
   }
 }
 
+function fmtTimestamp(iso: string | null): string {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  const diffMs = Date.now() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function RepoExplorer({
   hasPatToken,
   savedRepoUrl,
@@ -210,6 +226,10 @@ export function RepoExplorer({
     extractProgressRef.current?.scrollTo(0, extractProgressRef.current.scrollHeight);
   }, [extractMessages]);
 
+  // ── Timestamps ────────────────────────────────────────────────────────────
+  const [lastPulled, setLastPulled] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
   // ── File-tree state ───────────────────────────────────────────────────────
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
@@ -258,6 +278,16 @@ export function RepoExplorer({
       localStorage.setItem("singl:repo", JSON.stringify({ treeWidth, activeTab }));
     } catch {}
   }, [treeWidth, activeTab]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("singl:repo:ts");
+      if (!raw) return;
+      const s = JSON.parse(raw) as { lastPulled?: string; lastUpdated?: string };
+      if (s.lastPulled) setLastPulled(s.lastPulled);
+      if (s.lastUpdated) setLastUpdated(s.lastUpdated);
+    } catch {}
+  }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const resetFileTree = useCallback(() => {
@@ -407,6 +437,9 @@ export function RepoExplorer({
             setCloneStatus("done");
             setClonedSlug(payload.slug);
             setCurrentBranch(selectedBranch);
+            const cloneNow = new Date().toISOString();
+            setLastUpdated(cloneNow);
+            try { localStorage.setItem("singl:repo:ts", JSON.stringify({ lastPulled, lastUpdated: cloneNow })); } catch {}
             await loadDir(payload.slug, true);
           } else if (line.startsWith("[ERROR]")) {
             setCloneStatus("error");
@@ -508,6 +541,10 @@ export function RepoExplorer({
         async () => {
           resetFileTree();
           await loadDir(clonedSlug, true);
+          const pullNow = new Date().toISOString();
+          setLastPulled(pullNow);
+          setLastUpdated(pullNow);
+          try { localStorage.setItem("singl:repo:ts", JSON.stringify({ lastPulled: pullNow, lastUpdated: pullNow })); } catch {}
         },
         (msg) => { setGitError(true); setGitMessages((prev) => [...prev, msg]); },
       );
@@ -822,6 +859,20 @@ export function RepoExplorer({
             {repoUrl.replace(/^https?:\/\//, "").split("/").slice(-2).join("/")}
           </span>
 
+          <Tooltip>
+            <TooltipTrigger className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors shrink-0">
+              <IconInfoCircle className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-left">
+                <span className="opacity-70">Last pulled</span>
+                <span>{fmtTimestamp(lastPulled)}</span>
+                <span className="opacity-70">Last updated</span>
+                <span>{fmtTimestamp(lastUpdated)}</span>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+
           <Button
             size="sm"
             variant="ghost"
@@ -998,44 +1049,41 @@ export function RepoExplorer({
                 {openTabs.size > 0 ? (
                   <>
                     {/* Tab bar */}
-                    <div className="shrink-0 flex items-stretch border-b bg-muted/20">
-                      <div className="flex items-stretch flex-1 min-w-0 overflow-x-auto">
-                        {Array.from(openTabs.entries()).map(([path, tab]) => {
-                          const fileName = path.split("/").pop() ?? "";
-                          const isActive = path === activeTab;
-                          return (
-                            <div
-                              key={path}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => setActiveTab(path)}
-                              onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
-                              className={cn(
-                                "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
-                                isActive
-                                  ? "border-t-2 border-t-primary bg-background text-foreground"
-                                  : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
-                              )}
+                    <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
+                      {Array.from(openTabs.entries()).map(([path, tab]) => {
+                        const fileName = path.split("/").pop() ?? "";
+                        const isActive = path === activeTab;
+                        return (
+                          <div
+                            key={path}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveTab(path)}
+                            onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
+                              isActive
+                                ? "border-t-2 border-t-primary bg-background text-foreground"
+                                : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+                            )}
+                          >
+                            <FileIcon name={fileName} className="size-3.5 shrink-0" />
+                            <span className="font-mono">{fileName}</span>
+                            {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
+                              title="Close"
+                              className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
                             >
-                              <FileIcon name={fileName} className="size-3.5 shrink-0" />
-                              <span className="font-mono">{fileName}</span>
-                              {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
-                                title="Close"
-                                className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                              >
-                                <IconX className="size-3" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                        <div className="flex-1 bg-muted/10 min-w-[20px]" />
-                      </div>
+                              <IconX className="size-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
                       <button
                         onClick={handleCloseAllTabs}
                         title="Close All Editors"
-                        className="shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
+                        className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
                       >
                         <IconX className="size-3" />
                         Close All
@@ -1070,7 +1118,7 @@ export function RepoExplorer({
                               theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
                               options={{
                                 readOnly: true,
-                                minimap: { enabled: false },
+                                minimap: { enabled: true },
                                 scrollBeyondLastLine: false,
                                 wordWrap: "on",
                                 fontSize: 13,

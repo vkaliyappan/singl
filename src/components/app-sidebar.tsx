@@ -11,7 +11,7 @@ import {
   IconMoon,
   IconBoxMultiple,
 } from "@tabler/icons-react"
-import { useTheme } from "next-themes"
+import { useTheme } from "@/components/providers"
 
 import {
   Sidebar,

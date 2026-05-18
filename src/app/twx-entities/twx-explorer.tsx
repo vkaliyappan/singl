@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/providers";
 import {
   IconChevronRight,
   IconFile,
@@ -11,6 +11,7 @@ import {
   IconSettings,
   IconDownload,
   IconPackageImport,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FileIcon, FileTreeNode, FileTreePanel, OpenEditorsPanel, getLanguage } from "@/components/file-tree";
 import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ExistingEnvCard,
   NewEnvCard,
@@ -145,6 +147,20 @@ async function readStream(
   }
 }
 
+function fmtTimestamp(iso: string | null): string {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  const diffMs = Date.now() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 interface TwxExplorerProps {
@@ -198,6 +214,10 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
   useEffect(() => {
     extractProgressRef.current?.scrollTo(0, extractProgressRef.current.scrollHeight);
   }, [extractMessages]);
+
+  // ── Timestamps ────────────────────────────────────────────────────────────
+  const [lastExported, setLastExported] = useState<string | null>(null);
+  const [lastExtracted, setLastExtracted] = useState<string | null>(null);
 
   // ── File tree ─────────────────────────────────────────────────────────────
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
@@ -301,6 +321,16 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
       );
     } catch {}
   }, [selectedEnv, selectedProject, customProject, treeWidth, activeTab]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("singl:twx:ts");
+      if (!raw) return;
+      const s = JSON.parse(raw) as { lastExported?: string; lastExtracted?: string };
+      if (s.lastExported) setLastExported(s.lastExported);
+      if (s.lastExtracted) setLastExtracted(s.lastExtracted);
+    } catch {}
+  }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const resetFileTree = useCallback(() => {
@@ -524,6 +554,12 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
           const dir = parsed.outputDir ?? "";
           setLastExportDir(dir);
           setExportStatus("done");
+          const exportNow = new Date().toISOString();
+          setLastExported(exportNow);
+          try {
+            const existing = JSON.parse(localStorage.getItem("singl:twx:ts") ?? "{}") as { lastExtracted?: string };
+            localStorage.setItem("singl:twx:ts", JSON.stringify({ lastExported: exportNow, lastExtracted: existing.lastExtracted ?? null }));
+          } catch {}
           if (dir) await loadDir(dir, true);
         },
         (msg) => {
@@ -557,6 +593,12 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
         (msg) => setExtractMessages((prev) => [...prev, msg]),
         async () => {
           setExtractStatus("done");
+          const extractNow = new Date().toISOString();
+          setLastExtracted(extractNow);
+          try {
+            const existing = JSON.parse(localStorage.getItem("singl:twx:ts") ?? "{}") as { lastExported?: string };
+            localStorage.setItem("singl:twx:ts", JSON.stringify({ lastExported: existing.lastExported ?? null, lastExtracted: extractNow }));
+          } catch {}
           const safeEnv = selectedEnv.replace(/[^a-zA-Z0-9_\-]/g, "_");
           if (safeEnv) {
             setLastExportDir(safeEnv);
@@ -726,6 +768,24 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
               )}
               {extractStatus === "extracting" ? "Extracting…" : "Extract"}
             </Button>
+          </div>
+
+          {/* Info button */}
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs text-muted-foreground invisible">&nbsp;</Label>
+            <Tooltip>
+              <TooltipTrigger className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors border border-transparent">
+                <IconInfoCircle className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-left">
+                  <span className="opacity-70">Last exported</span>
+                  <span>{fmtTimestamp(lastExported)}</span>
+                  <span className="opacity-70">Last extracted</span>
+                  <span>{fmtTimestamp(lastExtracted)}</span>
+                </div>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -929,44 +989,41 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
                 {openTabs.size > 0 ? (
                   <>
                     {/* Tab bar */}
-                    <div className="shrink-0 flex items-stretch border-b bg-muted/20">
-                      <div className="flex items-stretch flex-1 min-w-0 overflow-x-auto">
-                        {Array.from(openTabs.entries()).map(([path, tab]) => {
-                          const fileName = path.split("/").pop() ?? "";
-                          const isActive = path === activeTab;
-                          return (
-                            <div
-                              key={path}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => setActiveTab(path)}
-                              onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
-                              className={cn(
-                                "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
-                                isActive
-                                  ? "border-t-2 border-t-primary bg-background text-foreground"
-                                  : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
-                              )}
+                    <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
+                      {Array.from(openTabs.entries()).map(([path, tab]) => {
+                        const fileName = path.split("/").pop() ?? "";
+                        const isActive = path === activeTab;
+                        return (
+                          <div
+                            key={path}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveTab(path)}
+                            onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
+                              isActive
+                                ? "border-t-2 border-t-primary bg-background text-foreground"
+                                : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+                            )}
+                          >
+                            <FileIcon name={fileName} className="size-3.5 shrink-0" />
+                            <span className="font-mono">{fileName}</span>
+                            {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
+                              title="Close"
+                              className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
                             >
-                              <FileIcon name={fileName} className="size-3.5 shrink-0" />
-                              <span className="font-mono">{fileName}</span>
-                              {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
-                                title="Close"
-                                className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                              >
-                                <IconX className="size-3" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                        <div className="flex-1 bg-muted/10 min-w-[20px]" />
-                      </div>
+                              <IconX className="size-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
                       <button
                         onClick={handleCloseAllTabs}
                         title="Close All Editors"
-                        className="shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
+                        className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
                       >
                         <IconX className="size-3" />
                         Close All
@@ -1001,7 +1058,7 @@ export function TwxExplorer({ initialEnvs }: TwxExplorerProps) {
                               theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
                               options={{
                                 readOnly: true,
-                                minimap: { enabled: false },
+                                minimap: { enabled: true },
                                 scrollBeyondLastLine: false,
                                 wordWrap: "on",
                                 fontSize: 13,

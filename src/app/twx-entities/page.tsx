@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { environmentSettings, twxProjects } from "@/db/schema";
 import { TwxExplorer } from "./twx-explorer";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "TWX Entities" };
 
 export default async function TwxEntitiesPage() {

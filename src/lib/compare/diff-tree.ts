@@ -34,11 +34,21 @@ function isTextFile(filePath: string): boolean {
   return TEXT_EXTENSIONS.has(ext);
 }
 
-/** Hash file content; for text files normalizes CRLF→LF so Windows checkouts match Unix exports. */
+/** Hash file content normalised to match what Monaco's diff engine sees:
+ *  - CRLF → LF
+ *  - trim leading + trailing whitespace per line  (ignoreTrimWhitespace: true)
+ *  - strip trailing blank lines at EOF */
 function sha256(filePath: string): string {
   const data = fs.readFileSync(filePath);
   if (isTextFile(filePath)) {
-    const normalized = data.toString("utf-8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const normalized = data.toString("utf-8")
+      .replace(/^﻿/, "")        // strip BOM
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())    // leading + trailing (matches Monaco's ignoreTrimWhitespace)
+      .join("\n")
+      .trimEnd();                    // trailing blank lines at EOF
     return crypto.createHash("sha256").update(normalized).digest("hex");
   }
   return crypto.createHash("sha256").update(data).digest("hex");

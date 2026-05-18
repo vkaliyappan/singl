@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - db_data:/data
+    environment:
+      DATABASE_URL: file:/data/local.db
+      TWX_BASE_URL: ${TWX_BASE_URL:-}
+      TWX_APP_KEY: ${TWX_APP_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  db_data:

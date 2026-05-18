@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/providers";
 import {
   IconRefresh,
   IconLoader2,
@@ -133,6 +133,7 @@ type SavedState = {
   selectedEnv?: string;
   baseIsRepo?: boolean;
   hideIdentical?: boolean;
+  diffView?: "side" | "inline";
   treeWidth?: number;
   expandedDirs?: string[];
   selectedPath?: string | null;
@@ -156,7 +157,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
   const [searchActive, setSearchActive] = useState(false);
 
   // ── Resize panel ────────────────────────────────────────────────────────────
-  const [treeWidth, setTreeWidth] = useState(() => readSavedState().treeWidth ?? 280);
+  const [treeWidth, setTreeWidth] = useState(280);
   const treeWidthRef = useRef(treeWidth);
   useEffect(() => { treeWidthRef.current = treeWidth; });
 
@@ -180,39 +181,50 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
   }, []);
 
   // ── Compare state ────────────────────────────────────────────────────────────
-  const [selectedEnv, setSelectedEnv] = useState<string>(() => readSavedState().selectedEnv ?? envs[0] ?? "");
-  const [baseIsRepo, setBaseIsRepo] = useState(() => readSavedState().baseIsRepo ?? true);
-  const [treeData, setTreeData] = useState<TreeData | null>(() => readSavedState().treeData ?? null);
+  const [selectedEnv, setSelectedEnv] = useState<string>(envs[0] ?? "");
+  const [baseIsRepo, setBaseIsRepo] = useState(true);
+  const [treeData, setTreeData] = useState<TreeData | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
 
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set(readSavedState().expandedDirs ?? []));
-  const [hideIdentical, setHideIdentical] = useState(() => readSavedState().hideIdentical ?? false);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [hideIdentical, setHideIdentical] = useState(false);
+  const [diffView, setDiffView] = useState<"side" | "inline">("side");
 
   // ── Multi-tab diff state ──────────────────────────────────────────────────
   const [openDiffTabs, setOpenDiffTabs] = useState<Map<string, DiffTabState>>(new Map());
-  const [activeTab, setActiveTab] = useState<string | null>(() => readSavedState().selectedPath ?? null);
+  const [activeTab, setActiveTab] = useState<string | null>(null);
   const openDiffTabsRef = useRef(openDiffTabs);
   openDiffTabsRef.current = openDiffTabs;
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
 
-  const [nodeMap, setNodeMap] = useState<Map<string, DiffNode>>(() => {
-    const saved = readSavedState();
-    if (!saved.treeData) return new Map();
-    const map = new Map<string, DiffNode>();
-    for (const n of saved.treeData.nodes) map.set(n.path, n);
-    return map;
-  });
+  const [nodeMap, setNodeMap] = useState<Map<string, DiffNode>>(new Map());
 
   // ── Persistence ──────────────────────────────────────────────────────────────
   const hasMountedRef = useRef(false);
-  const pendingRestorePathRef = useRef<string | null>(
-    (() => {
-      const saved = readSavedState();
-      return saved.treeData && saved.selectedPath ? saved.selectedPath : null;
-    })()
-  );
+  const pendingRestorePathRef = useRef<string | null>(null);
+
+  // Restore persisted state after mount (must be default values above to match SSR)
+  useEffect(() => {
+    const saved = readSavedState();
+    if (saved.treeWidth !== undefined) setTreeWidth(saved.treeWidth);
+    if (saved.selectedEnv) setSelectedEnv(saved.selectedEnv);
+    if (saved.baseIsRepo !== undefined) setBaseIsRepo(saved.baseIsRepo);
+    if (saved.hideIdentical !== undefined) setHideIdentical(saved.hideIdentical);
+    if (saved.diffView) setDiffView(saved.diffView);
+    if (saved.expandedDirs) setExpandedDirs(new Set(saved.expandedDirs));
+    if (saved.treeData) {
+      setTreeData(saved.treeData);
+      const map = new Map<string, DiffNode>();
+      for (const n of saved.treeData.nodes) map.set(n.path, n);
+      setNodeMap(map);
+      if (saved.selectedPath) {
+        pendingRestorePathRef.current = saved.selectedPath;
+        setActiveTab(saved.selectedPath);
+      }
+    }
+  }, []);
 
   const selectedEnvRef = useRef(selectedEnv);
   useEffect(() => { selectedEnvRef.current = selectedEnv; });
@@ -284,6 +296,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
           selectedEnv,
           baseIsRepo,
           hideIdentical,
+          diffView,
           treeWidth,
           expandedDirs: Array.from(expandedDirs),
           selectedPath: activeTab,
@@ -291,7 +304,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
         })
       );
     } catch {}
-  }, [selectedEnv, baseIsRepo, hideIdentical, treeWidth, expandedDirs, activeTab, treeData]);
+  }, [selectedEnv, baseIsRepo, hideIdentical, diffView, treeWidth, expandedDirs, activeTab, treeData]);
 
   const handleCloseTab = useCallback((path: string) => {
     const tabs = Array.from(openDiffTabsRef.current.keys());
@@ -603,45 +616,42 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
           {openDiffTabs.size > 0 ? (
             <>
               {/* Tab bar */}
-              <div className="shrink-0 flex items-stretch border-b bg-muted/20">
-                <div className="flex items-stretch flex-1 min-w-0 overflow-x-auto">
-                  {Array.from(openDiffTabs.entries()).map(([path, tab]) => {
-                    const fileName = path.split("/").pop() ?? "";
-                    const isActive = path === activeTab;
-                    return (
-                      <div
-                        key={path}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setActiveTab(path)}
-                        onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
-                        className={cn(
-                          "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
-                          isActive
-                            ? "border-t-2 border-t-primary bg-background text-foreground"
-                            : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
-                        )}
+              <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
+                {Array.from(openDiffTabs.entries()).map(([path, tab]) => {
+                  const fileName = path.split("/").pop() ?? "";
+                  const isActive = path === activeTab;
+                  return (
+                    <div
+                      key={path}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setActiveTab(path)}
+                      onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
+                        isActive
+                          ? "border-t-2 border-t-primary bg-background text-foreground"
+                          : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+                      )}
+                    >
+                      <FileIcon name={fileName} className="size-3.5 shrink-0" />
+                      <span className="font-mono">{fileName}</span>
+                      <StatusBadge status={tab.node.status} />
+                      {tab.loading && <IconLoader2 className="size-3 animate-spin shrink-0 ml-0.5" />}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
+                        title="Close"
+                        className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
                       >
-                        <FileIcon name={fileName} className="size-3.5 shrink-0" />
-                        <span className="font-mono">{fileName}</span>
-                        <StatusBadge status={tab.node.status} />
-                        {tab.loading && <IconLoader2 className="size-3 animate-spin shrink-0 ml-0.5" />}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
-                          title="Close"
-                          className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                        >
-                          <IconX className="size-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  <div className="flex-1 bg-muted/10 min-w-[20px]" />
-                </div>
+                        <IconX className="size-3" />
+                      </button>
+                    </div>
+                  );
+                })}
                 <button
                   onClick={handleCloseAllTabs}
                   title="Close All Editors"
-                  className="shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
+                  className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
                 >
                   <IconX className="size-3" />
                   Close All
@@ -654,11 +664,41 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                   {/* Breadcrumb */}
                   <div className="shrink-0 px-3 py-0.5 border-b bg-muted/10 flex items-center justify-between">
                     <span className="text-[11px] text-muted-foreground font-mono truncate">{activeTab}</span>
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground shrink-0 ml-2">
-                      <span className={baseIsRepo ? "text-foreground font-medium" : ""}>Repo</span>
-                      <IconArrowsExchange className="size-3" />
-                      <span className={!baseIsRepo ? "text-foreground font-medium" : ""}>TWX</span>
-                      <span className="ml-1 opacity-60">(base ← left)</span>
+                    <div className="flex items-center gap-3 shrink-0 ml-2">
+                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                        <span className={baseIsRepo ? "text-foreground font-medium" : ""}>Repo</span>
+                        <IconArrowsExchange className="size-3" />
+                        <span className={!baseIsRepo ? "text-foreground font-medium" : ""}>TWX</span>
+                        <span className="ml-1 opacity-60">(base ← left)</span>
+                      </div>
+                      {activeTabData.node.status !== "identical" && (
+                        <div className="flex items-center rounded border overflow-hidden text-[10px]">
+                          <button
+                            onClick={() => setDiffView("side")}
+                            className={cn(
+                              "px-2 py-0.5 transition-colors",
+                              diffView === "side"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-accent/40"
+                            )}
+                            title="Side by side diff"
+                          >
+                            Side by side
+                          </button>
+                          <button
+                            onClick={() => setDiffView("inline")}
+                            className={cn(
+                              "px-2 py-0.5 transition-colors",
+                              diffView === "inline"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground hover:bg-accent/40"
+                            )}
+                            title="Inline diff"
+                          >
+                            Inline
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -688,13 +728,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                             readOnly: true,
                             automaticLayout: true,
                             fontSize: 12,
-                            minimap: { enabled: false },
+                            minimap: { enabled: true },
                             scrollBeyondLastLine: false,
                           }}
                         />
                       ) : (
                         <MonacoDiffEditor
-                          key={activeTab}
+                          key={`${activeTab}-${diffView}`}
                           height="100%"
                           language={language}
                           original={baseIsRepo ? activeTabData.leftContent : (activeTabData.rightContent ?? "")}
@@ -703,12 +743,17 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                           options={{
                             readOnly: true,
                             originalEditable: false,
-                            renderSideBySide: true,
+                            renderSideBySide: diffView === "side",
                             automaticLayout: true,
                             fontSize: 12,
                             minimap: { enabled: false },
                             scrollBeyondLastLine: false,
                             renderOverviewRuler: false,
+                          }}
+                          onMount={(editor) => {
+                            if (diffView === "inline") {
+                              editor.getModifiedEditor().updateOptions({ minimap: { enabled: true } });
+                            }
                           }}
                         />
                       )}
