@@ -1,4 +1,5 @@
 import path from "path";
+import fs from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { appSettings, repoSettings } from "@/db/schema";
@@ -39,6 +40,19 @@ export async function GET(request: NextRequest) {
     }
     if (!rightRoot.startsWith(twxBase)) {
       return NextResponse.json({ error: "Invalid TWX root prefix" }, { status: 400 });
+    }
+
+    if (!fs.existsSync(leftRoot)) {
+      return NextResponse.json(
+        { error: `Repository path not found: ${path.relative(cwd, leftRoot)}` },
+        { status: 400 }
+      );
+    }
+    if (!fs.existsSync(rightRoot)) {
+      return NextResponse.json(
+        { error: `No TWX entities found for environment "${env}". Pull entities from the server first.` },
+        { status: 400 }
+      );
     }
 
     const { nodes, summary } = mergeTrees(leftRoot, rightRoot);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useReducer } from "react";
 import { useActionState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   saveEnvironmentSettings,
   deleteEnvironmentSettings,
+  cloneEnvironmentSettings,
   saveAzurePatToken,
   saveProjectConfig,
   deleteProjectConfig,
@@ -253,30 +254,82 @@ export function ExistingEnvCard({
     deleteEnvironmentSettings,
     {}
   );
+  const [cloneState, cloneAction, clonePending] = useActionState<SettingsActionState, FormData>(
+    cloneEnvironmentSettings,
+    {}
+  );
   const [showProjects, setShowProjects] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [showClone, dispatchShowClone] = useReducer((_: boolean, v: boolean) => v, false);
 
   useEffect(() => {
     if (saveState.success || deleteState.success) onSuccess?.();
   }, [saveState.success, deleteState.success, onSuccess]);
 
+  useEffect(() => {
+    if (cloneState.success) {
+      dispatchShowClone(false);
+      onSuccess?.();
+    }
+  }, [cloneState.success, onSuccess]);
+
   return (
     <div className="border rounded-lg p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{setting.environment}</span>
-        <form action={deleteAction}>
-          <input type="hidden" name="environment" value={setting.environment} />
+        <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
-            type="submit"
-            disabled={deletePending}
-            className="h-7 text-xs text-destructive hover:text-destructive"
+            type="button"
+            onClick={() => dispatchShowClone(!showClone)}
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
           >
-            {deletePending ? "Deleting…" : "Delete"}
+            Clone
           </Button>
-        </form>
+          <form action={deleteAction}>
+            <input type="hidden" name="environment" value={setting.environment} />
+            <Button
+              variant="ghost"
+              size="sm"
+              type="submit"
+              disabled={deletePending}
+              className="h-7 text-xs text-destructive hover:text-destructive"
+            >
+              {deletePending ? "Deleting…" : "Delete"}
+            </Button>
+          </form>
+        </div>
       </div>
+
+      {showClone && (
+        <form action={cloneAction} className="flex flex-col gap-2 border border-dashed rounded p-3 bg-muted/10">
+          <input type="hidden" name="sourceEnvironment" value={setting.environment} />
+          <Label className="text-xs font-medium">Clone as</Label>
+          <div className="flex gap-2">
+            <Input
+              name="newEnvironment"
+              placeholder="new-env-name"
+              required
+              autoFocus
+              className="h-7 text-xs"
+            />
+            <Button type="submit" size="sm" disabled={clonePending} className="h-7 text-xs shrink-0">
+              {clonePending ? "Cloning…" : "Clone"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => dispatchShowClone(false)}
+              className="h-7 text-xs"
+            >
+              Cancel
+            </Button>
+          </div>
+          {cloneState.error && <p className="text-xs text-destructive">{cloneState.error}</p>}
+        </form>
+      )}
 
       <form action={saveAction} className="flex flex-col gap-3">
         <input type="hidden" name="environment" value={setting.environment} />

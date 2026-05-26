@@ -146,6 +146,61 @@ export async function saveComparePaths(
   }
 }
 
+export async function cloneEnvironmentSettings(
+  _prevState: SettingsActionState,
+  formData: FormData
+): Promise<SettingsActionState> {
+  const sourceEnvironment = formData.get("sourceEnvironment") as string;
+  const newEnvironment = (formData.get("newEnvironment") as string)?.trim();
+
+  if (!sourceEnvironment || !newEnvironment) {
+    return { error: "Source and new environment names are required." };
+  }
+  if (sourceEnvironment === newEnvironment) {
+    return { error: "New name must differ from the source." };
+  }
+
+  try {
+    const [source] = await db
+      .select()
+      .from(environmentSettings)
+      .where(eq(environmentSettings.environment, sourceEnvironment))
+      .limit(1);
+
+    if (!source) return { error: "Source environment not found." };
+
+    await db.insert(environmentSettings).values({
+      environment: newEnvironment,
+      twxBaseUrl: source.twxBaseUrl,
+      twxAppKey: "",
+    });
+
+    const projects = await db
+      .select()
+      .from(twxProjects)
+      .where(eq(twxProjects.environment, sourceEnvironment));
+
+    if (projects.length > 0) {
+      await db.insert(twxProjects).values(
+        projects.map(({ projectName, folderName, alias, exports }) => ({
+          environment: newEnvironment,
+          projectName,
+          folderName,
+          alias,
+          exports,
+        }))
+      );
+    }
+
+    revalidatePath("/settings");
+    revalidatePath("/twx-entities");
+    return { success: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: msg };
+  }
+}
+
 export async function deleteEnvironmentSettings(
   _prevState: SettingsActionState,
   formData: FormData

@@ -14,7 +14,21 @@ import {
   IconX,
   IconPackageImport,
   IconInfoCircle,
+  IconGitCommit,
+  IconTrash,
 } from "@tabler/icons-react";
+import { ChangesPanel } from "./changes-panel";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,6 +183,9 @@ export function RepoExplorer({
 }: RepoExplorerProps) {
   const { resolvedTheme } = useTheme();
 
+  // ── View (explorer / changes) ─────────────────────────────────────────────
+  const [view, setView] = useState<"explorer" | "changes">("explorer");
+
   // ── Resize panel ──────────────────────────────────────────────────────────
   const [treeWidth, setTreeWidth] = useState(280);
   const treeWidthRef = useRef(280);
@@ -220,6 +237,12 @@ export function RepoExplorer({
   // ── Extract state ─────────────────────────────────────────────────────────
   const [extractStatus, setExtractStatus] = useState<"idle" | "extracting" | "done" | "error">("idle");
   const [extractMessages, setExtractMessages] = useState<string[]>([]);
+
+  // ── Clear extracted state ─────────────────────────────────────────────────
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [clearStatus, setClearStatus] = useState<"idle" | "clearing" | "done" | "error">("idle");
+  const [clearError, setClearError] = useState<string | null>(null);
+  const [changesPanelRefresh, setChangesPanelRefresh] = useState(0);
   const extractProgressRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -486,6 +509,25 @@ export function RepoExplorer({
       setExtractMessages((prev) => [...prev, err instanceof Error ? err.message : String(err)]);
     }
   }, [clonedSlug]);
+
+  const handleClearExtracted = useCallback(async () => {
+    setClearStatus("clearing");
+    setClearError(null);
+    try {
+      const res = await fetch("/api/repo/clean", { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; deleted?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to clear extracted code");
+      setClearStatus("done");
+      setChangesPanelRefresh((n) => n + 1);
+      if (clonedSlug) {
+        resetFileTree();
+        await loadDir(clonedSlug, true);
+      }
+    } catch (err) {
+      setClearStatus("error");
+      setClearError(err instanceof Error ? err.message : String(err));
+    }
+  }, [clonedSlug, loadDir, resetFileTree]);
 
   const handleChangeRepo = useCallback(() => {
     setCloneStatus("idle");
@@ -857,6 +899,48 @@ export function RepoExplorer({
             {extractStatus === "extracting" ? "Extracting…" : "Extract"}
           </Button>
 
+          <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+            <AlertDialogTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!!gitOp || clearStatus === "clearing"}
+                  className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+                />
+              }
+            >
+              {clearStatus === "clearing"
+                ? <Spinner className="size-3" />
+                : <IconTrash className="size-3.5" />}
+              {clearStatus === "clearing" ? "Clearing…" : "Clear Extracted"}
+            </AlertDialogTrigger>
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear extracted code?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  All <code>Code/</code> directories created by Extract will be deleted. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={() => { setClearDialogOpen(false); handleClearExtracted(); }}
+                >
+                  Clear Extracted
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {clearError && (
+            <span className="text-xs text-destructive truncate max-w-[180px]">{clearError}</span>
+          )}
+          {clearStatus === "done" && (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400">Cleared.</span>
+          )}
+
           <div className="flex-1" />
 
           <span className="text-xs text-muted-foreground truncate max-w-[220px] hidden md:block font-mono">
@@ -891,7 +975,16 @@ export function RepoExplorer({
 
       {/* ── Clone progress ─────────────────────────────────────────────────── */}
       {cloneMessages.length > 0 && (
-        <div className="shrink-0 border-b px-4 py-1.5 bg-muted/40 max-h-24 overflow-y-auto">
+        <div className="shrink-0 border-b px-4 py-1.5 bg-muted/40 max-h-24 overflow-y-auto relative">
+          {cloneStatus !== "cloning" && (
+            <button
+              onClick={() => setCloneMessages([])}
+              className="absolute top-1.5 right-2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear"
+            >
+              <IconX className="size-3.5" />
+            </button>
+          )}
           {cloneMessages.map((msg, i) => (
             <p
               key={i}
@@ -980,185 +1073,221 @@ export function RepoExplorer({
         </div>
       )}
 
-      {/* ── File explorer ───────────────────────────────────────────────────── */}
+      {/* ── File explorer / Changes ─────────────────────────────────────────── */}
       {hasClone && (
-        <div className="flex-1 min-h-0 flex overflow-hidden">
-          {treeLoading ? (
-            <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground">
-              <Spinner className="size-5" />
-              <span className="text-sm">Loading file tree…</span>
-            </div>
-          ) : (
-            <>
-              {/* ── Tree panel ── */}
-              <div
-                className="shrink-0 flex flex-col overflow-hidden border-r"
-                style={{ width: treeWidth }}
-              >
-                <FileTreePanel
-                  onCollapseAll={handleCollapseAll}
-                  onExpandAll={handleExpandAll}
-                  isSearchActive={searchActive}
-                  onSearchToggle={() => setSearchActive((v) => !v)}
-                  searchContent={
-                    <SearchPanel
-                      onSearch={handleSearch}
-                      onResultClick={handleSearchResultClick}
-                    />
-                  }
-                  openEditors={
-                    <OpenEditorsPanel
-                      openPaths={Array.from(openTabs.keys())}
-                      activePath={activeTab}
-                      onSelect={setActiveTab}
-                      onClose={handleCloseTab}
-                      onCloseAll={handleCloseAllTabs}
-                    />
-                  }
-                  header={
-                    <div className="shrink-0 flex items-center gap-1 px-2 py-1 border-b select-none">
-                      <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground rotate-90" />
-                      <span className="text-xs font-semibold text-foreground uppercase tracking-wider truncate">
-                        {repoName}
-                      </span>
-                    </div>
-                  }
-                >
-                  <div className="py-0.5">
-                    {rootEntries.map((entry) => (
-                      <TreeNode
-                        key={entry.path}
-                        entry={entry}
-                        depth={0}
-                        selectedFile={activeTab}
-                        expandedDirs={expandedDirs}
-                        dirContents={dirContents}
-                        loadingDirs={loadingDirs}
-                        dirErrors={dirErrors}
-                        onFileClick={handleFileClick}
-                        onDirToggle={handleDirToggle}
-                      />
-                    ))}
-                  </div>
-                </FileTreePanel>
-              </div>
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {/* ── View toggle ── */}
+          <div className="shrink-0 border-b flex items-center bg-muted/10">
+            <button
+              onClick={() => setView("explorer")}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                view === "explorer"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <IconFile className="size-3.5" />
+              Explorer
+            </button>
+            <button
+              onClick={() => setView("changes")}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                view === "changes"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <IconGitCommit className="size-3.5" />
+              Changes
+            </button>
+          </div>
 
-              {/* Resize handle */}
-              <div
-                className="w-1 shrink-0 bg-border hover:bg-primary/40 cursor-col-resize transition-colors"
-                onMouseDown={handleDragStart}
-              />
-
-              {/* ── Editor panel ── */}
-              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-                {openTabs.size > 0 ? (
-                  <>
-                    {/* Tab bar */}
-                    <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
-                      {Array.from(openTabs.entries()).map(([path, tab]) => {
-                        const fileName = path.split("/").pop() ?? "";
-                        const isActive = path === activeTab;
-                        return (
-                          <div
-                            key={path}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setActiveTab(path)}
-                            onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
-                            className={cn(
-                              "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
-                              isActive
-                                ? "border-t-2 border-t-primary bg-background text-foreground"
-                                : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
-                            )}
-                          >
-                            <FileIcon name={fileName} className="size-3.5 shrink-0" />
-                            <span className="font-mono">{fileName}</span>
-                            {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
-                              title="Close"
-                              className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                            >
-                              <IconX className="size-3" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                      <button
-                        onClick={handleCloseAllTabs}
-                        title="Close All Editors"
-                        className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
-                      >
-                        <IconX className="size-3" />
-                        Close All
-                      </button>
-                    </div>
-
-                    {activeTab && activeTabState && (
-                      <>
-                        {/* Breadcrumb path */}
-                        <div className="shrink-0 px-3 py-0.5 border-b bg-muted/10">
-                          <span className="text-[11px] text-muted-foreground font-mono truncate">
-                            {activeTab}
+          {/* ── Explorer view ── */}
+          {view === "explorer" && (
+            <div className="flex-1 min-h-0 flex overflow-hidden">
+              {treeLoading ? (
+                <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground">
+                  <Spinner className="size-5" />
+                  <span className="text-sm">Loading file tree…</span>
+                </div>
+              ) : (
+                <>
+                  {/* ── Tree panel ── */}
+                  <div
+                    className="shrink-0 flex flex-col overflow-hidden border-r"
+                    style={{ width: treeWidth }}
+                  >
+                    <FileTreePanel
+                      onCollapseAll={handleCollapseAll}
+                      onExpandAll={handleExpandAll}
+                      isSearchActive={searchActive}
+                      onSearchToggle={() => setSearchActive((v) => !v)}
+                      searchContent={
+                        <SearchPanel
+                          onSearch={handleSearch}
+                          onResultClick={handleSearchResultClick}
+                        />
+                      }
+                      openEditors={
+                        <OpenEditorsPanel
+                          openPaths={Array.from(openTabs.keys())}
+                          activePath={activeTab}
+                          onSelect={setActiveTab}
+                          onClose={handleCloseTab}
+                          onCloseAll={handleCloseAllTabs}
+                        />
+                      }
+                      header={
+                        <div className="shrink-0 flex items-center gap-1 px-2 py-1 border-b select-none">
+                          <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground rotate-90" />
+                          <span className="text-xs font-semibold text-foreground uppercase tracking-wider truncate">
+                            {repoName}
                           </span>
                         </div>
-
-                        {/* Content */}
-                        <div className="flex-1 min-h-0">
-                          {activeTabState.loading ? (
-                            <div className="flex items-center justify-center h-full">
-                              <Spinner className="size-5" />
-                            </div>
-                          ) : activeTabState.error ? (
-                            <div className="p-4">
-                              <p className="text-xs text-destructive">{activeTabState.error}</p>
-                            </div>
-                          ) : (
-                            <MonacoEditor
-                              key={activeTab}
-                              height="100%"
-                              language={getLanguage(activeTab)}
-                              value={activeTabState.content ?? ""}
-                              theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-                              options={{
-                                readOnly: true,
-                                minimap: { enabled: true },
-                                scrollBeyondLastLine: false,
-                                wordWrap: "on",
-                                fontSize: 13,
-                                lineNumbers: "on",
-                                folding: true,
-                                renderLineHighlight: "line",
-                                automaticLayout: true,
-                              }}
-                              onMount={(ed) => {
-                                editorRef.current = ed;
-                                const jump = pendingJumpRef.current;
-                                if (jump) {
-                                  pendingJumpRef.current = null;
-                                  setTimeout(() => {
-                                    ed.revealLineInCenter(jump.line);
-                                    ed.setPosition({ lineNumber: jump.line, column: jump.col });
-                                    ed.focus();
-                                  }, 50);
-                                }
-                              }}
-                            />
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-                    <IconFile className="size-8 opacity-20" />
-                    <p className="text-xs">Select a file to view its content</p>
+                      }
+                    >
+                      <div className="py-0.5">
+                        {rootEntries.map((entry) => (
+                          <TreeNode
+                            key={entry.path}
+                            entry={entry}
+                            depth={0}
+                            selectedFile={activeTab}
+                            expandedDirs={expandedDirs}
+                            dirContents={dirContents}
+                            loadingDirs={loadingDirs}
+                            dirErrors={dirErrors}
+                            onFileClick={handleFileClick}
+                            onDirToggle={handleDirToggle}
+                          />
+                        ))}
+                      </div>
+                    </FileTreePanel>
                   </div>
-                )}
-              </div>
-            </>
+
+                  {/* Resize handle */}
+                  <div
+                    className="w-1 shrink-0 bg-border hover:bg-primary/40 cursor-col-resize transition-colors"
+                    onMouseDown={handleDragStart}
+                  />
+
+                  {/* ── Editor panel ── */}
+                  <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                    {openTabs.size > 0 ? (
+                      <>
+                        {/* Tab bar */}
+                        <div className="shrink-0 flex flex-wrap items-stretch border-b bg-muted/20">
+                          {Array.from(openTabs.entries()).map(([path, tab]) => {
+                            const fileName = path.split("/").pop() ?? "";
+                            const isActive = path === activeTab;
+                            return (
+                              <div
+                                key={path}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setActiveTab(path)}
+                                onKeyDown={(e) => e.key === "Enter" && setActiveTab(path)}
+                                className={cn(
+                                  "flex items-center gap-1.5 px-3 py-1 border-r text-xs whitespace-nowrap cursor-pointer select-none",
+                                  isActive
+                                    ? "border-t-2 border-t-primary bg-background text-foreground"
+                                    : "border-t-2 border-t-transparent bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+                                )}
+                              >
+                                <FileIcon name={fileName} className="size-3.5 shrink-0" />
+                                <span className="font-mono">{fileName}</span>
+                                {tab.loading && <Spinner className="size-3 shrink-0 ml-0.5" />}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleCloseTab(path); }}
+                                  title="Close"
+                                  className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                                >
+                                  <IconX className="size-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          <button
+                            onClick={handleCloseAllTabs}
+                            title="Close All Editors"
+                            className="ml-auto shrink-0 px-3 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border-l bg-muted/20 transition-colors whitespace-nowrap"
+                          >
+                            <IconX className="size-3" />
+                            Close All
+                          </button>
+                        </div>
+
+                        {activeTab && activeTabState && (
+                          <>
+                            {/* Breadcrumb path */}
+                            <div className="shrink-0 px-3 py-0.5 border-b bg-muted/10">
+                              <span className="text-[11px] text-muted-foreground font-mono truncate">
+                                {activeTab}
+                              </span>
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-h-0">
+                              {activeTabState.loading ? (
+                                <div className="flex items-center justify-center h-full">
+                                  <Spinner className="size-5" />
+                                </div>
+                              ) : activeTabState.error ? (
+                                <div className="p-4">
+                                  <p className="text-xs text-destructive">{activeTabState.error}</p>
+                                </div>
+                              ) : (
+                                <MonacoEditor
+                                  key={activeTab}
+                                  height="100%"
+                                  language={getLanguage(activeTab)}
+                                  value={activeTabState.content ?? ""}
+                                  theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+                                  options={{
+                                    readOnly: true,
+                                    minimap: { enabled: true },
+                                    scrollBeyondLastLine: false,
+                                    wordWrap: "on",
+                                    fontSize: 13,
+                                    lineNumbers: "on",
+                                    folding: true,
+                                    renderLineHighlight: "line",
+                                    automaticLayout: true,
+                                  }}
+                                  onMount={(ed) => {
+                                    editorRef.current = ed;
+                                    const jump = pendingJumpRef.current;
+                                    if (jump) {
+                                      pendingJumpRef.current = null;
+                                      setTimeout(() => {
+                                        ed.revealLineInCenter(jump.line);
+                                        ed.setPosition({ lineNumber: jump.line, column: jump.col });
+                                        ed.focus();
+                                      }, 50);
+                                    }
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+                        <IconFile className="size-8 opacity-20" />
+                        <p className="text-xs">Select a file to view its content</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           )}
+
+          {/* ── Changes view ── */}
+          {view === "changes" && <ChangesPanel refreshTrigger={changesPanelRefresh} />}
         </div>
       )}
 

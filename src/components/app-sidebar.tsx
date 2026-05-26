@@ -10,7 +10,6 @@ import {
   IconSun,
   IconMoon,
   IconBoxMultiple,
-  IconCloudUpload,
 } from "@tabler/icons-react"
 import { useTheme } from "@/components/providers"
 
@@ -32,8 +31,7 @@ const navItems = [
   { title: "Home", href: "/", icon: IconHome },
   { title: "Repository", href: "/repo", icon: IconGitBranch },
   { title: "TWX Entities", href: "/twx-entities", icon: IconBoxMultiple },
-  { title: "Deployment Export", href: "/deployment-export", icon: IconCloudUpload },
-  { title: "Compare", href: "/compare", icon: IconGitCompare },
+{ title: "Compare", href: "/compare", icon: IconGitCompare },
   { title: "Settings", href: "/settings", icon: IconSettings },
 ]
 
