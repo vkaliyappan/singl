@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const relativePath = searchParams.get('path') ?? '';
 
-  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'repos');
+  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/repo');
   const targetPath = relativePath
     ? path.resolve(reposDir, relativePath)
     : reposDir;

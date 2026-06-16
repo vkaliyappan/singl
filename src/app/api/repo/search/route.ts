@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results: [] });
   }
 
-  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "repos");
+  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "dist/repo");
   const searchRoot = path.resolve(reposDir, root);
 
   if (!searchRoot.startsWith(reposDir) || !fs.existsSync(searchRoot)) {

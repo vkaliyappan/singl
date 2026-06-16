@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     }
 
     const cwd = process.cwd();
-    const reposBase = path.resolve(/*turbopackIgnore: true*/ cwd, "repos");
+    const reposBase = path.resolve(/*turbopackIgnore: true*/ cwd, "dist/repo");
     const repoPath = path.resolve(reposBase, repo.repoSlug);
     const fullPath = path.resolve(repoPath, file);
 
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     if (!fs.existsSync(path.join(repoPath, ".git"))) {
       return NextResponse.json(
-        { error: `Repository not found at repos/${repo.repoSlug}. Try cloning again.` },
+        { error: `Repository not found at dist/repo/${repo.repoSlug}. Try cloning again.` },
         { status: 400 }
       );
     }

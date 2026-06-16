@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const relativePath = searchParams.get('path') ?? '';
 
-  const baseDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'twx-entities');
+  const baseDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/twx-entities');
   const targetPath = relativePath
     ? path.resolve(baseDir, relativePath)
     : baseDir;

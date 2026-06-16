@@ -5,6 +5,8 @@ export const appSettings = sqliteTable("app_settings", {
   azurePatToken: text().notNull().default(""),
   twxRootPrefix: text().notNull().default("WindchillClients/Thingworx"),
   repoRootSubpath: text().notNull().default(""),
+  bundleSrcDir: text().notNull().default("./WindchillClients/Thingworx"),
+  bundleDestDir: text().notNull().default("./dist/bundles"),
   updatedAt: int({ mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
 });
 

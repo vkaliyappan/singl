@@ -545,7 +545,7 @@ export function ComparePathsForm({ twxRootPrefix, repoRootSubpath }: ComparePath
           className="font-mono text-xs"
         />
         <p className="text-[11px] text-muted-foreground">
-          Path under <code className="font-mono">twx-entities/&#123;env&#125;/</code> used as the TWX root.
+          Path under <code className="font-mono">dist/twx-entities/&#123;env&#125;/</code> used as the TWX root.
           Files are compared by relative path from this point.
           e.g. <code className="font-mono">WindchillClients/Thingworx</code>
         </p>

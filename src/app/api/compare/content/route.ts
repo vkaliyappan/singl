@@ -43,8 +43,8 @@ async function handleRequest(env: string, relPath: string) {
   const safeEnv = env.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
   const cwd = process.cwd();
-  const leftRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "repos", repo.repoSlug, repoRootSubpath);
-  const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "twx-entities", safeEnv, twxRootPrefix);
+  const leftRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "dist/repo", repo.repoSlug, repoRootSubpath);
+  const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "dist/twx-entities", safeEnv, twxRootPrefix);
 
   const leftFile = path.resolve(leftRoot, relPath);
   const rightFile = path.resolve(rightRoot, relPath);

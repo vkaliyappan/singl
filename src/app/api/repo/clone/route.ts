@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
       const authenticatedUrl = injectPat(repoUrl, pat);
       const slug = repoUrl.replace(/\.git$/, '').split('/').pop() ?? 'repo';
-      const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'repos');
+      const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/repo');
       const clonePath = path.resolve(reposDir, slug);
 
       if (!fs.existsSync(reposDir)) {

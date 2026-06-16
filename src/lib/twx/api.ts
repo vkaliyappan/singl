@@ -22,6 +22,7 @@ const TYPE_TO_COLLECTION: Record<string, string> = {
   Thing: 'Things',
   ThingShape: 'ThingShapes',
   ThingTemplate: 'ThingTemplates',
+  Transformer: 'Transformers',
 };
 
 function collectionName(entityType: string): string {

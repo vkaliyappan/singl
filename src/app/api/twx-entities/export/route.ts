@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       }
 
       const safeEnv = envName.replace(/[^a-zA-Z0-9_\-]/g, '_');
-      const baseDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'twx-entities');
+      const baseDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/twx-entities');
       const outputDir = path.resolve(baseDir, safeEnv);
 
       const [envRows, dbProjects] = await Promise.all([

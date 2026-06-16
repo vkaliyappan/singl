@@ -13,7 +13,7 @@ export async function POST() {
     }
 
     const cwd = process.cwd();
-    const reposBase = path.resolve(/*turbopackIgnore: true*/ cwd, "repos");
+    const reposBase = path.resolve(/*turbopackIgnore: true*/ cwd, "dist/repo");
     const repoPath = path.resolve(reposBase, repo.repoSlug);
 
     if (!repoPath.startsWith(reposBase)) {

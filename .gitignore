@@ -63,4 +63,6 @@ local.db
 /repo/
 /twx-entities/
 
+/dist/
+
 .mcp.json

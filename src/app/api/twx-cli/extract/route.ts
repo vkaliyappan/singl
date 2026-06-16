@@ -24,13 +24,13 @@ export async function POST(request: Request) {
 
       if (envName?.trim()) {
         const safeEnv = envName.replace(/[^a-zA-Z0-9_\-]/g, '_');
-        dir = path.resolve(cwd, 'twx-entities', safeEnv, 'WindchillClients', 'Thingworx');
-        label = `twx-entities/${safeEnv}`;
+        dir = path.resolve(cwd, 'dist/twx-entities', safeEnv, 'WindchillClients', 'Thingworx');
+        label = `dist/twx-entities/${safeEnv}`;
       } else if (repoSlug?.trim()) {
-        label = `repos/${repoSlug}`;
+        label = `dist/repo/${repoSlug}`;
         // Try ThingWorx directly at repo root first, then under WindchillClients/
-        const candidate1 = path.resolve(cwd, 'repos', repoSlug, 'ThingWorx');
-        const candidate2 = path.resolve(cwd, 'repos', repoSlug, 'WindchillClients', 'ThingWorx');
+        const candidate1 = path.resolve(cwd, 'dist/repo', repoSlug, 'ThingWorx');
+        const candidate2 = path.resolve(cwd, 'dist/repo', repoSlug, 'WindchillClients', 'ThingWorx');
         const exists = async (p: string) => fs.access(p).then(() => true).catch(() => false);
         dir = (await exists(candidate1)) ? candidate1 : candidate2;
       } else {

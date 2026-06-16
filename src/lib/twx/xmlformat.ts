@@ -5,7 +5,7 @@ const ENTITIES_STRIP_ATTRS = new Set([
 ]);
 
 export function formatEntityXml(rawXml: string): string {
-  let xml = rawXml.replace(/<\?xml[^?]*\?>\s*/, '');
+  let xml = rawXml.replace(/^﻿/, '').replace(/<\?xml[^?]*\?>\s*/, '');
   xml = prettyPrint(xml);
 
   xml = xml.replace(/<Entities([^>]*)>/, (_match, attrs: string) => {

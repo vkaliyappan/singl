@@ -5,6 +5,7 @@ import { readManifest } from './src/lib/twx/manifest';
 import { runExport } from './src/lib/twx/exporter';
 import { runDeploymentExport } from './src/lib/twx/deployment-exporter';
 import { runDeploymentExtract } from './src/lib/twx/deployment-extractor';
+import { runBundle } from './src/lib/twx/bundler';
 import type { ParsedFlags } from './src/lib/twx/types';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -59,6 +60,15 @@ function showHelp(): void {
   console.log('  --input <dir>       Directory containing project folders (e.g. ./export/20260421-143000)');
   console.log('  --output <dir>      WindchillClients root       (default: ./WindchillClients/ThingWorx)');
   console.log('  --project <name>    Extract only this project   (default: all)');
+  console.log('  --dry-run           Preview without writing files');
+  console.log('');
+  console.log('Options (bundle):');
+  console.log('  --manifest <path>   Path to manifest.twx.json  (default: ./manifest.twx.json)');
+  console.log('  --src <dir>         Source directory containing project alias folders');
+  console.log('                      (default: ./WindchillClients/Thingworx)');
+  console.log('  --dest <dir>        Destination directory for bundled output');
+  console.log('                      (default: ./dist/bundles)');
+  console.log('  --project <name>    Bundle only this project    (default: all)');
   console.log('  --dry-run           Preview without writing files');
   console.log('');
   console.log('  --help              Show this help');
@@ -167,6 +177,42 @@ async function main(): Promise<void> {
     console.log(`  zipFilesProcessed: ${result.zipFilesProcessed}`);
     console.log(`  entitiesExtracted: ${result.entitiesExtracted}`);
     console.log(`  entitiesSkipped:   ${result.entitiesSkipped}`);
+    if (result.errors.length) {
+      console.error(`  errors: ${result.errors.length}`);
+      result.errors.forEach(e => console.error('   -', e));
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cmd === 'bundle') {
+    const srcDir = path.resolve(process.cwd(), (flags.src as string | undefined) ?? './WindchillClients/Thingworx');
+    const destDir = path.resolve(process.cwd(), (flags.dest as string | undefined) ?? './dist/bundles');
+    const envFilter = (flags.env as string | undefined) ?? null;
+
+    const { db } = await import('./src/db/index.js');
+    const { twxProjects } = await import('./src/db/schema.js');
+    const { eq } = await import('drizzle-orm');
+
+    const rows = envFilter
+      ? await db.select().from(twxProjects).where(eq(twxProjects.environment, envFilter))
+      : await db.select().from(twxProjects);
+
+    // Deduplicate by alias — same alias across envs is the same project folder
+    const seen = new Set<string>();
+    const projects = rows
+      .map(r => ({ alias: r.alias || r.projectName, projectName: r.projectName }))
+      .filter(p => { if (seen.has(p.alias)) return false; seen.add(p.alias); return true; });
+
+    if (projects.length === 0) {
+      console.error('No projects found in database. Configure projects in Settings first.');
+      process.exit(1);
+    }
+
+    const result = await runBundle({ projects, srcDir, destDir, projectFilter, dryRun, onProgress: console.log });
+    console.log('\nBundle summary:');
+    console.log(`  projectsProcessed: ${result.projectsProcessed}`);
+    console.log(`  zipsCreated:       ${result.zipsCreated}`);
     if (result.errors.length) {
       console.error(`  errors: ${result.errors.length}`);
       result.errors.forEach(e => console.error('   -', e));

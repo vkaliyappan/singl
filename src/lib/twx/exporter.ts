@@ -11,9 +11,13 @@ const TYPE_TO_PLURAL: Record<string, string> = {
   MediaEntity: 'MediaEntities',
   Organization: 'Organizations',
   Project: 'Projects',
+  StateDefinition: 'StateDefinitions',
+  StyleDefinition: 'StyleDefinitions',
   StyleTheme: 'StyleThemes',
   Thing: 'Things',
-  StateDefinition: 'StateDefinitions',
+  ThingShape: 'ThingShapes',
+  ThingTemplate: 'ThingTemplates',
+  Transformer: 'Transformers',
 };
 
 function pluralType(entityType: string): string {

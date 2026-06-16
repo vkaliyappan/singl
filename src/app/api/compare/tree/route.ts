@@ -29,11 +29,11 @@ export async function GET(request: NextRequest) {
     const safeEnv = env.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
     const cwd = process.cwd();
-    const leftRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "repos", repo.repoSlug, repoRootSubpath);
-    const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "twx-entities", safeEnv, twxRootPrefix);
+    const leftRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "dist/repo", repo.repoSlug, repoRootSubpath);
+    const rightRoot = path.resolve(/*turbopackIgnore: true*/ cwd, "dist/twx-entities", safeEnv, twxRootPrefix);
 
-    const reposBase = path.resolve(cwd, "repos");
-    const twxBase = path.resolve(cwd, "twx-entities");
+    const reposBase = path.resolve(cwd, "dist/repo");
+    const twxBase = path.resolve(cwd, "dist/twx-entities");
 
     if (!leftRoot.startsWith(reposBase)) {
       return NextResponse.json({ error: "Invalid repo subpath" }, { status: 400 });

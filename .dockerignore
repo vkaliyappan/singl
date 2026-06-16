@@ -16,3 +16,4 @@ plans/
 .idea/
 WindchillClients/
 windchill_ccd_build/
+dist/*

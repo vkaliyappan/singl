@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'path is required' }, { status: 400 });
   }
 
-  const baseDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'twx-entities');
+  const baseDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/twx-entities');
   const targetPath = path.resolve(baseDir, relativePath);
 
   if (!targetPath.startsWith(baseDir)) {

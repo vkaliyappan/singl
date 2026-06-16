@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const [settings] = await db.select().from(appSettings).limit(1).catch(() => []);
   const pat = settings?.azurePatToken ?? '';
 
-  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'repos');
+  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/repo');
   const clonePath = path.resolve(reposDir, slug);
 
   const stream = new TransformStream<Uint8Array, Uint8Array>();

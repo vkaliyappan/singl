@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
 
   if (!root || !q?.trim()) return NextResponse.json({ results: [] });
 
-  const base = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "twx-entities");
+  const base = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "dist/twx-entities");
   const searchRoot = path.resolve(base, root);
 
   if (!searchRoot.startsWith(base) || !fs.existsSync(searchRoot)) {

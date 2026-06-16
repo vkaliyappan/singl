@@ -123,6 +123,28 @@ export async function deleteProjectConfig(
   }
 }
 
+export async function saveBundleSettings(
+  _prevState: SettingsActionState,
+  formData: FormData
+): Promise<SettingsActionState> {
+  const bundleSrcDir = ((formData.get("bundleSrcDir") as string) ?? "").trim();
+  const bundleDestDir = ((formData.get("bundleDestDir") as string) ?? "").trim();
+
+  try {
+    const existing = await db.select({ id: appSettings.id }).from(appSettings).limit(1);
+    if (existing.length > 0) {
+      await db.update(appSettings).set({ bundleSrcDir, bundleDestDir, updatedAt: new Date() });
+    } else {
+      await db.insert(appSettings).values({ id: 1, azurePatToken: "", bundleSrcDir, bundleDestDir });
+    }
+    revalidatePath("/settings");
+    return { success: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: msg };
+  }
+}
+
 export async function saveComparePaths(
   _prevState: SettingsActionState,
   formData: FormData

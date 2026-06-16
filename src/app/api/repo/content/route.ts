@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'path is required' }, { status: 400 });
   }
 
-  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'repos');
+  const reposDir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), 'dist/repo');
   const targetPath = path.resolve(reposDir, relativePath);
 
   if (!targetPath.startsWith(reposDir)) {
