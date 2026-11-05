@@ -1,0 +1,441 @@
+/* Palettes: .light / .dark are toggled on the card from the theme's mode */
+.light {
+  --fg: #1d1d1f;
+  --sub: #6e6e73;
+  --vibe: #3a3a3c;
+  --row: rgba(255, 255, 255, 0.62);
+  --row-border: rgba(255, 255, 255, 0.9);
+  --card-border: rgba(255, 255, 255, 0.95);
+  --track: rgba(0, 0, 0, 0.07);
+  --day-bg: #fff1d6;
+  --day-fg: #d98a00;
+  --night-bg: #e6e8ff;
+  --night-fg: #5b5fc7;
+  --ctrl: rgba(0, 0, 0, 0.06);
+  --ctrl-on: #ffffff;
+  --hover: rgba(128, 128, 128, 0.16);
+  --primary: #1d1d1f;
+  --primary-fg: #ffffff;
+}
+
+.dark {
+  --fg: #f5f5f7;
+  --sub: #a1a1a6;
+  --vibe: #d1d1d6;
+  --row: rgba(255, 255, 255, 0.06);
+  --row-border: rgba(255, 255, 255, 0.08);
+  --card-border: rgba(255, 255, 255, 0.1);
+  --track: rgba(255, 255, 255, 0.1);
+  --day-bg: #4a3b1e;
+  --day-fg: #fbc54a;
+  --night-bg: #2e3160;
+  --night-fg: #a5b4fc;
+  --ctrl: rgba(255, 255, 255, 0.08);
+  --ctrl-on: rgba(255, 255, 255, 0.2);
+  --hover: rgba(255, 255, 255, 0.1);
+  --primary: #f5f5f7;
+  --primary-fg: #1d1d1f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+/* Shell is measured to size the native window; padding leaves room for the shadow */
+#shell {
+  display: inline-block;
+  padding: 16px 20px 28px;
+}
+
+.card {
+  width: 316px;
+  padding: 10px 12px 12px;
+  border-radius: 24px;
+  border: 1px solid var(--card-border);
+  color: var(--fg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: background 0.35s ease, color 0.35s ease;
+  cursor: default;
+}
+
+.ico {
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  font-style: normal;
+}
+
+/* Header */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 4px 4px;
+}
+
+.globe {
+  font-size: 13px;
+  opacity: 0.7;
+  margin-right: 8px;
+}
+
+.title {
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.icon-btn {
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  font-size: 11px;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--fg);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.icon-btn:hover,
+.icon-btn.on {
+  opacity: 1;
+  background: var(--hover);
+}
+
+/* City rows */
+.city {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  column-gap: 12px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 10px 14px 10px 12px;
+  border-radius: 16px;
+  background: var(--row);
+  border: 1px solid var(--row-border);
+  transition: transform 0.2s ease;
+}
+
+.city:hover {
+  transform: translateY(-1px);
+}
+
+.badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  transition: background 0.4s, color 0.4s;
+}
+
+.badge.day {
+  background: var(--day-bg);
+  color: var(--day-fg);
+}
+
+.badge.night {
+  background: var(--night-bg);
+  color: var(--night-fg);
+}
+
+.name {
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vibe {
+  font-size: 11.5px;
+  color: var(--vibe);
+}
+
+.meta {
+  font-size: 10.5px;
+  color: var(--sub);
+  white-space: nowrap;
+}
+
+.time {
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 30px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.ampm {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sub);
+  margin-left: 3px;
+}
+
+.track {
+  grid-column: 2 / 4;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+.no-details .meta,
+.no-details .track {
+  display: none;
+}
+
+/* Settings */
+.settings {
+  padding: 2px 2px 0;
+}
+
+.group {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--row);
+  border: 1px solid var(--row-border);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--sub);
+  margin-bottom: 6px;
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  gap: 10px;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px 4px;
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-size: 9.5px;
+  color: var(--sub);
+}
+
+.swatch i {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  transition: transform 0.15s;
+}
+
+.swatch:hover i {
+  transform: scale(1.08);
+}
+
+.swatch.active {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.swatch.active i {
+  box-shadow: 0 0 0 2px var(--fg);
+}
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--ctrl);
+}
+
+.seg button {
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.seg button.on {
+  background: var(--ctrl-on);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+
+/* iOS-style switch */
+.switch {
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--ctrl);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex: none;
+  margin: 0;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: left 0.2s;
+}
+
+.switch:checked {
+  background: #34c759;
+}
+
+.switch:checked::after {
+  left: 16px;
+}
+
+input[type="range"] {
+  width: 140px;
+  accent-color: var(--fg);
+}
+
+.city-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--track);
+}
+
+.city-item:last-child {
+  border-bottom: 0;
+}
+
+.city-item .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.city-item .zone {
+  font-size: 10.5px;
+  color: var(--sub);
+}
+
+.add {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-row {
+  display: flex;
+  gap: 6px;
+}
+
+.add input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg);
+  background: var(--ctrl);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 6px 9px;
+  outline: none;
+  user-select: text;
+}
+
+.add input:focus {
+  border-color: var(--sub);
+}
+
+.hint {
+  font-size: 10.5px;
+  color: #e5484d;
+  min-height: 0;
+}
+
+.hint:empty {
+  display: none;
+}
+
+.primary,
+.ghost {
+  font: inherit;
+  font-weight: 600;
+  border: 0;
+  border-radius: 9px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--sub);
+}
+
+.ghost:hover {
+  color: var(--fg);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+[hidden] {
+  display: none !important;
+}

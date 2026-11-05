@@ -1,0 +1,34 @@
+﻿{
+    "Left":  1006,
+    "Top":  181,
+    "Topmost":  false,
+    "Clocks":  [
+                   {
+                       "Label":  "Chennai",
+                       "Zone":  "India Standard Time"
+                   },
+                   {
+                       "Label":  "London",
+                       "Zone":  "GMT Standard Time"
+                   },
+                   {
+                       "Label":  "New York",
+                       "Zone":  "Eastern Standard Time"
+                   },
+                   {
+                       "Label":  "San Jose",
+                       "Zone":  "Pacific Standard Time"
+                   },
+                   {
+                       "Label":  "Tokyo",
+                       "Zone":  "Tokyo Standard Time"
+                   }
+               ],
+    "Use24h":  false,
+    "ShowSeconds":  true,
+    "ShowDetails":  true,
+    "Scale":  1,
+    "Opacity":  1,
+    "Theme":  "Mist",
+    "Locked":  false
+}
