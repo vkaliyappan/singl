@@ -173,3 +173,26 @@ mod tests {
     assert!(!get(&pool).await.unwrap().has_azure_pat_token);
   }
 }
+
+/// Agent providers switched off on the Settings page (`["codex", …]`). A
+/// missing or unreadable value means none.
+pub async fn disabled_agents(pool: &SqlitePool) -> Result<Vec<String>> {
+  let raw: Option<String> =
+    sqlx::query_scalar("SELECT disabledAgents FROM app_settings WHERE id = 1").fetch_optional(pool).await?;
+  let list: Vec<String> = raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
+  Ok(list.into_iter().filter(|p| crate::agents::PROVIDER_IDS.contains(&p.as_str())).collect())
+}
+
+pub async fn set_disabled_agents(pool: &SqlitePool, providers: &[String]) -> Result<()> {
+  let clean: Vec<&String> =
+    providers.iter().filter(|p| crate::agents::PROVIDER_IDS.contains(&p.as_str())).collect();
+  sqlx::query(
+    "INSERT INTO app_settings (id, disabledAgents, updatedAt) VALUES (1, ?1, ?2)
+     ON CONFLICT(id) DO UPDATE SET disabledAgents = excluded.disabledAgents, updatedAt = excluded.updatedAt",
+  )
+  .bind(serde_json::to_string(&clean).unwrap_or_else(|_| "[]".into()))
+  .bind(now())
+  .execute(pool)
+  .await?;
+  Ok(())
+}

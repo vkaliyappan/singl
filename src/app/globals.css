@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* Only src/ holds class names. Without a base, Tailwind scans the whole
+   project, src-tauri/target included, and reads Cargo's gigabyte-sized build
+   output (app_lib.lib) until the dev server runs out of memory. */
+@import "tailwindcss" source("../");
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 

@@ -13,6 +13,7 @@
  * Code-node sandbox, timers — comes in through {@link FlowHost}.
  */
 
+import { describeAgent } from "./agents";
 import { compareDatasets, mergeInputs } from "./datasets";
 import {
   ancestorsOf,
@@ -36,7 +37,7 @@ import {
 } from "./graph";
 import { evaluateTemplate } from "./expression";
 import { asInfotable, reshapeLike, toRows } from "./schema";
-import type { EdgePort, FlowGraph, NodeRunState, RunEvent } from "./types";
+import type { AgentProvider, EdgePort, FlowGraph, NodeRunState, RunEvent } from "./types";
 
 /** Deliberate abort, thrown by a Stop and Error node. Ends the whole run. */
 export class FlowStopError extends Error {
@@ -71,6 +72,19 @@ export type FlowHost = {
     timeoutMs?: number
   ): Promise<{ value: unknown; logs: string[] }>;
   sleep(ms: number): Promise<void>;
+  /** Runs an Agent node's CLI; see engine/agent.ts. */
+  runAgent(options: {
+    provider: AgentProvider;
+    prompt: string;
+    model?: string;
+    cwd?: string;
+    outputMode: "text" | "json";
+    autoApprove?: boolean;
+    extraArgs?: string;
+    timeoutMs?: number;
+    onLine?: (line: string) => void;
+    signal?: { readonly aborted: boolean };
+  }): Promise<{ value: unknown; command: string; cwd: string; logs: string[] }>;
 };
 
 export type RunFlowOptions = {
@@ -478,7 +492,39 @@ export async function runFlow(options: RunFlowOptions): Promise<RunFlowResult> {
         }
 
         case "agent": {
-          throw new Error("Agent nodes are not available in singl yet.");
+          const ctx = contextFor(node, scope());
+          const prompt = evaluateTemplate(node.prompt ?? "", ctx);
+          if (prompt.error) throw new Error(prompt.error);
+          const run = await host.runAgent({
+            provider: node.provider,
+            prompt: String(prompt.value ?? ""),
+            model: node.model,
+            cwd: node.cwd,
+            outputMode: node.outputMode === "json" ? "json" : "text",
+            autoApprove: node.autoApprove,
+            extraArgs: node.extraArgs,
+            timeoutMs: node.timeoutMs,
+            // Agents take minutes, so the canvas gets their output as it lands
+            // rather than all at once when the node finishes.
+            onLine: (line) => emit({ type: "node-log", id, line }),
+            signal,
+          });
+          results[id] = run.value;
+          states[id] = {
+            status: "ok",
+            result: run.value,
+            inputs: {
+              agent: describeAgent(node),
+              command: run.command,
+              cwd: run.cwd,
+              prompt: String(prompt.value ?? ""),
+            },
+            inputErrors,
+            logs: run.logs.length ? run.logs : undefined,
+            rows: rowCount(run.value),
+            ms: Date.now() - startedAt,
+          };
+          break;
         }
 
         case "code": {

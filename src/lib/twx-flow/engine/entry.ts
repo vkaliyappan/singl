@@ -14,11 +14,12 @@
 import { parseGraph } from "../graph";
 import { runFlow, type FlowHost } from "../execute";
 import type { FlowGraph, RunEvent } from "../types";
+import { runAgent, type AgentHost } from "./agent";
 import { runCode } from "./sandbox";
 
 type Envelope<T> = ({ ok: true } & T) | { ok: false; error: string };
 
-declare const __host: {
+declare const __host: AgentHost & {
   executeService(collection: string, entity: string, service: string, inputsJson: string): Promise<string>;
   loadFlow(id: string): Promise<string>;
   runSandbox(source: string, inputJson: string, budgetMs: number): Promise<string>;
@@ -52,6 +53,7 @@ const host: FlowHost = {
   },
   runCode: (code, ctx, timeoutMs) => runCode(code, ctx, timeoutMs, __host.runSandbox),
   sleep: (ms) => __host.sleep(ms),
+  runAgent: (options) => runAgent(__host, options),
 };
 
 const signal = {

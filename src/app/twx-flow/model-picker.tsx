@@ -1,29 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IconRefresh } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { cn } from "@/lib/utils";
+import { discoverAgentModels, type ModelDiscovery } from "@/lib/twx-flow/agent-models";
 import type { AgentModel } from "@/lib/twx-flow/agents";
 import type { AgentProvider } from "@/lib/twx-flow/types";
 
 const CUSTOM = "__custom__";
 
+type Listed = ModelDiscovery & { provider: AgentProvider };
+
 /**
- * singl-web asks the agent CLI for its models; singl cannot run agent CLIs yet,
- * so the picker offers only the CLI default and a custom entry.
+ * Asks the CLI which models it offers right now. The answer belongs to one
+ * provider; switching provider simply stops matching it.
  */
 function useAgentModels(provider: AgentProvider) {
-  void provider;
+  const [listed, setListed] = useState<Listed | null>(null);
+  const [loading, setLoading] = useState(false);
+  const latest = useRef(0);
+
+  const load = useCallback(async (which: AgentProvider) => {
+    const seq = ++latest.current;
+    setLoading(true);
+    let answer: ModelDiscovery;
+    try {
+      answer = await discoverAgentModels(which);
+    } catch (e) {
+      answer = { models: [], sources: [], problems: [e instanceof Error ? e.message : String(e)] };
+    }
+    if (seq !== latest.current) return;
+    setListed({ ...answer, provider: which });
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      await load(provider);
+    })();
+  }, [provider, load]);
+
+  const answer = listed?.provider === provider ? listed : null;
   return {
-    models: [] as AgentModel[],
-    sources: [] as string[],
-    problems: ["agent CLIs are not available in singl yet"],
-    loading: false,
-    refresh: () => {},
+    models: answer?.models ?? [],
+    sources: answer?.sources ?? [],
+    problems: answer?.problems ?? [],
+    loading: !answer || loading,
+    refresh: () => void load(provider),
   };
 }
 

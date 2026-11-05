@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyButton } from "./copy-button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Channel, invoke } from "@tauri-apps/api/core";
@@ -1249,6 +1250,7 @@ export function FlowEditor({
           <p className="min-w-0 flex-1 text-xs break-words whitespace-pre-wrap text-destructive">
             {runError}
           </p>
+          <CopyButton text={runError} className="text-destructive" />
           <Button
             size="xs"
             variant="ghost"

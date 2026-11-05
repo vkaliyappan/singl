@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyButton } from "./copy-button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
@@ -445,16 +446,19 @@ export function LogPanel({
                   ) : selectedState?.error ? (
                     // Skipped nodes carry a reason too — why a branch was not
                     // taken, or which circle of wiring left this one out.
-                    <pre
+                    <div
                       className={cn(
-                        "overflow-auto rounded-md border p-2 font-mono text-[10px] whitespace-pre-wrap",
+                        "relative rounded-md border",
                         selectedState.status === "error"
                           ? "border-destructive/40 bg-destructive/5 text-destructive"
                           : "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400"
                       )}
                     >
-                      {selectedState.error}
-                    </pre>
+                      <CopyButton text={selectedState.error} className="absolute top-1 right-1" />
+                      <pre className="overflow-auto p-2 pr-8 font-mono text-[10px] whitespace-pre-wrap">
+                        {selectedState.error}
+                      </pre>
+                    </div>
                   ) : selectedState?.result === undefined ? (
                     <p className="text-[11px] text-muted-foreground">
                       This node produced no output.

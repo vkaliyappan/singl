@@ -151,9 +151,6 @@ export type NodeCatalogEntry = {
   label?: string;
 };
 
-/** Off until singl can run agent CLIs (see src/lib/twx-flow/execute.ts). */
-export const AGENTS_AVAILABLE = false;
-
 /** One palette row per agent CLI, all of them `agent` nodes underneath. */
 const AGENT_ENTRIES: NodeCatalogEntry[] = AGENT_PROVIDERS.map((provider: AgentProvider) => ({
   key: `agent:${provider}`,
@@ -236,10 +233,7 @@ export const NODE_CATALOGUE: NodeCatalogEntry[] = [
     hint: "Wait before continue with execution",
     section: "Other",
   },
-  // Agent nodes need the agent CLI runtime, which singl does not have yet. They
-  // still load and render in flows made in singl-web; a run reports them as
-  // unavailable.
-  ...(AGENTS_AVAILABLE ? AGENT_ENTRIES : []),
+  ...AGENT_ENTRIES,
 ];
 
 export const CATALOGUE_SECTIONS = ["Popular", "Core", "AI", "Other"] as const;

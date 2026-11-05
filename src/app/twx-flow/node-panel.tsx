@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyButton } from "./copy-button";
 import { useEffect, useMemo, useState } from "react";
 import {
   IconAlertCircle,
@@ -670,7 +671,8 @@ export function NodePanel({
             {state?.status === "error" && (
               <p className="flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive">
                 <IconAlertCircle className="mt-0.5 size-3.5 shrink-0" />
-                <span className="break-words">{state.error}</span>
+                <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{state.error}</span>
+                <CopyButton text={state.error ?? ""} />
               </p>
             )}
 

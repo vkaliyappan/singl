@@ -13,7 +13,9 @@
 
 pub mod sandbox;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rquickjs::function::Async;
@@ -23,6 +25,7 @@ use sqlx::SqlitePool;
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
+use crate::agents::process::{ProcEvent, ProcRegistry, SpawnSpec};
 use crate::db::flows;
 use crate::jobs::until_cancelled;
 use crate::twx::api::Client;
@@ -36,6 +39,22 @@ const ENGINE_MEMORY_LIMIT: usize = 1024 * 1024 * 1024;
 
 pub type Emit = Arc<dyn Fn(String) + Send + Sync>;
 
+/// What Agent nodes need: where processes are kept, where they may run, and
+/// which providers the Settings page switched off.
+#[derive(Clone, Default)]
+pub struct AgentEnv {
+  pub registry: ProcRegistry,
+  pub root: PathBuf,
+  pub disabled: Vec<String>,
+}
+
+/// Events of one agent process waiting to be read by the runner.
+#[derive(Default)]
+struct Mailbox {
+  events: Vec<ProcEvent>,
+  notify: Arc<tokio::sync::Notify>,
+}
+
 /// Side effects the runner reaches through `__host`. Cheap to clone.
 #[derive(Clone)]
 struct Host {
@@ -46,6 +65,9 @@ struct Host {
   /// JS thread only ever waits on join handles.
   handle: Handle,
   emit: Emit,
+  agents: AgentEnv,
+  /// Per agent process started by this run, the events not read yet.
+  mailboxes: Arc<Mutex<HashMap<String, Mailbox>>>,
 }
 
 fn ok_or_error(result: std::result::Result<String, String>) -> String {
@@ -90,6 +112,86 @@ impl Host {
     }
   }
 
+  /// Resolves an Agent node's working directory and checks the provider may
+  /// run: `{ ok, cwd, root, mcpConfig }`.
+  fn agent_prepare(&self, provider: &str, cwd: &str) -> String {
+    let check = || -> Result<Value> {
+      if self.agents.disabled.iter().any(|p| p == provider) {
+        return Err(CoreError::Invalid("switched off".into()));
+      }
+      crate::agents::resolve_command(provider)?;
+      let dir = crate::agents::resolve_cwd(&self.agents.root, Some(cwd))?;
+      let mcp = crate::agents::project_mcp_config(&dir).map(|p| p.to_string_lossy().into_owned());
+      Ok(json!({ "ok": true, "cwd": dir.to_string_lossy(), "root": self.agents.root.to_string_lossy(), "mcpConfig": mcp }))
+    };
+    match check() {
+      Ok(v) => v.to_string(),
+      Err(e) if e.to_string() == "switched off" => json!({ "ok": false, "disabled": true, "error": "switched off" }).to_string(),
+      Err(e) => json!({ "ok": false, "error": e.to_string() }).to_string(),
+    }
+  }
+
+  /// Starts an agent CLI; `{ ok, id }`. It is killed if the run is stopped.
+  async fn agent_spawn(&self, spec_json: String, cwd: String) -> String {
+    let host = self.clone();
+    let work = async move {
+      let spec: SpawnSpec = serde_json::from_str(&spec_json).map_err(|e| e.to_string())?;
+      let dir = crate::agents::resolve_cwd(&host.agents.root, Some(&cwd)).map_err(|e| e.to_string())?;
+      let key = Arc::new(Mutex::new(String::new()));
+      let boxes = host.mailboxes.clone();
+      let sink_key = key.clone();
+      let sink = Arc::new(move |event: ProcEvent| {
+        let id = sink_key.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut boxes = boxes.lock().unwrap_or_else(|e| e.into_inner());
+        let mailbox = boxes.entry(id).or_default();
+        mailbox.events.push(event);
+        mailbox.notify.notify_one();
+      });
+      // Events can arrive before the id is known; they wait under "" until then.
+      let id = {
+        let mut boxes = host.mailboxes.lock().unwrap_or_else(|e| e.into_inner());
+        let id = host.agents.registry.spawn(spec, &dir, sink).map_err(|e| e.to_string())?;
+        *key.lock().unwrap_or_else(|e| e.into_inner()) = id.clone();
+        if let Some(early) = boxes.remove("") {
+          boxes.insert(id.clone(), early);
+        } else {
+          boxes.entry(id.clone()).or_default();
+        }
+        id
+      };
+      let (registry, token, proc_id) = (host.agents.registry.clone(), host.token.clone(), id.clone());
+      tokio::spawn(async move {
+        token.cancelled().await;
+        registry.kill(&proc_id);
+      });
+      Ok(json!({ "ok": true, "id": id }).to_string())
+    };
+    ok_or_error(self.handle.spawn(work).await.map_err(join_error).and_then(|r| r))
+  }
+
+  /// The next events of an agent process, waiting until there is at least one.
+  async fn agent_next(&self, id: String) -> String {
+    let boxes = self.mailboxes.clone();
+    let work = async move {
+      loop {
+        let notify = {
+          let mut guard = boxes.lock().unwrap_or_else(|e| e.into_inner());
+          let Some(mailbox) = guard.get_mut(&id) else { return "[]".to_string() };
+          if !mailbox.events.is_empty() {
+            let events = std::mem::take(&mut mailbox.events);
+            if events.iter().any(|e| matches!(e, ProcEvent::Exit { .. })) {
+              guard.remove(&id);
+            }
+            return serde_json::to_string(&events).unwrap_or_else(|_| "[]".into());
+          }
+          mailbox.notify.clone()
+        };
+        notify.notified().await;
+      }
+    };
+    self.handle.spawn(work).await.unwrap_or_else(|_| "[]".into())
+  }
+
   async fn sleep(&self, ms: f64) {
     let token = self.token.clone();
     let wait = Duration::from_millis(ms.max(0.0) as u64);
@@ -114,8 +216,17 @@ pub async fn run(
   request_json: String,
   token: CancellationToken,
   emit: Emit,
+  agents: AgentEnv,
 ) -> Result<()> {
-  let host = Host { pool, client, token, handle: Handle::current(), emit };
+  let host = Host {
+    pool,
+    client,
+    token,
+    handle: Handle::current(),
+    emit,
+    agents,
+    mailboxes: Arc::new(Mutex::new(HashMap::new())),
+  };
   let (tx, rx) = tokio::sync::oneshot::channel();
 
   // QuickJS values are not Send, so the context lives on a thread of its own
@@ -197,6 +308,39 @@ async fn run_in_js(host: Host, request_json: String) -> std::result::Result<(), 
           )?,
         )?;
 
+        let h = host.clone();
+        api.set(
+          "agentPrepare",
+          Function::new(ctx.clone(), move |provider: String, cwd: String| h.agent_prepare(&provider, &cwd))?,
+        )?;
+
+        let h = host.clone();
+        api.set(
+          "agentSpawn",
+          Function::new(
+            ctx.clone(),
+            Async(move |spec: String, cwd: String| {
+              let h = h.clone();
+              async move { h.agent_spawn(spec, cwd).await }
+            }),
+          )?,
+        )?;
+
+        let h = host.clone();
+        api.set(
+          "agentNext",
+          Function::new(
+            ctx.clone(),
+            Async(move |id: String| {
+              let h = h.clone();
+              async move { h.agent_next(id).await }
+            }),
+          )?,
+        )?;
+
+        let registry = host.agents.registry.clone();
+        api.set("agentKill", Function::new(ctx.clone(), move |id: String| registry.kill(&id))?)?;
+
         let emit = host.emit.clone();
         api.set("emit", Function::new(ctx.clone(), move |event: String| emit(event))?)?;
         let token = host.token.clone();
@@ -232,7 +376,8 @@ mod tests {
     let sink = events.clone();
     let emit: Emit = Arc::new(move |e: String| sink.lock().unwrap().push(serde_json::from_str::<Value>(&e).unwrap()));
     let request = json!({ "graph": graph }).to_string();
-    run(pool, Client::new("http://127.0.0.1:9", "x"), request, CancellationToken::new(), emit).await.unwrap();
+    let agents = AgentEnv { root: dir.path().to_path_buf(), ..Default::default() };
+    run(pool, Client::new("http://127.0.0.1:9", "x"), request, CancellationToken::new(), emit, agents).await.unwrap();
     let out = events.lock().unwrap().clone();
     out
   }
@@ -267,6 +412,88 @@ mod tests {
     assert_eq!(a["status"], "ok");
     assert_eq!(a["logs"][0], "hi");
     assert_eq!(end_state(&events, "c")["result"], 4);
+  }
+
+  /// A stand-in `claude`: a `.cmd` shim around a script that echoes stdin.
+  #[cfg(windows)]
+  #[tokio::test(flavor = "multi_thread")]
+  async fn runs_agent_nodes_through_a_cli() {
+    let bin = tempfile::tempdir().unwrap();
+    std::fs::write(
+      bin.path().join("fake.js"),
+      "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{console.error('working');console.log('echo: '+s.trim())});",
+    )
+    .unwrap();
+    let shim = bin.path().join("claude.cmd");
+    std::fs::write(&shim, r#"@"node" "%~dp0\fake.js" %*"#).unwrap();
+    // SAFETY: the only test that reads this variable.
+    unsafe { std::env::set_var("TWX_FLOW_AGENT_CLAUDE_BIN", &shim) };
+
+    let graph = json!({
+      "nodes": [{ "id": "g", "kind": "agent", "label": "Ask", "x": 0, "y": 0,
+        "provider": "claude", "prompt": "hi {{ 1 + 1 }}", "outputMode": "text" }],
+      "edges": []
+    });
+    let events = run_graph(graph).await;
+    let state = end_state(&events, "g");
+    assert_eq!(state["status"], "ok", "{events:?}");
+    assert_eq!(state["result"], "echo: hi 2");
+    assert!(events.iter().any(|e| e["type"] == "node-log" && e["line"] == "working"), "{events:?}");
+  }
+
+  /// Stop has to reach a CLI that would otherwise never finish.
+  #[cfg(windows)]
+  #[tokio::test(flavor = "multi_thread")]
+  async fn stopping_a_run_kills_its_agent() {
+    let bin = tempfile::tempdir().unwrap();
+    std::fs::write(bin.path().join("hang.js"), "setInterval(() => {}, 1000);").unwrap();
+    let shim = bin.path().join("codex.cmd");
+    std::fs::write(&shim, r#"@"node" "%~dp0\hang.js" %*"#).unwrap();
+    // SAFETY: the only test that reads this variable.
+    unsafe { std::env::set_var("TWX_FLOW_AGENT_CODEX_BIN", &shim) };
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open(&dir.path().join("t.db")).await.unwrap();
+    let registry = ProcRegistry::default();
+    let agents = AgentEnv { registry: registry.clone(), root: dir.path().to_path_buf(), disabled: vec![] };
+    let graph = json!({
+      "nodes": [{ "id": "g", "kind": "agent", "label": "Hang", "x": 0, "y": 0,
+        "provider": "codex", "prompt": "wait", "outputMode": "text" }],
+      "edges": []
+    });
+    let token = CancellationToken::new();
+    let stopper = token.clone();
+    tokio::spawn(async move {
+      tokio::time::sleep(Duration::from_millis(1500)).await;
+      stopper.cancel();
+    });
+    let emit: Emit = Arc::new(|_| {});
+    let request = json!({ "graph": graph }).to_string();
+    let started = std::time::Instant::now();
+    run(pool, Client::new("http://127.0.0.1:9", "x"), request, token, emit, agents).await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(15), "run did not stop: {:?}", started.elapsed());
+  }
+
+  #[test]
+  fn disabled_providers_are_refused_before_spawning() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+      let dir = tempfile::tempdir().unwrap();
+      let pool = open(&dir.path().join("t.db")).await.unwrap();
+      let host = Host {
+        pool,
+        client: Client::new("http://127.0.0.1:9", "x"),
+        token: CancellationToken::new(),
+        handle: Handle::current(),
+        emit: Arc::new(|_| {}),
+        agents: AgentEnv { root: dir.path().to_path_buf(), disabled: vec!["claude".into()], ..Default::default() },
+        mailboxes: Default::default(),
+      };
+      let out: Value = serde_json::from_str(&host.agent_prepare("claude", "")).unwrap();
+      assert_eq!(out["disabled"], true);
+      let out: Value = serde_json::from_str(&host.agent_prepare("bash", "")).unwrap();
+      assert_eq!(out["ok"], false);
+    });
   }
 
   #[tokio::test(flavor = "multi_thread")]

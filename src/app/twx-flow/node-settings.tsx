@@ -437,7 +437,7 @@ function AgentSettings({
     <div className="flex flex-col gap-2.5">
       <Field
         label="Agent"
-        hint={`Runs on the server that hosts this app, not in the browser. The ${def.bin} CLI has to be installed there, and TWX_FLOW_AGENTS_ENABLED has to be set.`}
+        hint={`Runs on this computer. The ${def.bin} CLI has to be installed and on PATH, and switched on under Settings → AI Agents.`}
       >
         <NativeSelect
           className="w-full"
@@ -475,7 +475,7 @@ function AgentSettings({
 
       <Field
         label="Working directory"
-        hint="Where the agent runs, relative to the server's agent root. Empty means the root itself. Anything outside it is refused."
+        hint="Where the agent runs, relative to the agent root (your workspace folder, or TWX_FLOW_AGENT_ROOT). Empty means the root itself. Anything outside it is refused."
       >
         <Input
           value={node.cwd ?? ""}

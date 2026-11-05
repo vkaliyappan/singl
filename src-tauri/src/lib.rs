@@ -113,6 +113,11 @@ pub fn run() {
       commands::flows::flow_folder_delete,
       commands::flows::flow_datashape_fields,
       commands::flows::flow_run,
+      commands::agents::agents_status,
+      commands::agents::agents_disabled_set,
+      commands::agents::agent_list_models_run,
+      commands::agents::agent_model_cache,
+      commands::agents::agent_anthropic_models,
       commands::settings::settings_get,
       commands::settings::settings_azure_pat_set,
       commands::settings::settings_compare_paths_set,
@@ -138,6 +143,7 @@ pub fn run() {
     .run(|app, event| {
       if let tauri::RunEvent::Exit = event {
         app.state::<state::AppState>().jobs.cancel_all();
+        app.state::<state::AppState>().agents.kill_all();
       }
     });
 }

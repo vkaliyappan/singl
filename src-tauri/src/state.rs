@@ -11,6 +11,8 @@ pub struct AppState {
   db: RwLock<SqlitePool>,
   pub db_path: PathBuf,
   pub jobs: JobRegistry,
+  /// Agent CLIs started by Agent nodes, killed when the app exits.
+  pub agents: singl_core::agents::process::ProcRegistry,
   pub workspace: std::sync::RwLock<Workspace>,
 }
 
@@ -22,6 +24,7 @@ impl AppState {
       db: RwLock::new(pool),
       db_path,
       jobs: JobRegistry::default(),
+      agents: Default::default(),
       workspace: std::sync::RwLock::new(workspace),
     })
   }

@@ -657,6 +657,9 @@
   // src/lib/twx-flow/agents.ts
   var AGENT_PROVIDERS = ["claude", "codex", "copilot", "antigravity"];
   var DEFAULT_AGENT_TIMEOUT_MS = 3e5;
+  var MAX_AGENT_TIMEOUT_MS = 36e5;
+  var MAX_AGENT_OUTPUT_BYTES = 4e6;
+  var MAX_PROMPT_ARG_CHARS = 8e3;
   var flag = (name, value) => value?.trim() ? [name, value.trim()] : [];
   var sessionFlags = (session, resume, preset, joined = false) => {
     const name = session?.resume ? resume : preset;
@@ -1061,6 +1064,92 @@
       docs: "agy --help"
     }
   };
+  var agentDef = (provider) => AGENT_DEFS[provider] ?? AGENT_DEFS.claude;
+  function splitArgs(raw) {
+    if (!raw?.trim()) return [];
+    const out = [];
+    const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+    let match;
+    while (match = pattern.exec(raw)) {
+      out.push(match[1] ?? match[2] ?? match[3] ?? "");
+    }
+    return out;
+  }
+  function needsLongPrompt(invocation) {
+    const def = agentDef(invocation.provider);
+    return def.promptVia === "arg" && def.longPrompt !== void 0 && (invocation.stream === true || invocation.prompt.length > MAX_PROMPT_ARG_CHARS);
+  }
+  function usesStreamMode(invocation) {
+    return invocation.stream === true && invocation.outputMode === "text" && agentDef(invocation.provider).stream !== void 0 && !needsLongPrompt(invocation);
+  }
+  function buildAgentArgs(invocation) {
+    const def = agentDef(invocation.provider);
+    const base = needsLongPrompt(invocation) ? def.longPrompt.args(invocation) : usesStreamMode(invocation) ? def.stream.args(invocation) : def.args(invocation);
+    const allow = !invocation.autoApprove && invocation.allowedTools?.length && def.allowToolArgs ? def.allowToolArgs(invocation.allowedTools) : [];
+    return [...base, ...allow, ...splitArgs(invocation.extraArgs)];
+  }
+  function parseAgentOutput(stdout, provider, outputMode, streamed = false) {
+    const text = stdout.trim();
+    if (!text) return text;
+    if (streamed) {
+      const events2 = parseEvents(text);
+      if (!events2.length) return text;
+      const message = (agentDef(provider).stream?.answer ?? lastMessage)(events2);
+      return outputMode === "json" ? { events: events2, text: message } : message;
+    }
+    if (outputMode === "text") return text;
+    if (agentDef(provider).jsonKind === "object") {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+    const events = parseEvents(text);
+    if (!events.length) return text;
+    return { events, text: lastMessage(events) };
+  }
+  function parseEvents(text) {
+    const events = [];
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        events.push(JSON.parse(trimmed));
+      } catch {
+      }
+    }
+    return events;
+  }
+  function lastMessage(events) {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const found = messageOf(events[i]);
+      if (found) return found;
+    }
+    return "";
+  }
+  function messageOf(event) {
+    if (!event || typeof event !== "object") return "";
+    const record = event;
+    const nested = ["msg", "item", "data", "message", "result", "step_update"];
+    for (const key of ["text", "message", "content", "result", "response"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    for (const key of nested) {
+      const value = record[key];
+      if (value && typeof value === "object") {
+        const found = messageOf(value);
+        if (found) return found;
+      }
+    }
+    return "";
+  }
+  function describeAgent(node) {
+    const def = agentDef(node.provider);
+    const model = node.model?.trim();
+    return model ? `${def.bin} \xB7 ${model}` : def.bin;
+  }
 
   // src/lib/twx-flow/nodes.ts
   var MAIN = [{ id: "main", tone: "neutral" }];
@@ -1152,7 +1241,6 @@
         return { mode: "interval", waitMs: 1e3, until: "" };
     }
   }
-  var AGENTS_AVAILABLE = false;
   var AGENT_ENTRIES = AGENT_PROVIDERS.map((provider) => ({
     key: `agent:${provider}`,
     kind: "agent",
@@ -1233,10 +1321,7 @@
       hint: "Wait before continue with execution",
       section: "Other"
     },
-    // Agent nodes need the agent CLI runtime, which singl does not have yet. They
-    // still load and render in flows made in singl-web; a run reports them as
-    // unavailable.
-    ...AGENTS_AVAILABLE ? AGENT_ENTRIES : []
+    ...AGENT_ENTRIES
   ];
 
   // src/lib/twx-flow/graph.ts
@@ -2111,7 +2196,39 @@
             break;
           }
           case "agent": {
-            throw new Error("Agent nodes are not available in singl yet.");
+            const ctx = contextFor(node, scope());
+            const prompt = evaluateTemplate(node.prompt ?? "", ctx);
+            if (prompt.error) throw new Error(prompt.error);
+            const run2 = await host2.runAgent({
+              provider: node.provider,
+              prompt: String(prompt.value ?? ""),
+              model: node.model,
+              cwd: node.cwd,
+              outputMode: node.outputMode === "json" ? "json" : "text",
+              autoApprove: node.autoApprove,
+              extraArgs: node.extraArgs,
+              timeoutMs: node.timeoutMs,
+              // Agents take minutes, so the canvas gets their output as it lands
+              // rather than all at once when the node finishes.
+              onLine: (line) => emit2({ type: "node-log", id, line }),
+              signal: signal2
+            });
+            results[id] = run2.value;
+            states[id] = {
+              status: "ok",
+              result: run2.value,
+              inputs: {
+                agent: describeAgent(node),
+                command: run2.command,
+                cwd: run2.cwd,
+                prompt: String(prompt.value ?? "")
+              },
+              inputErrors,
+              logs: run2.logs.length ? run2.logs : void 0,
+              rows: rowCount(run2.value),
+              ms: Date.now() - startedAt
+            };
+            break;
           }
           case "code": {
             const ctx = contextFor(node, scope());
@@ -2240,6 +2357,137 @@
     return { output: child.output, name: row.name, ran: child.order.length };
   }
 
+  // src/lib/twx-flow/engine/agent.ts
+  var MAX_LOG_LINES = 400;
+  var MAX_COMMAND_LINE_CHARS = 3e4;
+  var errorWithLogs = (message, logs, exitCode) => {
+    const error = new Error(message);
+    error.logs = logs;
+    if (exitCode !== void 0) error.exitCode = exitCode;
+    return error;
+  };
+  function unwrap(raw) {
+    const envelope = JSON.parse(raw);
+    if (!envelope.ok) throw Object.assign(new Error(envelope.error), { disabled: envelope.disabled });
+    return envelope;
+  }
+  async function runAgent(host2, options) {
+    const def = agentDef(options.provider);
+    const prompt = options.prompt.trim();
+    if (!prompt) throw new Error("The prompt is empty \u2014 there is nothing to ask the agent.");
+    let prepared;
+    try {
+      prepared = unwrap(host2.agentPrepare(options.provider, options.cwd ?? ""));
+    } catch (e) {
+      if (e.disabled) {
+        throw new Error(`${def.title} is switched off. Turn it on under Settings \u2192 AI Agents.`);
+      }
+      throw e;
+    }
+    const invocation = {
+      provider: options.provider,
+      prompt,
+      model: options.model,
+      outputMode: options.outputMode,
+      autoApprove: options.autoApprove,
+      extraArgs: options.extraArgs,
+      mcpConfig: prepared.mcpConfig ?? void 0
+    };
+    const args = buildAgentArgs(invocation);
+    const streamed = needsLongPrompt(invocation);
+    const stdin = streamed ? def.longPrompt.stdin(prompt) : def.promptVia === "stdin" ? prompt : "";
+    if (streamed && prompt.length > def.longPrompt.maxChars) {
+      throw new Error(
+        `This prompt is ${prompt.length} characters. ${def.title} takes at most ${def.longPrompt.maxChars} \u2014 past that it returns an empty answer instead of failing. Shorten the prompt, or use the Claude, Codex or Copilot node, which have no such limit.`
+      );
+    }
+    const length = def.bin.length + args.reduce((total, arg) => total + arg.length + 3, 0);
+    if (length > MAX_COMMAND_LINE_CHARS) {
+      throw new Error(
+        `The command line for ${def.title} is ${length} characters, past the ${MAX_COMMAND_LINE_CHARS} this platform allows \u2014 if an extra argument is that long, shorten it.`
+      );
+    }
+    const budget = Math.min(
+      MAX_AGENT_TIMEOUT_MS,
+      Math.max(1e3, Math.round(options.timeoutMs || DEFAULT_AGENT_TIMEOUT_MS))
+    );
+    const command = [def.bin, ...buildAgentArgs({ ...invocation, prompt: "\u2026" })].join(" ");
+    const startedAt = Date.now();
+    const spawned = unwrap(
+      await host2.agentSpawn(
+        JSON.stringify({ provider: options.provider, args, stdin, env: def.env ?? {}, timeoutMs: budget }),
+        prepared.cwd
+      )
+    );
+    const logs = [];
+    const note = (line) => {
+      if (logs.length < MAX_LOG_LINES) logs.push(line);
+      options.onLine?.(line);
+    };
+    const eventStream = usesStreamMode(invocation);
+    const describeEvent = streamed ? def.longPrompt.describeEvent : eventStream ? def.stream.describeEvent : void 0;
+    const onStdout = (line) => {
+      if (options.outputMode !== "text" || !line.trim()) return;
+      if (!describeEvent) return note(line);
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return note(line);
+      }
+      const described = event && typeof event === "object" ? describeEvent(event) : null;
+      if (described) note(described);
+    };
+    let stdout = "";
+    let truncated = false;
+    let exit;
+    while (!exit) {
+      const events = JSON.parse(await host2.agentNext(spawned.id));
+      if (!events.length) break;
+      for (const event of events) {
+        if (event.type === "exit") exit = event;
+        else if (event.type === "stderr") {
+          if (event.line.trim()) note(event.line);
+        } else if (!truncated) {
+          if (stdout.length + event.line.length + 1 > MAX_AGENT_OUTPUT_BYTES) {
+            truncated = true;
+            host2.agentKill(spawned.id);
+            continue;
+          }
+          stdout += `${event.line}
+`;
+          onStdout(event.line);
+        }
+      }
+    }
+    if (options.signal?.aborted || exit?.killed && !truncated) throw new Error("Run cancelled");
+    if (exit?.timedOut) throw errorWithLogs(`${def.title} timed out after ${budget}ms`, logs);
+    if (truncated) {
+      throw errorWithLogs(`${def.title} printed more than ${MAX_AGENT_OUTPUT_BYTES} bytes and was stopped`, logs);
+    }
+    const exitCode = exit?.code ?? 1;
+    if (exitCode !== 0) {
+      const tail = logs.slice(-8).join("\n").trim();
+      throw errorWithLogs(`${def.title} exited with code ${exitCode}${tail ? `:
+${tail}` : "."}`, logs, exitCode);
+    }
+    const value = parseAgentOutput(stdout, options.provider, options.outputMode, streamed || eventStream);
+    if (streamed && !(typeof value === "string" ? value.trim() : value?.text?.trim())) {
+      const events = stdout.split("\n").flatMap((line) => {
+        try {
+          return [JSON.parse(line)];
+        } catch {
+          return [];
+        }
+      });
+      throw errorWithLogs(
+        def.longPrompt.emptyReason?.(events) ?? `${def.title} accepted the prompt but returned nothing. It is ${prompt.length} characters \u2014 try a shorter one.`,
+        logs
+      );
+    }
+    return { value, command, cwd: prepared.cwd, exitCode, logs, ms: Date.now() - startedAt };
+  }
+
   // src/lib/twx-flow/code-node.ts
   var DEFAULT_CODE_TIMEOUT_MS = 5e3;
   var MAX_CODE_TIMEOUT_MS = 6e4;
@@ -2311,7 +2559,7 @@
   }
 
   // src/lib/twx-flow/engine/entry.ts
-  function unwrap(raw) {
+  function unwrap2(raw) {
     const envelope = JSON.parse(raw);
     if (!envelope.ok) throw new Error(envelope.error);
     return envelope;
@@ -2319,13 +2567,14 @@
   var host = {
     async executeService(collection, entityName, serviceName, inputs) {
       const raw = await __host.executeService(collection, entityName, serviceName, JSON.stringify(inputs ?? {}));
-      return unwrap(raw).json;
+      return unwrap2(raw).json;
     },
     async loadFlow(id) {
-      return unwrap(await __host.loadFlow(id)).flow;
+      return unwrap2(await __host.loadFlow(id)).flow;
     },
     runCode: (code, ctx, timeoutMs) => runCode(code, ctx, timeoutMs, __host.runSandbox),
-    sleep: (ms) => __host.sleep(ms)
+    sleep: (ms) => __host.sleep(ms),
+    runAgent: (options) => runAgent(__host, options)
   };
   var signal = {
     get aborted() {

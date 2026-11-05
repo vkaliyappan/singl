@@ -3,6 +3,7 @@
 //! IPC error at the boundary.
 
 pub mod compare;
+pub mod agents;
 pub mod db;
 pub mod error;
 pub mod flow;

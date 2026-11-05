@@ -137,5 +137,14 @@ pub async fn flow_run(
   let emit: singl_core::flow::Emit = Arc::new(move |event: String| {
     let _ = on_event.send(event);
   });
-  Ok(singl_core::flow::run(pool, client, request, job.token.clone(), emit).await?)
+  let root = {
+    let workspace = state.workspace.read().unwrap_or_else(|e| e.into_inner());
+    singl_core::agents::agent_root(workspace.root())
+  };
+  let agents = singl_core::flow::AgentEnv {
+    registry: state.agents.clone(),
+    root,
+    disabled: singl_core::db::settings::disabled_agents(&pool).await?,
+  };
+  Ok(singl_core::flow::run(pool, client, request, job.token.clone(), emit, agents).await?)
 }
