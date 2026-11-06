@@ -278,6 +278,15 @@ impl<'de> Deserialize<'de> for Entries {
   }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropertyDef {
+  pub name: String,
+  pub description: String,
+  pub base_type: String,
+  pub aspects: Value,
+}
+
 /// `String(v ?? fallback)` for a field of a JSON object.
 fn text_or(v: Option<&Value>, fallback: &str) -> String {
   match v {
@@ -557,6 +566,46 @@ impl Client {
     let res = self.send(self.request(Method::GET, &url, "application/json"), &what).await?;
     let text = res.text().await.map_err(|e| CoreError::Twx { status: 0, message: format!("{what} failed — {e}") })?;
     service_defs(&text, &what)
+  }
+
+  /// Property definitions of an entity, its own and inherited: singl-web's
+  /// `getPropertyDefinitions` mapping over a GetEntity reply.
+  pub async fn property_definitions(&self, collection: &str, entity: &str) -> Result<Vec<PropertyDef>> {
+    let what = format!("GetEntity {collection}/{entity}");
+    let url = format!("{}/{collection}/{}", self.base, encode(entity));
+    let res = self.send(self.request(Method::GET, &url, "application/json"), &what).await?;
+    let json: Value = Self::read_json(res, &what).await?;
+    let defs = json.pointer("/effectiveShape/propertyDefinitions").and_then(Value::as_object);
+    Ok(
+      defs
+        .into_iter()
+        .flatten()
+        .map(|(name, def)| PropertyDef {
+          name: name.clone(),
+          description: text_or(def.get("description"), ""),
+          base_type: text_or(def.get("baseType"), "STRING"),
+          aspects: object_or_empty(def.get("aspects")),
+        })
+        .collect(),
+    )
+  }
+
+  /// Current values of every property on a Thing, as one row.
+  pub async fn property_values(&self, thing: &str) -> Result<Value> {
+    let what = format!("GetProperties {thing}");
+    let url = format!("{}/Things/{}/Properties", self.base, encode(thing));
+    let res = self.send(self.request(Method::GET, &url, "application/json"), &what).await?;
+    let mut rows = Self::read_json::<Rows<Value>>(res, &what).await?.rows;
+    Ok(if rows.is_empty() { json!({}) } else { rows.swap_remove(0) })
+  }
+
+  /// Current value of one property on a Thing; `null` when absent.
+  pub async fn property_value(&self, thing: &str, property: &str) -> Result<Value> {
+    let what = format!("GetProperty {thing}/{property}");
+    let url = format!("{}/Things/{}/Properties/{}", self.base, encode(thing), encode(property));
+    let res = self.send(self.request(Method::GET, &url, "application/json"), &what).await?;
+    let rows = Self::read_json::<Rows<Value>>(res, &what).await?.rows;
+    Ok(rows.first().and_then(|r| r.get(property)).cloned().unwrap_or(Value::Null))
   }
 
   /// Field definitions of a DataShape: the declared structure of an infotable.

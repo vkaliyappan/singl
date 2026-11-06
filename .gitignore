@@ -56,3 +56,6 @@ target/
 .agents/mcp_config.json
 .codex/config.toml
 .claude/settings.local.json
+
+# Playwright MCP snapshots
+/.playwright-mcp/

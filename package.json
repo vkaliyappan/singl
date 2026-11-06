@@ -10,7 +10,8 @@
     "lint": "eslint",
     "tauri": "tauri",
     "release": "node scripts/release.mjs",
-    "flow:engine": "node scripts/build-flow-engine.mjs"
+    "flow:engine": "node scripts/build-flow-engine.mjs",
+    "twx:mcp:build": "cargo build --manifest-path src-tauri/Cargo.toml -p singl-core --bin twx-mcp"
   },
   "dependencies": {
     "@adapttable/core": "2.9.0",
