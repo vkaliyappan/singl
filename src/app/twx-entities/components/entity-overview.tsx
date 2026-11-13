@@ -13,6 +13,7 @@ import {
   IconSearch,
   IconLayersLinked,
   IconDownload,
+  IconRefresh,
   IconInfoCircle,
   IconDatabase,
   IconTag,
@@ -32,6 +33,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { save } from "@tauri-apps/plugin-dialog";
+import { saveEntityAs } from "@/lib/entities";
+import { errorMessage } from "@/lib/settings";
 import {
   type ParsedTwxEntity,
   type ParsedService,
@@ -55,6 +59,8 @@ interface EntityOverviewProps {
   /** Opens the service's extracted script from the Code folder. */
   onOpenServiceCode?: (service: string) => void;
   onViewCodeClick?: () => void;
+  /** Exports this entity again from ThingWorx over its file. */
+  onReexport?: () => Promise<void>;
 }
 
 export function EntityOverview({
@@ -63,7 +69,9 @@ export function EntityOverview({
   initialService,
   onOpenServiceCode,
   onViewCodeClick,
+  onReexport,
 }: EntityOverviewProps) {
+  const [reexporting, setReexporting] = useState(false);
   const { resolvedTheme } = useTheme();
   const opensOnService = !!initialService && entity.services.some((s) => s.name === initialService);
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "properties" | "subscriptions" | "config">(
@@ -80,16 +88,20 @@ export function EntityOverview({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const handleDownloadXml = () => {
+  const handleDownloadXml = async () => {
     if (!entity.rawXml) return;
-    const blob = new Blob([entity.rawXml], { type: "application/xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${entity.name || "entity"}.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Downloaded ${entity.name}.xml`);
+    try {
+      const dest = await save({
+        title: "Save entity XML",
+        defaultPath: `${entity.name || "entity"}.xml`,
+        filters: [{ name: "XML", extensions: ["xml"] }],
+      });
+      if (!dest) return; // cancelled
+      await saveEntityAs(dest, entity.rawXml);
+      toast.success(`Saved to ${dest}`);
+    } catch (e) {
+      toast.error(`Save failed: ${errorMessage(e)}`);
+    }
   };
 
   // ── Filter State ──────────────────────────────────────────────────────────
@@ -243,6 +255,27 @@ export function EntityOverview({
               </Button>
             )}
 
+            {onReexport && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reexporting}
+                onClick={async () => {
+                  setReexporting(true);
+                  try {
+                    await onReexport();
+                  } finally {
+                    setReexporting(false);
+                  }
+                }}
+                title="Export this entity again from ThingWorx, replacing this file"
+                className="h-8 gap-1.5 text-xs"
+              >
+                <IconRefresh className={reexporting ? "size-3.5 animate-spin" : "size-3.5"} />
+                {reexporting ? "Exporting…" : "Export from ThingWorx"}
+              </Button>
+            )}
+
             <Button
               size="sm"
               variant="outline"
@@ -250,7 +283,7 @@ export function EntityOverview({
               className="h-8 gap-1.5 text-xs"
             >
               <IconDownload className="size-3.5" />
-              Download
+              Save as…
             </Button>
           </div>
         </div>

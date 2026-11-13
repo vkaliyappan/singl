@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use singl_core::jobs::JobEvent;
 use singl_core::repo::files::{self, SearchFileResult, SearchOptions};
-use singl_core::twx::entities::{self, EntityExportResult, ExportJob, FoundEntry, LocatedEntity};
+use singl_core::twx::entities::{self, EntityExportResult, ExportJob, FoundEntry, LocatedEntity, SelectedEntity};
 use singl_core::twx::{projects, run_times};
 use singl_core::workspace::PathKind;
 use singl_core::{CoreError, db};
@@ -52,6 +52,12 @@ pub async fn entity_read(state: State<'_, AppState>, path: String) -> IpcResult<
 pub async fn entity_write(state: State<'_, AppState>, path: String, content: String) -> IpcResult<()> {
   let base = base(&state)?;
   blocking(move || entities::write(&base, &path, &content)).await
+}
+
+/// Writes `content` to `dest`, an absolute path the user picked in a Save dialog.
+#[tauri::command]
+pub async fn entity_save_as(dest: String, content: String) -> IpcResult<()> {
+  blocking(move || Ok(std::fs::write(&dest, content)?)).await
 }
 
 /// An empty file, or a folder when `dir`, inside `parent`. Resolves with its path.
@@ -140,19 +146,16 @@ pub async fn entity_run_times(state: State<'_, AppState>, env: String) -> IpcRes
   Ok(run_times::get(&file, &run_times::safe_env(&env)))
 }
 
-/// Exports `project` (or every project configured for `env`, or every project
-/// on the server when none is configured) into `<env folder>/WindchillClients/Thingworx`.
-#[tauri::command]
-pub async fn entity_export(
-  state: State<'_, AppState>,
-  env: String,
-  project: Option<String>,
-  on_event: Channel<JobEvent>,
-) -> IpcResult<EntityExportResult> {
-  let base = base(&state)?;
-  let pool = state.db().await;
-  let client = projects::connect(&pool, &env).await?;
-  let configured: Vec<ExportJob> = db::environments::list(&pool)
+/// The projects an export of `project` covers: `project` alone (with its
+/// Settings entry, if any), every project configured for `env`, or `None` for
+/// every project on the server.
+async fn export_jobs(
+  pool: &singl_core::SqlitePool,
+  env: &str,
+  project: Option<&str>,
+  log: &mut (dyn FnMut(String) + Send),
+) -> IpcResult<Option<Vec<ExportJob>>> {
+  let configured: Vec<ExportJob> = db::environments::list(pool)
     .await?
     .into_iter()
     .filter(|e| e.environment == env)
@@ -165,10 +168,7 @@ pub async fn entity_export(
     })
     .collect();
 
-  let mut log = move |line: String| {
-    let _ = on_event.send(JobEvent::Log { line });
-  };
-  let jobs = match project.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+  Ok(match project.map(str::trim).filter(|p| !p.is_empty()) {
     // A specific project: its Settings entry, if any, gives the filter and folders.
     Some(name) => Some(vec![configured.into_iter().find(|j| j.twx_name == name).unwrap_or_else(|| ExportJob {
       twx_name: name.into(),
@@ -182,11 +182,64 @@ pub async fn entity_export(
       Some(configured)
     }
     None => None,
+  })
+}
+
+/// Exports the entity file `path` again from `env`'s server, overwriting it.
+/// Resolves with the new XML.
+#[tauri::command]
+pub async fn entity_reexport(state: State<'_, AppState>, env: String, path: String) -> IpcResult<String> {
+  let base = base(&state)?;
+  let safe_env = run_times::safe_env(&env);
+  if path.replace('\\', "/").split('/').next() != Some(safe_env.as_str()) {
+    return Err(CoreError::Invalid(format!("\"{path}\" is not in {env}'s exports")).into());
+  }
+  let pool = state.db().await;
+  let client = projects::connect(&pool, &env).await?;
+  Ok(entities::reexport(&client, &base, &path).await?)
+}
+
+/// Every entity on the server in the projects an export of `project` covers,
+/// for picking which to export.
+#[tauri::command]
+pub async fn entity_list_remote(
+  state: State<'_, AppState>,
+  env: String,
+  project: Option<String>,
+) -> IpcResult<Vec<SelectedEntity>> {
+  let pool = state.db().await;
+  let client = projects::connect(&pool, &env).await?;
+  let mut ignore = |_: String| {};
+  let jobs = export_jobs(&pool, &env, project.as_deref(), &mut ignore).await?;
+  Ok(entities::list_remote(&client, jobs, &mut ignore).await?)
+}
+
+/// Exports `project` (or every project configured for `env`, or every project
+/// on the server when none is configured) into `<env folder>/WindchillClients/Thingworx`.
+/// With `only`, just those entities.
+#[tauri::command]
+pub async fn entity_export(
+  state: State<'_, AppState>,
+  env: String,
+  project: Option<String>,
+  only: Option<Vec<SelectedEntity>>,
+  on_event: Channel<JobEvent>,
+) -> IpcResult<EntityExportResult> {
+  let base = base(&state)?;
+  let pool = state.db().await;
+  let client = projects::connect(&pool, &env).await?;
+
+  let mut log = move |line: String| {
+    let _ = on_event.send(JobEvent::Log { line });
   };
+  let jobs = export_jobs(&pool, &env, project.as_deref(), &mut log).await?;
+  if let Some(only) = &only {
+    log(format!("Exporting {} selected entit{}", only.len(), if only.len() == 1 { "y" } else { "ies" }));
+  }
 
   let safe_env = run_times::safe_env(&env);
   let job = state.jobs.start();
-  let mut result = entities::export(&client, &base, &safe_env, jobs, &job.token, &mut log).await?;
+  let mut result = entities::export(&client, &base, &safe_env, jobs, only.as_deref(), &job.token, &mut log).await?;
   let run_times_file = state.workspace.read().unwrap_or_else(|e| e.into_inner()).resolve(PathKind::RunTimes);
   if let Some(file) = run_times_file {
     result.exported_at = Some(run_times::record(&file, &safe_env, run_times::RunKind::Exported)?);

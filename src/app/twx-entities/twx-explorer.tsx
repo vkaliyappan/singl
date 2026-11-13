@@ -28,6 +28,8 @@ import {
   IconPencil,
   IconTrash,
   IconClipboard,
+  IconListCheck,
+  IconChevronDown,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
@@ -80,9 +82,11 @@ import {
   locateEntity as locateEntityFiles,
   readEntityFile,
   renameEntityEntry,
+  reexportEntity,
   searchEntities,
   writeEntityFile,
   type LocatedEntity,
+  type RemoteEntity,
 } from "@/lib/entities";
 import { extractCode } from "@/lib/twx";
 import { errorMessage, type EnvSetting, type ProjectConfig } from "@/lib/settings";
@@ -103,6 +107,7 @@ import { parseTwxEntityXml, type ParsedTwxEntity } from "@/lib/twx/entity-xml-pa
 import { safeEnvDir, type TwxEntityLink } from "@/lib/twx/links";
 import { EntityOverview } from "./components/entity-overview";
 import { OutputDrawer } from "./components/output-drawer";
+import { ExportPicker } from "./components/export-picker";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -546,6 +551,27 @@ export function TwxExplorer({
     }
   }, []);
 
+  /** Replaces the open file `path` with a fresh export of its entity. */
+  const reexportTab = useCallback(
+    async (path: string) => {
+      if (isDirty(openTabsRef.current.get(path))) {
+        toast.error("Save or undo your changes to this file first");
+        return;
+      }
+      try {
+        const xml = await reexportEntity(selectedEnv, path);
+        setOpenTabs((prev) => {
+          const current = prev.get(path);
+          return current ? new Map(prev).set(path, { ...current, content: xml, saved: xml }) : prev;
+        });
+        toast.success(`Exported ${path.split("/").pop()} from ThingWorx`);
+      } catch (err) {
+        toast.error(errorMessage(err));
+      }
+    },
+    [selectedEnv]
+  );
+
   const saveActiveRef = useRef(() => {});
   saveActiveRef.current = () => {
     if (activeTabRef.current) void saveTab(activeTabRef.current);
@@ -895,19 +921,28 @@ export function TwxExplorer({
   }, [treeModel, treeRoot, handleFileClick]);
 
   // ── Export handler ────────────────────────────────────────────────────────
-  const handleExport = async () => {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  /** Exports the toolbar's project(s), or just `only` of them; with `thenExtract`, runs Extract after a successful export. */
+  const handleExport = async (only?: RemoteEntity[], thenExtract = false) => {
     const envRecord = envs.find((e) => e.environment === selectedEnv);
     if (!envRecord?.hasAppKey) return;
+    setPickerOpen(false);
 
     setExportStatus("exporting");
     setExportMessages([]);
+    setExtractMessages([]);
+    setExtractStatus("idle");
     setIsOutputOpen(true);
     resetFileTree();
     setLastExportDir(null);
 
     try {
-      const result = await exportEnvEntities(selectedEnv, resolvedProjectName, (msg) =>
-        setExportMessages((prev) => [...prev, msg])
+      const result = await exportEnvEntities(
+        selectedEnv,
+        resolvedProjectName,
+        (msg) => setExportMessages((prev) => [...prev, msg]),
+        only
       );
       const dir = result.outputDir;
       setLastExportDir(dir);
@@ -919,11 +954,18 @@ export function TwxExplorer({
       setExportStatus("error");
       setExportMessages((prev) => [...prev, `Error: ${errorMessage(err)}`]);
       toast.error("Export failed");
+      return;
     }
+    if (thenExtract) await handleExtract(true);
   };
 
   // ── Extract handler ───────────────────────────────────────────────────────
-  const handleExtract = async () => {
+  /** `afterExport`: chained from Export and Extract, so keep the export log above it. */
+  const handleExtract = async (afterExport = false) => {
+    if (!afterExport) {
+      setExportMessages([]);
+      setExportStatus("idle");
+    }
     setExtractStatus("extracting");
     setExtractMessages([]);
     setIsOutputOpen(true);
@@ -991,8 +1033,7 @@ export function TwxExplorer({
       ? "done"
       : "idle";
 
-  const activeProcessMessages =
-    exportMessages.length > 0 ? exportMessages : extractMessages;
+  const activeProcessMessages = [...exportMessages, ...extractMessages];
 
   const handleClearLogs = () => {
     setExportMessages([]);
@@ -1095,26 +1136,61 @@ export function TwxExplorer({
 
           {/* Right: Primary Action Group & Telemetry */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Export from ThingWorx Button */}
+            {/* Pick particular entities to export */}
             <Button
               size="sm"
-              onClick={handleExport}
+              variant="outline"
+              onClick={() => setPickerOpen(true)}
               disabled={!canExport}
-              className="h-8.5 gap-1.5 text-xs font-medium shadow-xs bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white border-0"
+              title="Choose particular entities to export"
+              className="h-8.5 gap-1.5 text-xs font-medium bg-background shadow-2xs"
             >
-              {exportStatus === "exporting" ? (
-                <Spinner className="size-3.5 text-white" />
-              ) : (
-                <IconDownload className="size-3.5" />
-              )}
-              {exportStatus === "exporting" ? "Exporting…" : "Export"}
+              <IconListCheck className="size-3.5" />
+              Select…
             </Button>
+
+            {/* Export from ThingWorx: split button, menu adds Export and Extract */}
+            <div className="flex items-center rounded-md shadow-xs bg-gradient-to-r from-indigo-600 to-violet-600">
+              <Button
+                size="sm"
+                onClick={() => handleExport()}
+                disabled={!canExport}
+                className="h-8.5 gap-1.5 text-xs font-medium rounded-r-none bg-transparent hover:bg-white/10 text-white border-0"
+              >
+                {exportStatus === "exporting" ? (
+                  <Spinner className="size-3.5 text-white" />
+                ) : (
+                  <IconDownload className="size-3.5" />
+                )}
+                {exportStatus === "exporting" ? "Exporting…" : "Export"}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={!canExport || extractStatus === "extracting"}
+                  title="More export options"
+                  className="h-8.5 px-1.5 rounded-r-md border-l border-white/25 text-white hover:bg-white/10 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                  render={<button type="button" />}
+                >
+                  <IconChevronDown className="size-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="text-xs min-w-44">
+                  <DropdownMenuItem onClick={() => handleExport()}>
+                    <IconDownload className="size-3.5" />
+                    Export
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport(undefined, true)}>
+                    <IconPackageImport className="size-3.5" />
+                    Export and Extract
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
             {/* Extract from CLI Bundle Button */}
             <Button
               size="sm"
               variant="outline"
-              onClick={handleExtract}
+              onClick={() => handleExtract()}
               disabled={!selectedEnv || extractStatus === "extracting"}
               className="h-8.5 gap-1.5 text-xs font-medium bg-background shadow-2xs"
             >
@@ -1616,6 +1692,7 @@ export function TwxExplorer({
                                   initialService={activeTab === linkedPath ? link?.service : undefined}
                                   onOpenServiceCode={(service) => openServiceCode(activeTab, service)}
                                   onViewCodeClick={() => setViewMode("code")}
+                                  onReexport={selectedEnvRecord?.hasAppKey ? () => reexportTab(activeTab) : undefined}
                                 />
                               </div>
                             ) : viewMode === "split" && parsedEntity ? (
@@ -1627,6 +1704,7 @@ export function TwxExplorer({
                                     filePath={activeTab}
                                       initialService={activeTab === linkedPath ? link?.service : undefined}
                                     onOpenServiceCode={(service) => openServiceCode(activeTab, service)}
+                                    onReexport={selectedEnvRecord?.hasAppKey ? () => reexportTab(activeTab) : undefined}
                                   />
                                 </div>
                                 <div className="w-1/2 min-w-0 overflow-hidden">
@@ -1730,7 +1808,7 @@ export function TwxExplorer({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <Button
                   size="default"
-                  onClick={handleExport}
+                  onClick={() => handleExport()}
                   disabled={!canExport}
                   className="h-10 text-xs font-medium gap-2 shadow-sm bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white border-0"
                 >
@@ -1741,7 +1819,7 @@ export function TwxExplorer({
                 <Button
                   size="default"
                   variant="outline"
-                  onClick={handleExtract}
+                  onClick={() => handleExtract()}
                   disabled={!selectedEnv || extractStatus === "extracting"}
                   className="h-10 text-xs font-medium gap-2 shadow-2xs"
                 >
@@ -1829,6 +1907,15 @@ export function TwxExplorer({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ExportPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        env={selectedEnv}
+        project={resolvedProjectName}
+        projectLabel={resolvedProjectName ?? "All configured projects"}
+        onExport={(only) => handleExport(only)}
+      />
 
       {/* ── New file / folder, rename ─────────────────────────────────────── */}
       <Dialog

@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::path::{Component, Path};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use super::api::{Client, TwxEntity};
@@ -383,6 +383,65 @@ pub struct EntityExportResult {
   pub exported_at: Option<String>,
 }
 
+/// Exports one already-exported entity again over its file `rel`
+/// (`…/<Collection>/<Name>.xml`), so it matches the server. Resolves with
+/// the new XML.
+pub async fn reexport(client: &Client, base: &Path, rel: &str) -> Result<String> {
+  let path = inside(base, rel)?;
+  if !path.is_file() {
+    return Err(not_found());
+  }
+  let invalid = || CoreError::Invalid("Not an exported entity file (…/<Collection>/<Name>.xml)".into());
+  let name = path
+    .file_name()
+    .and_then(|n| n.to_str())
+    .and_then(|n| n.strip_suffix(".xml"))
+    .filter(|n| !n.is_empty())
+    .ok_or_else(invalid)?;
+  let collection = path.parent().and_then(|p| p.file_name()).and_then(|c| c.to_str()).ok_or_else(invalid)?;
+  // The exporter takes the collection as the type; collection_name passes it through.
+  let xml = format_entity_xml(&client.export_entity(collection, name).await?);
+  std::fs::write(&path, &xml)?;
+  Ok(xml)
+}
+
+/// One entity picked for export, from [`list_remote`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedEntity {
+  /// The ThingWorx project it belongs to.
+  pub project: String,
+  #[serde(rename = "type")]
+  pub entity_type: String,
+  pub name: String,
+}
+
+/// Every entity of each job's project on the server, ignoring its export
+/// filter, so any of them can be picked for [`export`]. A project that cannot
+/// be read is logged and left out.
+pub async fn list_remote(
+  client: &Client,
+  jobs: Option<Vec<ExportJob>>,
+  log: &mut (dyn FnMut(String) + Send),
+) -> Result<Vec<SelectedEntity>> {
+  let names = match jobs {
+    Some(jobs) => jobs.into_iter().map(|j| j.twx_name).collect(),
+    None => client.all_projects().await?,
+  };
+  let mut out = Vec::new();
+  for project in names {
+    match client.project_entities(&project).await {
+      Ok(entities) => out.extend(entities.into_iter().map(|TwxEntity { name, entity_type }| SelectedEntity {
+        project: project.clone(),
+        entity_type,
+        name,
+      })),
+      Err(err) => log(format!("[WARN] Could not fetch entities for \"{project}\": {err}")),
+    }
+  }
+  Ok(out)
+}
+
 /// A name made safe for a folder name; spaces and dots stay.
 fn safe_folder(name: &str) -> String {
   name.chars().map(|c| if c.is_ascii_alphanumeric() || "_-. ".contains(c) { c } else { '_' }).collect()
@@ -390,12 +449,15 @@ fn safe_folder(name: &str) -> String {
 
 /// Exports each job's entities as formatted XML into
 /// `<base>/<env_dir>/WindchillClients/Thingworx/<alias>/<folder>/<Collection>/<Name>.xml`.
-/// `jobs` of `None` exports every project on the server.
+/// `jobs` of `None` exports every project on the server. With `only`, just
+/// those entities are exported (each job's export filter is ignored) and
+/// projects with none of them are skipped.
 pub async fn export(
   client: &Client,
   base: &Path,
   env_dir: &str,
   jobs: Option<Vec<ExportJob>>,
+  only: Option<&[SelectedEntity]>,
   cancel: &CancellationToken,
   log: &mut (dyn FnMut(String) + Send),
 ) -> Result<EntityExportResult> {
@@ -415,6 +477,9 @@ pub async fn export(
 
   let mut result = EntityExportResult { output_dir: env_dir.to_string(), ..Default::default() };
   for job in jobs {
+    if only.is_some_and(|only| !only.iter().any(|e| e.project == job.twx_name)) {
+      continue;
+    }
     let alias = safe_folder(&job.alias);
     let folder = safe_folder(&job.folder_name);
     if [&alias, &folder].iter().any(|s| s.trim().is_empty() || is_unsafe_name(s)) {
@@ -434,13 +499,15 @@ pub async fn export(
       }
     };
     let total = entities.len();
-    let filtered = filter_entities(entities, &job.exports);
-    log(format!(
-      "[{}] {total} entities found, exporting {} (filter: {})",
-      job.twx_name,
-      filtered.len(),
-      job.exports.join(", ")
-    ));
+    let filtered = match only {
+      Some(only) => entities
+        .into_iter()
+        .filter(|e| only.iter().any(|s| s.project == job.twx_name && s.entity_type == e.entity_type && s.name == e.name))
+        .collect::<Vec<_>>(),
+      None => filter_entities(entities, &job.exports),
+    };
+    let filter = if only.is_some() { "selected".to_string() } else { job.exports.join(", ") };
+    log(format!("[{}] {total} entities found, exporting {} (filter: {filter})", job.twx_name, filtered.len()));
 
     for TwxEntity { name, entity_type } in filtered {
       if cancel.is_cancelled() {

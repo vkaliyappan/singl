@@ -28,6 +28,8 @@ export const listEntityFiles = (path: string) => invoke<string[]>("entity_files"
 export const readEntityFile = (path: string) => invoke<string>("entity_read", { path })
 /** Saves an existing file. */
 export const writeEntityFile = (path: string, content: string) => invoke<void>("entity_write", { path, content })
+/** Writes `content` to an absolute path the user picked (Save dialog). */
+export const saveEntityAs = (dest: string, content: string) => invoke<void>("entity_save_as", { dest, content })
 /** Resolves with the new entry's path. */
 export const createEntityEntry = (parent: string, name: string, type: "file" | "dir") =>
   invoke<string>("entity_create", { parent, name, dir: type === "dir" })
@@ -49,6 +51,23 @@ export const locateEntity = (query: { env: string; entity: string; collection?: 
 
 export const getRunTimes = (env: string) => invoke<RunTimes>("entity_run_times", { env })
 
-/** `project` alone, or every project configured for `env` (all on the server when none is). */
-export const exportEnvEntities = (env: string, project: string | undefined, onLine: (line: string) => void) =>
-  invoke<EntityExportResult>("entity_export", { env, project, onEvent: logChannel(onLine) })
+/** Exports the entity file `path` again from `env`'s server, overwriting it; resolves with the new XML. */
+export const reexportEntity = (env: string, path: string) => invoke<string>("entity_reexport", { env, path })
+
+/** An entity on the server, as listed for picking which to export. */
+export type RemoteEntity = { project: string; type: string; name: string }
+
+/** Every entity on the server in the projects `exportEnvEntities(env, project)` covers. */
+export const listRemoteEntities = (env: string, project: string | undefined) =>
+  invoke<RemoteEntity[]>("entity_list_remote", { env, project })
+
+/**
+ * `project` alone, or every project configured for `env` (all on the server when none is).
+ * With `only`, just those entities, ignoring each project's export filter.
+ */
+export const exportEnvEntities = (
+  env: string,
+  project: string | undefined,
+  onLine: (line: string) => void,
+  only?: RemoteEntity[]
+) => invoke<EntityExportResult>("entity_export", { env, project, only, onEvent: logChannel(onLine) })

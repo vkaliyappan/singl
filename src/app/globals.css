@@ -1,13 +1,16 @@
-/* Only src/ holds class names. Without a base, Tailwind scans the whole
-   project, src-tauri/target included, and reads Cargo's gigabyte-sized build
-   output (app_lib.lib) until the dev server runs out of memory. */
-@import "tailwindcss" source("../");
+/* Only src/ holds class names, so automatic source detection is off and the
+   sources are listed below. Left to itself (even with source("../")), the
+   Turbopack build ends up reading src-tauri/target, Cargo's 30+ GB of build
+   output, and next build / next dev run out of memory. */
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 /* AdaptTable's shadcn preset ships its utility classes inside the package, so
    Tailwind has to scan it or none of the table's styles compile. */
 @source "../../node_modules/@adapttable/shadcn/dist/**/*.js";
+
+@source "../**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
 
