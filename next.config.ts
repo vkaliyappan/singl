@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
   // cacheComponents / partialPrefetching enable PPR, which static export does not support
   reactCompiler: true,
   experimental: {
+    agentUpgrade: "security",
     // The persisted dev cache replays the @tailwindcss/turbopack output across
     // restarts and misses classes from files added since, so keep dev uncached.
     turbopackFileSystemCacheForDev: false,
