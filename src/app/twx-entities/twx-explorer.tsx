@@ -76,7 +76,6 @@ import { cn } from "@/lib/utils";
 import {
   createEntityEntry,
   deleteEntityEntry,
-  exportEnvEntities,
   getRunTimes,
   listEntityFiles,
   locateEntity as locateEntityFiles,
@@ -88,7 +87,17 @@ import {
   type LocatedEntity,
   type RemoteEntity,
 } from "@/lib/entities";
-import { extractCode } from "@/lib/twx";
+import {
+  ENTITY_EXPORT,
+  ENTITY_EXTRACT,
+  clearEntityJobs,
+  startExport,
+  startExtract,
+  type EntityExportResult,
+  type EntityExtractResult,
+  type EntityJobMeta,
+} from "@/lib/entity-jobs";
+import { useJob, useJobFinished, type Job, type JobStatus } from "@/lib/background-jobs";
 import { errorMessage, type EnvSetting, type ProjectConfig } from "@/lib/settings";
 import { FileIcon, FileTreePanel, OpenEditorsPanel, getLanguage } from "@/components/file-tree";
 import {
@@ -267,12 +276,17 @@ export function TwxExplorer({
   const [selectedEnv, setSelectedEnv] = useState(linkEnv || (initialEnvs[0]?.environment ?? ""));
   const [selectedProject, setSelectedProject] = useState("__all__");
   const [customProject, setCustomProject] = useState("");
-  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "done" | "error">("idle");
-  const [exportMessages, setExportMessages] = useState<string[]>([]);
   const [lastExportDir, setLastExportDir] = useState<string | null>(null);
 
-  const [extractStatus, setExtractStatus] = useState<"idle" | "extracting" | "done" | "error">("idle");
-  const [extractMessages, setExtractMessages] = useState<string[]>([]);
+  // Export / Extract runs live in @/lib/entity-jobs so they outlive this page.
+  const exportJob = useJob<EntityJobMeta, EntityExportResult>(ENTITY_EXPORT);
+  const extractJob = useJob<EntityJobMeta, EntityExtractResult>(ENTITY_EXTRACT);
+  const asStatus = <R extends string>(s: JobStatus, running: R) => (s === "running" ? running : s);
+  const exportStatus = asStatus(exportJob.status, "exporting");
+  const extractStatus = asStatus(extractJob.status, "extracting");
+  const jobBusy = exportJob.status === "running" || extractJob.status === "running";
+  const exportMessages = useMemo(() => exportJob.log.map((l) => l.text), [exportJob.log]);
+  const extractMessages = useMemo(() => extractJob.log.map((l) => l.text), [extractJob.log]);
 
   // Log drawer state
   const [isOutputOpen, setIsOutputOpen] = useState(true);
@@ -924,70 +938,50 @@ export function TwxExplorer({
   const [pickerOpen, setPickerOpen] = useState(false);
 
   /** Exports the toolbar's project(s), or just `only` of them; with `thenExtract`, runs Extract after a successful export. */
-  const handleExport = async (only?: RemoteEntity[], thenExtract = false) => {
+  const handleExport = (only?: RemoteEntity[], thenExtract = false) => {
     const envRecord = envs.find((e) => e.environment === selectedEnv);
-    if (!envRecord?.hasAppKey) return;
+    if (!envRecord?.hasAppKey || jobBusy) return;
     setPickerOpen(false);
-
-    setExportStatus("exporting");
-    setExportMessages([]);
-    setExtractMessages([]);
-    setExtractStatus("idle");
     setIsOutputOpen(true);
     resetFileTree();
     setLastExportDir(null);
-
-    try {
-      const result = await exportEnvEntities(
-        selectedEnv,
-        resolvedProjectName,
-        (msg) => setExportMessages((prev) => [...prev, msg]),
-        only
-      );
-      const dir = result.outputDir;
-      setLastExportDir(dir);
-      setExportStatus("done");
-      setLastExported(result.exportedAt ?? new Date().toISOString());
-      toast.success(`Export complete: ${result.exported} entities`);
-      if (dir) await loadTree(dir);
-    } catch (err) {
-      setExportStatus("error");
-      setExportMessages((prev) => [...prev, `Error: ${errorMessage(err)}`]);
-      toast.error("Export failed");
-      return;
-    }
-    if (thenExtract) await handleExtract(true);
+    void startExport(selectedEnv, resolvedProjectName, only, thenExtract);
   };
 
   // ── Extract handler ───────────────────────────────────────────────────────
-  /** `afterExport`: chained from Export and Extract, so keep the export log above it. */
-  const handleExtract = async (afterExport = false) => {
-    if (!afterExport) {
-      setExportMessages([]);
-      setExportStatus("idle");
-    }
-    setExtractStatus("extracting");
-    setExtractMessages([]);
+  const handleExtract = () => {
+    if (jobBusy) return;
     setIsOutputOpen(true);
-
-    try {
-      const { extractedAt } = await extractCode({ envName: selectedEnv }, (msg) =>
-        setExtractMessages((prev) => [...prev, msg])
-      );
-      setExtractStatus("done");
-      setLastExtracted(extractedAt ?? new Date().toISOString());
-      toast.success("Extraction complete");
-      const safeEnv = safeEnvDir(selectedEnv);
-      if (safeEnv) {
-        setLastExportDir(safeEnv);
-        await loadTree(safeEnv);
-      }
-    } catch (err) {
-      setExtractStatus("error");
-      setExtractMessages((prev) => [...prev, `Error: ${errorMessage(err)}`]);
-      toast.error("Extraction failed");
-    }
+    void startExtract(selectedEnv);
   };
+
+  // A run finished while this page is open: show its result. (One that
+  // finished while it was closed is picked up by the mount-time loads.)
+  const onEntityJobFinished = useCallback(
+    (job: Job<EntityJobMeta, EntityExportResult | EntityExtractResult>, kind: "export" | "extract") => {
+      if (job.status !== "done" || job.meta?.env !== selectedEnv) return;
+      const now = new Date().toISOString();
+      let dir = safeEnvDir(selectedEnv);
+      if (kind === "export") {
+        const r = job.result as EntityExportResult;
+        setLastExported(r.exportedAt ?? now);
+        dir = r.outputDir || dir;
+      } else {
+        setLastExtracted((job.result as EntityExtractResult).extractedAt ?? now);
+      }
+      setLastExportDir(dir);
+      void loadTree(dir);
+    },
+    [selectedEnv, loadTree]
+  );
+  useJobFinished<EntityJobMeta, EntityExportResult>(
+    ENTITY_EXPORT,
+    useCallback((job) => onEntityJobFinished(job, "export"), [onEntityJobFinished])
+  );
+  useJobFinished<EntityJobMeta, EntityExtractResult>(
+    ENTITY_EXTRACT,
+    useCallback((job) => onEntityJobFinished(job, "extract"), [onEntityJobFinished])
+  );
 
   // ── Derived state ─────────────────────────────────────────────────────────
   const selectedEnvRecord = envs.find((e) => e.environment === selectedEnv);
@@ -1001,7 +995,7 @@ export function TwxExplorer({
   const canExport =
     !!selectedEnv &&
     !!selectedEnvRecord?.hasAppKey &&
-    exportStatus !== "exporting" &&
+    !jobBusy &&
     (selectedProject !== "__custom__" || !!customProject.trim());
 
   const activeTabState = activeTab ? openTabs.get(activeTab) : null;
@@ -1035,12 +1029,7 @@ export function TwxExplorer({
 
   const activeProcessMessages = [...exportMessages, ...extractMessages];
 
-  const handleClearLogs = () => {
-    setExportMessages([]);
-    setExtractMessages([]);
-    if (exportStatus !== "exporting") setExportStatus("idle");
-    if (extractStatus !== "extracting") setExtractStatus("idle");
-  };
+  const handleClearLogs = clearEntityJobs;
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
@@ -1136,103 +1125,37 @@ export function TwxExplorer({
 
           {/* Right: Primary Action Group & Telemetry */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Pick particular entities to export */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setPickerOpen(true)}
-              disabled={!canExport}
-              title="Choose particular entities to export"
-              className="h-8.5 gap-1.5 text-xs font-medium bg-background shadow-2xs"
-            >
-              <IconListCheck className="size-3.5" />
-              Select…
-            </Button>
-
-            {/* Export from ThingWorx: split button, menu adds Export and Extract */}
-            <div className="flex items-center rounded-md shadow-xs bg-gradient-to-r from-indigo-600 to-violet-600">
-              <Button
-                size="sm"
-                onClick={() => handleExport()}
-                disabled={!canExport}
-                className="h-8.5 gap-1.5 text-xs font-medium rounded-r-none bg-transparent hover:bg-white/10 text-white border-0"
+            {/* Utilities: refresh, settings, info in one quiet tray */}
+            <div className="flex items-center h-8.5 rounded-lg border border-input bg-background shadow-2xs p-0.5 gap-0.5">
+              {/* Quick Refresh Local Files */}
+              <button
+                type="button"
+                onClick={() => selectedEnv && loadLocalDirectory(selectedEnv)}
+                disabled={!selectedEnv || treeLoading}
+                title="Rescan local exported files"
+                className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
               >
-                {exportStatus === "exporting" ? (
-                  <Spinner className="size-3.5 text-white" />
-                ) : (
-                  <IconDownload className="size-3.5" />
-                )}
-                {exportStatus === "exporting" ? "Exporting…" : "Export"}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  disabled={!canExport || extractStatus === "extracting"}
-                  title="More export options"
-                  className="h-8.5 px-1.5 rounded-r-md border-l border-white/25 text-white hover:bg-white/10 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
-                  render={<button type="button" />}
-                >
-                  <IconChevronDown className="size-3.5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="text-xs min-w-44">
-                  <DropdownMenuItem onClick={() => handleExport()}>
-                    <IconDownload className="size-3.5" />
-                    Export
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport(undefined, true)}>
-                    <IconPackageImport className="size-3.5" />
-                    Export and Extract
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                <IconRefresh className={cn("size-3.5", treeLoading && "animate-spin")} />
+              </button>
 
-            {/* Extract from CLI Bundle Button */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleExtract()}
-              disabled={!selectedEnv || extractStatus === "extracting"}
-              className="h-8.5 gap-1.5 text-xs font-medium bg-background shadow-2xs"
-            >
-              {extractStatus === "extracting" ? (
-                <Spinner className="size-3.5" />
-              ) : (
-                <IconPackageImport className="size-3.5" />
-              )}
-              {extractStatus === "extracting" ? "Extracting…" : "Extract"}
-            </Button>
-
-            {/* Quick Refresh Local Files */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => selectedEnv && loadLocalDirectory(selectedEnv)}
-              disabled={!selectedEnv || treeLoading}
-              title="Rescan local exported files"
-              className="h-8.5 w-8.5 p-0 bg-background text-muted-foreground hover:text-foreground"
-            >
-              <IconRefresh className={cn("size-3.5", treeLoading && "animate-spin")} />
-            </Button>
-
-            {/* Manage Environments Shortcut */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => router.push("/settings")}
-              title="Manage Environments & Projects"
-              className="h-8.5 w-8.5 p-0 bg-background text-muted-foreground hover:text-foreground"
-            >
-              <IconSettings className="size-3.5" />
-            </Button>
+              {/* Manage Environments Shortcut */}
+              <button
+                type="button"
+                onClick={() => router.push("/settings")}
+                title="Manage Environments & Projects"
+                className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+              >
+                <IconSettings className="size-3.5" />
+              </button>
 
             {/* Info & Telemetry Popover */}
             <Popover>
               <PopoverTrigger
-                className="h-8.5 w-8.5 flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
                 title="Environment details & history"
                 render={<button type="button" />}
               >
-                <IconInfoCircle className="size-4" />
+                <IconInfoCircle className="size-3.5" />
               </PopoverTrigger>
               <PopoverContent align="end" className="w-80 p-3.5 space-y-3">
                 <div className="flex items-center justify-between border-b pb-2">
@@ -1299,6 +1222,70 @@ export function TwxExplorer({
                 </Button>
               </PopoverContent>
             </Popover>
+            </div>
+
+            <div className="h-5 w-px bg-border mx-0.5" />
+
+            {/* Extract from CLI Bundle: secondary step after Export */}
+            <button
+              type="button"
+              onClick={() => handleExtract()}
+              disabled={!selectedEnv || jobBusy}
+              title={extractStale ? staleHint : "Extract the exported CLI bundle into Code/ folders"}
+              className="relative flex items-center gap-1.5 h-8.5 px-3 rounded-lg border border-input bg-background shadow-2xs text-xs font-medium hover:bg-accent/60 transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+            >
+              {extractStatus === "extracting" ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <IconPackageImport className="size-3.5 text-muted-foreground" />
+              )}
+              {extractStatus === "extracting" ? "Extracting…" : "Extract"}
+              {extractStale && extractStatus !== "extracting" && (
+                <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-amber-500 ring-2 ring-background" />
+              )}
+            </button>
+
+            {/* Export from ThingWorx: primary action, rightmost; menu holds variants */}
+            <div className="flex items-stretch h-8.5 rounded-lg bg-primary text-primary-foreground shadow-xs overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handleExport()}
+                disabled={!canExport}
+                title="Export the selected project scope from ThingWorx"
+                className="flex items-center gap-1.5 pl-3 pr-2.5 text-xs font-semibold hover:bg-white/10 transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+              >
+                {exportStatus === "exporting" ? (
+                  <Spinner className="size-3.5" />
+                ) : (
+                  <IconDownload className="size-3.5" />
+                )}
+                {exportStatus === "exporting" ? "Exporting…" : "Export"}
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={!canExport || extractStatus === "extracting"}
+                  title="More export options"
+                  className="flex items-center px-1.5 border-l border-primary-foreground/20 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                  render={<button type="button" />}
+                >
+                  <IconChevronDown className="size-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="text-xs min-w-48">
+                  <DropdownMenuItem onClick={() => handleExport()}>
+                    <IconDownload className="size-3.5" />
+                    Export project
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport(undefined, true)}>
+                    <IconPackageImport className="size-3.5" />
+                    Export and Extract
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setPickerOpen(true)}>
+                    <IconListCheck className="size-3.5" />
+                    Choose entities…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
 
@@ -1820,7 +1807,7 @@ export function TwxExplorer({
                   size="default"
                   variant="outline"
                   onClick={() => handleExtract()}
-                  disabled={!selectedEnv || extractStatus === "extracting"}
+                  disabled={!selectedEnv || jobBusy}
                   className="h-10 text-xs font-medium gap-2 shadow-2xs"
                 >
                   <IconPackageImport className="size-4" />

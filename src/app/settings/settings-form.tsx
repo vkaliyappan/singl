@@ -23,8 +23,6 @@ import {
   IconLoader2,
   IconFolder,
   IconShield,
-  IconChevronDown,
-  IconChevronRight,
   IconInfoCircle,
   IconHome,
   IconRefresh,
@@ -33,6 +31,8 @@ import {
   IconClock,
   IconLayoutBottombarCollapse,
   IconRobot,
+  IconSearch,
+  IconPlugConnected,
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -240,11 +240,86 @@ function ProjectDialog({
   )
 }
 
-// ── Environment Card ───────────────────────────────────────────────────────
+// ── Environments: list + detail ────────────────────────────────────────────
 
-function EnvironmentCard({ setting }: { setting: EnvSetting }) {
+/** Host part of a base URL, for the compact list; falls back to the raw text. */
+function hostOf(url: string) {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+function EnvironmentsPanel({ settings, generation }: { settings: EnvSetting[]; generation: number }) {
+  const [selected, setSelected] = useState(settings[0]?.environment ?? "")
+  const [query, setQuery] = useState("")
+  const q = query.trim().toLowerCase()
+
+  // An environment matches on its name, host, or any of its project names/aliases.
+  const visible = q
+    ? settings.filter(
+        (s) =>
+          s.environment.toLowerCase().includes(q) ||
+          s.twxBaseUrl.toLowerCase().includes(q) ||
+          s.projects.some((p) => p.projectName.toLowerCase().includes(q) || p.alias?.toLowerCase().includes(q))
+      )
+    : settings
+  const current = settings.find((s) => s.environment === selected) ?? settings[0]
+
+  return (
+    <div className="grid items-start gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div className="flex flex-col gap-2 lg:sticky lg:top-0">
+        <div className="relative">
+          <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search environments or projects"
+            className="h-8 pl-8 text-xs"
+          />
+        </div>
+        <div className="flex flex-col gap-1" role="listbox" aria-label="Environments">
+          {visible.length === 0 && <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">No matches.</p>}
+          {visible.map((s) => {
+            const active = s.environment === current?.environment
+            return (
+              <button
+                key={s.environment}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => setSelected(s.environment)}
+                className={cn(
+                  "flex cursor-pointer flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                  active ? "border-primary/40 bg-primary/5 shadow-xs" : "border-transparent hover:bg-muted"
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      !s.enabled ? "bg-muted-foreground/40" : s.hasAppKey ? "bg-green-500" : "bg-amber-500"
+                    )}
+                    title={!s.enabled ? "Disabled" : s.hasAppKey ? "App key configured" : "App key missing"}
+                  />
+                  <span className={cn("truncate font-mono text-xs font-semibold", !s.enabled && "text-muted-foreground")}>{s.environment}</span>
+                  <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">{s.projects.length}</span>
+                </span>
+                <span className="truncate pl-3 text-[10px] text-muted-foreground">{s.twxBaseUrl ? hostOf(s.twxBaseUrl) : "No URL set"}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {current && <EnvironmentDetail key={`${generation}:${current.environment}`} setting={current} projectQuery={q} />}
+    </div>
+  )
+}
+
+function EnvironmentDetail({ setting, projectQuery }: { setting: EnvSetting; projectQuery: string }) {
   const refresh = useContext(RefreshContext)
-  const [expanded, setExpanded] = useState(true)
   const [showCloneDialog, setShowCloneDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showAppKey, setShowAppKey] = useState(false)
@@ -253,6 +328,8 @@ function EnvironmentCard({ setting }: { setting: EnvSetting }) {
   const [enabled, setEnabled] = useState(setting.enabled)
   const [enabledError, setEnabledError] = useState("")
   const [enabledPending, startEnabledTransition] = useTransition()
+  // Starts from the environment search so a project hit is already narrowed down.
+  const [projectFilter, setProjectFilter] = useState(projectQuery)
 
   const [saveState, saveAction, savePending] = useSettingsAction((formData) =>
     saveEnvironment(setting.environment, field(formData, "twxBaseUrl"), field(formData, "twxAppKey"))
@@ -278,41 +355,144 @@ function EnvironmentCard({ setting }: { setting: EnvSetting }) {
     })
   }
 
+  const pf = projectFilter.trim().toLowerCase()
+  const projects = [...setting.projects]
+    .filter(
+      (p) =>
+        !pf ||
+        p.projectName.toLowerCase().includes(pf) ||
+        p.alias?.toLowerCase().includes(pf) ||
+        p.folderName?.toLowerCase().includes(pf)
+    )
+    .sort((a, b) => a.projectName.localeCompare(b.projectName))
+
+  const openProject = (p: ProjectConfig | null) => {
+    setEditingProject(p)
+    setProjectDialogOpen(true)
+  }
+
   return (
-    <Card className="gap-0 overflow-hidden border-border/60 py-0 shadow-xs">
-      {/* Card Header */}
-      <div className="flex items-center justify-between border-b border-border/40 bg-muted/30 px-3.5 py-2.5">
-        <div className="flex items-center gap-2">
-          <div className="rounded bg-primary/10 p-1 text-primary">
-            <IconServer className="size-3.5" />
+    <div className="flex min-w-0 flex-col gap-4">
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="rounded-lg bg-primary/10 p-2 text-primary">
+            <IconServer className="size-4" />
           </div>
-          <span className="font-mono text-xs font-semibold">{setting.environment}</span>
-          {!enabled && (
-            <Badge variant="secondary" className="h-4 py-0 text-[9px] font-normal">
-              Disabled
-            </Badge>
-          )}
-          <StatusBadge ok={setting.hasAppKey} okLabel="AppKey Configured" missingLabel="Key Missing" />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-semibold">{setting.environment}</span>
+              <StatusBadge ok={setting.hasAppKey} okLabel="AppKey Configured" missingLabel="Key Missing" />
+            </div>
+            <span className="truncate text-[11px] text-muted-foreground">{setting.twxBaseUrl ? hostOf(setting.twxBaseUrl) : "No base URL set"}</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-1">
           {enabledError && <span className="text-[10px] font-medium text-destructive">{enabledError}</span>}
-          <label className="flex items-center gap-1.5 px-1.5 text-[10px] text-muted-foreground">
+          <label className="flex items-center gap-1.5 px-1.5 text-[11px] text-muted-foreground">
             <Switch checked={enabled} disabled={enabledPending} onCheckedChange={toggleEnabled} aria-label={`Enable ${setting.environment}`} />
             {enabled ? "Enabled" : "Disabled"}
           </label>
-
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => setShowCloneDialog(true)}>
             <IconCopy className="size-3" />
-            <span className="text-[10px]">Clone</span>
+            <span className="text-[11px]">Clone</span>
           </Button>
-
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => setShowDeleteDialog(true)}>
             <IconTrash className="size-3" />
-            <span className="text-[10px]">Delete</span>
+            <span className="text-[11px]">Delete</span>
           </Button>
         </div>
       </div>
+
+      {/* Connection */}
+      <Card className="gap-0 border-border/60 py-0 shadow-xs">
+        <div className="flex items-center gap-1.5 border-b border-border/40 px-3.5 py-2 text-xs font-medium">
+          <IconPlugConnected className="size-3.5 text-muted-foreground" />
+          Connection
+        </div>
+        <CardContent className="p-3.5">
+          <form action={saveAction} className="flex flex-col gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium">TWX Base URL</Label>
+                <Input
+                  name="twxBaseUrl"
+                  defaultValue={setting.twxBaseUrl}
+                  title={setting.twxBaseUrl}
+                  placeholder="https://your-thingworx-host/Thingworx"
+                  className="h-8 font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px] font-medium">TWX App Key</Label>
+                  <SecretToggle shown={showAppKey} onToggle={() => setShowAppKey(!showAppKey)} />
+                </div>
+                <Input
+                  name="twxAppKey"
+                  type={showAppKey ? "text" : "password"}
+                  autoComplete="new-password"
+                  placeholder={setting.hasAppKey ? "•••••••• (blank keeps existing)" : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}
+                  className="h-8 font-mono text-xs"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <SaveStatus state={saveState} saved="Saved." />
+              <SubmitButton pending={savePending} label="Save Connection" />
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Projects */}
+      <Card className="gap-0 overflow-hidden border-border/60 py-0 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border/40 px-3.5 py-2">
+          <span className="flex items-center gap-1.5 text-xs font-medium">
+            <IconFolders className="size-3.5 text-muted-foreground" />
+            Projects
+            <Badge variant="outline" className="h-4 py-0 text-[9px]">
+              {pf ? `${projects.length} / ${setting.projects.length}` : setting.projects.length}
+            </Badge>
+          </span>
+          <div className="relative ml-auto w-full sm:w-52">
+            <IconSearch className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+              placeholder="Filter projects"
+              className="h-7 pl-6 text-xs"
+            />
+          </div>
+          <Button variant="outline" size="sm" className="text-[11px]" onClick={() => openProject(null)}>
+            <IconPlus className="size-3" />
+            Add Project
+          </Button>
+        </div>
+
+        {setting.projects.length === 0 ? (
+          <div className="py-6 text-center text-[11px] text-muted-foreground">No projects configured for this environment yet.</div>
+        ) : projects.length === 0 ? (
+          <div className="py-6 text-center text-[11px] text-muted-foreground">No projects match “{projectFilter}”.</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="bg-muted/30 text-[10px] tracking-wide text-muted-foreground uppercase">
+              <tr>
+                <th className="px-3.5 py-1.5 text-left font-medium">Project</th>
+                <th className="px-2 py-1.5 text-left font-medium">Alias / Folder</th>
+                <th className="px-2 py-1.5 text-left font-medium">Exports</th>
+                <th className="w-16" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {projects.map((proj) => (
+                <ProjectRow key={proj.id} project={proj} onEdit={() => openProject(proj)} />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
       {/* Clone Dialog */}
       <Dialog open={showCloneDialog} onOpenChange={setShowCloneDialog}>
@@ -324,7 +504,6 @@ function EnvironmentCard({ setting }: { setting: EnvSetting }) {
               key is not copied.
             </DialogDescription>
           </DialogHeader>
-
           <form action={cloneAction} className="space-y-3 pt-1">
             <div className="space-y-1">
               <Label className="text-xs font-medium">New Environment Name</Label>
@@ -341,7 +520,7 @@ function EnvironmentCard({ setting }: { setting: EnvSetting }) {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Dialog: the web page deleted on one click; here it asks first. */}
+      {/* Delete Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
@@ -365,137 +544,50 @@ function EnvironmentCard({ setting }: { setting: EnvSetting }) {
         </DialogContent>
       </Dialog>
 
-      {/* Environment Details Form */}
-      <CardContent className="space-y-3 p-3.5">
-        <form action={saveAction} className="space-y-2.5">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-[11px] font-medium">TWX Base URL</Label>
-              <Input
-                name="twxBaseUrl"
-                defaultValue={setting.twxBaseUrl}
-                placeholder="https://your-thingworx-host/Thingworx"
-                className="h-8 font-mono text-xs"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-[11px] font-medium">TWX App Key</Label>
-                <SecretToggle shown={showAppKey} onToggle={() => setShowAppKey(!showAppKey)} />
-              </div>
-              <Input
-                name="twxAppKey"
-                type={showAppKey ? "text" : "password"}
-                autoComplete="new-password"
-                placeholder={setting.hasAppKey ? "•••••••• (Leave blank to keep existing)" : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}
-                className="h-8 font-mono text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pt-1">
-            <SaveStatus state={saveState} saved="Saved." />
-            <SubmitButton pending={savePending} label="Save Connection" />
-          </div>
-        </form>
-
-        {/* Projects Section */}
-        <div className="border-t border-border/40 pt-2.5">
-          <div className="flex items-center justify-between pb-2">
-            <button
-              type="button"
-              onClick={() => setExpanded(!expanded)}
-              className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-foreground transition-colors hover:text-primary"
-            >
-              {expanded ? <IconChevronDown className="size-3.5" /> : <IconChevronRight className="size-3.5" />}
-              <span>Configured Projects</span>
-              <Badge variant="outline" className="ml-1 h-4 py-0 text-[9px]">
-                {setting.projects.length}
-              </Badge>
-            </button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-[10px]"
-              onClick={() => {
-                setEditingProject(null)
-                setProjectDialogOpen(true)
-              }}
-            >
-              <IconPlus className="size-3" />
-              Add Project
-            </Button>
-          </div>
-
-          {expanded && (
-            <div className="space-y-1.5">
-              {setting.projects.length === 0 ? (
-                <div className="rounded-md border border-dashed bg-muted/10 py-4 text-center text-[11px] text-muted-foreground">
-                  No projects configured for this environment yet.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {setting.projects.map((proj) => (
-                    <ProjectItem
-                      key={proj.id}
-                      project={proj}
-                      onEdit={() => {
-                        setEditingProject(proj)
-                        setProjectDialogOpen(true)
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </CardContent>
-
       <ProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} environment={setting.environment} project={editingProject} />
-    </Card>
+    </div>
   )
 }
 
-function ProjectItem({ project, onEdit }: { project: ProjectConfig; onEdit: () => void }) {
+function ProjectRow({ project, onEdit }: { project: ProjectConfig; onEdit: () => void }) {
   const [state, deleteAction, deletePending] = useSettingsAction(() => deleteProject(project.id))
+  const alias = project.alias && project.alias !== project.projectName ? project.alias : ""
 
   return (
-    <div className="flex items-center justify-between rounded-md border border-border/40 bg-muted/20 p-2 text-xs">
-      <div className="min-w-0 flex-1 pr-2">
-        <div className="flex items-center gap-1.5 truncate">
-          <span className="truncate text-xs font-semibold">{project.projectName}</span>
-          {project.alias && project.alias !== project.projectName && (
-            <span className="font-mono text-[10px] text-muted-foreground">({project.alias})</span>
-          )}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span>Exports:</span>
-          <span className="truncate font-mono">{project.exports.join(", ")}</span>
-        </div>
+    <tr className="group hover:bg-muted/30">
+      <td className="px-3.5 py-1.5">
+        <button type="button" onClick={onEdit} className="cursor-pointer text-left font-semibold hover:text-primary">
+          {project.projectName}
+        </button>
         {state.error && <p className="text-[10px] text-destructive">{state.error}</p>}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-0.5">
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={onEdit} aria-label="Edit project">
-          <IconEdit className="size-3" />
-        </Button>
-        <form action={deleteAction}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            type="submit"
-            disabled={deletePending}
-            className="text-muted-foreground hover:text-destructive"
-            aria-label="Delete project"
-          >
-            <IconTrash className="size-3" />
+      </td>
+      <td className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+        {alias || "—"}
+        {project.folderName && <span className="ml-1 text-[10px]">→ {project.folderName}</span>}
+      </td>
+      <td className="max-w-40 truncate px-2 py-1.5 font-mono text-[11px] text-muted-foreground" title={project.exports.join(", ")}>
+        {project.exports.join(", ")}
+      </td>
+      <td className="px-2 py-1">
+        <div className="flex items-center justify-end gap-0.5">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={onEdit} aria-label="Edit project">
+            <IconEdit className="size-3" />
           </Button>
-        </form>
-      </div>
-    </div>
+          <form action={deleteAction}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              type="submit"
+              disabled={deletePending}
+              className="text-muted-foreground hover:text-destructive"
+              aria-label="Delete project"
+            >
+              <IconTrash className="size-3" />
+            </Button>
+          </form>
+        </div>
+      </td>
+    </tr>
   )
 }
 
@@ -1228,11 +1320,7 @@ export function SettingsExplorer({
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {settings.map((s) => (
-                  <EnvironmentCard key={`${generation}:${s.environment}`} setting={s} />
-                ))}
-              </div>
+              <EnvironmentsPanel settings={settings} generation={generation} />
             ))}
 
           {section === "integrations" && <AzurePatCard hasAzurePatToken={app.hasAzurePatToken} />}

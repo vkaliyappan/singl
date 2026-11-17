@@ -5,7 +5,7 @@
 // instead of SSE and each command resolves with its result. Relative paths
 // resolve against the workspace folder.
 
-import { useState, useRef, useEffect, useCallback, useMemo, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   IconCloudDownload,
   IconArchive,
@@ -62,6 +62,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { errorMessage } from "@/lib/settings";
+import { appendJobLog, clearJob, isJobRunning, runJob, useJob, type JobLine } from "@/lib/background-jobs";
 import {
   backupDeploymentFiles,
   bundleProjects as runBundle,
@@ -145,51 +146,51 @@ function classifyMessage(msg: string): LogEntry["kind"] {
   return "info";
 }
 
-function logEntry(msg: string): LogEntry {
-  return {
-    id: `${Date.now()}-${Math.random()}`,
-    timestamp: new Date().toLocaleTimeString("en-US", { hour12: false }),
-    text: msg,
-    kind: classifyMessage(msg),
-  };
+function logEntries(log: JobLine[]): LogEntry[] {
+  return log.map((l, i) => ({
+    id: String(i),
+    timestamp: new Date(l.at).toLocaleTimeString("en-US", { hour12: false }),
+    text: l.text,
+    kind: classifyMessage(l.text),
+  }));
 }
 
-interface StageState<T> {
-  setRunning: (running: boolean) => void;
-  setLog: Dispatch<SetStateAction<LogEntry[]>>;
-  setResult: Dispatch<SetStateAction<T | null>>;
-}
+const TABS: TabType[] = ["export", "extract", "configs", "bundle", "backup", "upload"];
+/** Background-job key of a stage (see @/lib/background-jobs); the run outlives this page. */
+const stageJob = (tab: TabType) => `deploy:${tab}`;
 
 /**
- * Runs one stage's command: clears its console, streams log lines into it, and
- * keeps the result for the summary card. Toasts double as native notifications.
+ * Runs one stage's command as a background job: clears its console, streams log
+ * lines into it, and keeps the result for the summary card. Toasts double as
+ * native notifications.
  */
 async function runStage<T extends { errors: string[] }>(
-  stage: StageState<T>,
+  tab: TabType,
   label: string,
-  run: (onLine: (line: string) => void) => Promise<NoInfer<T>>,
+  run: (onLine: (line: string) => void) => Promise<T>,
   summary: (result: NoInfer<T>) => string
 ) {
-  stage.setRunning(true);
-  stage.setLog([]);
-  stage.setResult(null);
-  const appendConsole = (line: string) => stage.setLog((prev) => [...prev, logEntry(line)]);
-  try {
-    const result = await run(appendConsole);
-    appendConsole(`[DONE] ${summary(result)}`);
-    stage.setResult(result);
-    if (result.errors.length > 0) {
-      toast.warning(`${label} finished with ${result.errors.length} error(s)`, { description: summary(result) });
+  const key = stageJob(tab);
+  const r = await runJob<T>(key, run);
+  if (!r) return;
+  if (r.ok) {
+    appendJobLog(key, `[DONE] ${summary(r.result)}`);
+    if (r.result.errors.length > 0) {
+      toast.warning(`${label} finished with ${r.result.errors.length} error(s)`, { description: summary(r.result) });
     } else {
-      toast.success(`${label} complete`, { description: summary(result) });
+      toast.success(`${label} complete`, { description: summary(r.result) });
     }
-  } catch (err) {
-    const msg = errorMessage(err);
-    appendConsole(`[ERROR] ${msg}`);
-    toast.error(`${label} failed`, { description: msg });
-  } finally {
-    stage.setRunning(false);
+  } else {
+    appendJobLog(key, `[ERROR] ${r.error}`);
+    toast.error(`${label} failed`, { description: r.error });
   }
+}
+
+/** A stage's job: running flag, console entries and last good result. */
+function useStage<T>(tab: TabType) {
+  const job = useJob<unknown, T>(stageJob(tab));
+  const log = useMemo(() => logEntries(job.log), [job.log]);
+  return { running: job.status === "running", log, result: job.status === "done" ? job.result ?? null : null };
 }
 
 interface UploadPreview {
@@ -209,7 +210,10 @@ export function DeployExplorer({
   workspaceRoot,
 }: DeployExplorerProps) {
   // Active Tab
-  const [activeTab, setActiveTab] = useState<TabType>("export");
+  // Back on this page mid-run: open the running stage.
+  const [activeTab, setActiveTab] = useState<TabType>(
+    () => TABS.find((t) => isJobRunning(stageJob(t))) ?? "export"
+  );
 
   // Stage 1: Export state
   const [exportEnv, setExportEnv] = useState("");
@@ -219,18 +223,14 @@ export function DeployExplorer({
   // Export pulls from one server, so offer only the projects configured for it.
   const exportProjects = exportEnv ? projectsByEnv[exportEnv] ?? [] : projects;
   const [exportDryRun, setExportDryRun] = useState(false);
-  const [exportRunning, setExportRunning] = useState(false);
-  const [exportLog, setExportLog] = useState<LogEntry[]>([]);
-  const [exportResult, setExportResult] = useState<DeploymentExportResult | null>(null);
+  const { running: exportRunning, log: exportLog, result: exportResult } = useStage<DeploymentExportResult>("export");
 
   // Stage 2: Extract state
   const [extractInput, setExtractInput] = useState("");
   const [extractOutput, setExtractOutput] = useState("./WindchillClients/ThingWorx");
   const [extractProject, setExtractProject] = useState(ALL_PROJECTS);
   const [extractDryRun, setExtractDryRun] = useState(false);
-  const [extractRunning, setExtractRunning] = useState(false);
-  const [extractLog, setExtractLog] = useState<LogEntry[]>([]);
-  const [extractResult, setExtractResult] = useState<DeploymentExtractResult | null>(null);
+  const { running: extractRunning, log: extractLog, result: extractResult } = useStage<DeploymentExtractResult>("extract");
 
   // Stage 3: Update Configs state
   const [configSource, setConfigSource] = useState(bundleSrcDir);
@@ -250,9 +250,7 @@ export function DeployExplorer({
   const [usernameInputs, setUsernameInputs] = useState<Record<string, string>>({});
   const [configCleanDest, setConfigCleanDest] = useState(false);
   const [configDryRun, setConfigDryRun] = useState(false);
-  const [configRunning, setConfigRunning] = useState(false);
-  const [configLog, setConfigLog] = useState<LogEntry[]>([]);
-  const [configResult, setConfigResult] = useState<ConnectorUpdateResult | null>(null);
+  const { running: configRunning, log: configLog, result: configResult } = useStage<ConnectorUpdateResult>("configs");
   const [configConfirmOpen, setConfigConfirmOpen] = useState(false);
 
   // Stage 4: Bundle state
@@ -260,9 +258,7 @@ export function DeployExplorer({
   const [bundleDest, setBundleDest] = useState(bundleDestDir);
   const [bundleProject, setBundleProject] = useState(ALL_PROJECTS);
   const [bundleDryRun, setBundleDryRun] = useState(false);
-  const [bundleRunning, setBundleRunning] = useState(false);
-  const [bundleLog, setBundleLog] = useState<LogEntry[]>([]);
-  const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
+  const { running: bundleRunning, log: bundleLog, result: bundleResult } = useStage<BundleResult>("bundle");
 
   // Stage 5: Backup state
   const [backupEnv, setBackupEnv] = useState("");
@@ -271,9 +267,7 @@ export function DeployExplorer({
   const [backupProject, setBackupProject] = useState(ALL_PROJECTS);
   const [backupZip, setBackupZip] = useState(false);
   const [backupDryRun, setBackupDryRun] = useState(false);
-  const [backupRunning, setBackupRunning] = useState(false);
-  const [backupLog, setBackupLog] = useState<LogEntry[]>([]);
-  const [backupResult, setBackupResult] = useState<DeploymentBackupResult | null>(null);
+  const { running: backupRunning, log: backupLog, result: backupResult } = useStage<DeploymentBackupResult>("backup");
   // Backs up the server being deployed to, so offer only its projects.
   const backupProjects = backupEnv ? projectsByEnv[backupEnv] ?? [] : projects;
 
@@ -285,9 +279,7 @@ export function DeployExplorer({
   const [uploadSubfolder, setUploadSubfolder] = useState(false);
   const [uploadDeleteZip, setUploadDeleteZip] = useState(false);
   const [uploadDryRun, setUploadDryRun] = useState(false);
-  const [uploadRunning, setUploadRunning] = useState(false);
-  const [uploadLog, setUploadLog] = useState<LogEntry[]>([]);
-  const [uploadResult, setUploadResult] = useState<DeploymentUploadResult | null>(null);
+  const { running: uploadRunning, log: uploadLog, result: uploadResult } = useStage<DeploymentUploadResult>("upload");
   const [uploadPreview, setUploadPreview] = useState<UploadPreview>({
     loading: false,
     lines: [],
@@ -412,7 +404,7 @@ export function DeployExplorer({
       username: p.usernameChange,
     }));
     await runStage(
-      { setRunning: setConfigRunning, setLog: setConfigLog, setResult: setConfigResult },
+      "configs",
       "Connector update",
       (onLine) =>
         updateConnectors(
@@ -431,7 +423,7 @@ export function DeployExplorer({
 
   const handleBackup = useCallback(async () => {
     await runStage(
-      { setRunning: setBackupRunning, setLog: setBackupLog, setResult: setBackupResult },
+      "backup",
       "Backup",
       (onLine) =>
         backupDeploymentFiles(
@@ -452,7 +444,7 @@ export function DeployExplorer({
   // Execution Handlers
   const handleExport = useCallback(async () => {
     await runStage(
-      { setRunning: setExportRunning, setLog: setExportLog, setResult: setExportResult },
+      "export",
       "Export",
       (onLine) =>
         exportDeploymentFiles(
@@ -471,7 +463,7 @@ export function DeployExplorer({
 
   const handleExtract = useCallback(async () => {
     await runStage(
-      { setRunning: setExtractRunning, setLog: setExtractLog, setResult: setExtractResult },
+      "extract",
       "Extract",
       (onLine) =>
         extractDeploymentFiles(
@@ -489,7 +481,7 @@ export function DeployExplorer({
 
   const handleBundle = useCallback(async () => {
     await runStage(
-      { setRunning: setBundleRunning, setLog: setBundleLog, setResult: setBundleResult },
+      "bundle",
       "Bundle",
       (onLine) =>
         runBundle(
@@ -535,7 +527,7 @@ export function DeployExplorer({
   const handleUpload = useCallback(async () => {
     setUploadConfirmOpen(false);
     await runStage(
-      { setRunning: setUploadRunning, setLog: setUploadLog, setResult: setUploadResult },
+      "upload",
       "Upload",
       (onLine) => uploadDeploymentFiles({ ...uploadArgs, dryRun: uploadDryRun }, onLine),
       (r) => `${r.filesUploaded} file(s) uploaded, ${r.zipsExtracted} ZIP(s) extracted to SystemRepository${r.targetDir}`
@@ -559,27 +551,7 @@ export function DeployExplorer({
   }, [currentLogs]);
 
   // Clear current active logs
-  const handleClearLogs = useCallback(() => {
-    if (activeTab === "export") {
-      setExportLog([]);
-      setExportResult(null);
-    } else if (activeTab === "extract") {
-      setExtractLog([]);
-      setExtractResult(null);
-    } else if (activeTab === "configs") {
-      setConfigLog([]);
-      setConfigResult(null);
-    } else if (activeTab === "bundle") {
-      setBundleLog([]);
-      setBundleResult(null);
-    } else if (activeTab === "backup") {
-      setBackupLog([]);
-      setBackupResult(null);
-    } else if (activeTab === "upload") {
-      setUploadLog([]);
-      setUploadResult(null);
-    }
-  }, [activeTab]);
+  const handleClearLogs = useCallback(() => clearJob(stageJob(activeTab)), [activeTab]);
 
   // Pipeline Handoff Handlers
   const handleHandoffToExtract = useCallback((folderPath?: string) => {

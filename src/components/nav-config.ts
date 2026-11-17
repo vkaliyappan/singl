@@ -29,7 +29,8 @@ export const navSections: NavSection[] = [
     title: "Workspace",
     items: [
       { title: "Home", href: "/", icon: IconHome },
-      { title: "Repository", href: "/repo", icon: IconGitBranch },
+      { title: "TWX Repository", href: "/repo", icon: IconGitBranch },
+      { title: "Windchill Repository", href: "/repo2", icon: IconGitBranch },
     ],
   },
   {

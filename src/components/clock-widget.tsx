@@ -465,7 +465,7 @@ export function ClockWidget() {
           >
             {settings.pinned ? <IconPinFilled size={14} /> : <IconPin size={14} />}
           </HeaderButton>
-          <HeaderButton title="Minimize" aria-label="Minimize" onClick={() => windowAction((w) => w.minimize())}>
+          <HeaderButton title="Minimize" aria-label="Minimize" onClick={() => windowAction((w) => w.hide())}>
             <IconMinus size={14} />
           </HeaderButton>
           <HeaderButton

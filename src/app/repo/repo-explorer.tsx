@@ -4,7 +4,7 @@
 // (src/lib/repo.ts, src/lib/twx.ts); git and extract output streams over a
 // Channel instead of SSE.
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/components/providers";
 import {
@@ -61,19 +61,20 @@ import { RepoFileTree } from "./repo-file-tree";
 import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import {
-  checkoutBranch,
-  clearExtracted,
-  cloneRepo,
-  fetchRepo,
-  listBranches,
-  listRepoFiles,
-  pullRepo,
-  readRepoFile,
-  searchRepo,
-} from "@/lib/repo";
+import { listBranches, listRepoFiles, readRepoFile, searchRepo, type RepoSlot } from "@/lib/repo";
 import { errorMessage } from "@/lib/settings";
-import { extractCode } from "@/lib/twx";
+import { clearJob, isJobRunning, useJob, useJobFinished, type Job } from "@/lib/background-jobs";
+import {
+  repoJobKey,
+  loadRepoTimes,
+  startCheckout,
+  startClear,
+  startClone,
+  startExtract,
+  startFetch,
+  startPull,
+  type RepoJobMeta,
+} from "@/lib/repo-jobs";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -91,6 +92,7 @@ interface TabState {
 }
 
 interface RepoExplorerProps {
+  slot: RepoSlot;
   hasPatToken: boolean;
   savedRepoUrl: string;
   savedBranch: string;
@@ -126,12 +128,15 @@ function getProviderInfo(url: string) {
 }
 
 export function RepoExplorer({
+  slot,
   hasPatToken,
   savedRepoUrl,
   savedBranch,
   savedSlug,
 }: RepoExplorerProps) {
   const { resolvedTheme } = useTheme();
+  const REPO_JOB = repoJobKey(slot);
+  const storageKey = slot === 1 ? "singl:repo" : `singl:repo${slot}`;
 
   // ── View (explorer / changes) ─────────────────────────────────────────────
   const [view, setView] = useState<"explorer" | "changes">("explorer");
@@ -177,30 +182,34 @@ export function RepoExplorer({
   const [fetchingBranches, setFetchingBranches] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
 
-  const [cloneStatus, setCloneStatus] = useState<"idle" | "cloning" | "done" | "error">(
-    savedSlug ? "done" : "idle"
-  );
+  // Git / extract operations run as one background job (@/lib/repo-jobs) that outlives this page.
+  const repoJob = useJob<RepoJobMeta>(REPO_JOB);
+  const runningOp = repoJob.status === "running" ? repoJob.meta?.op ?? null : null;
+
+  const [cloneState, setCloneStatus] = useState<"idle" | "done" | "error">(savedSlug ? "done" : "idle");
+  const cloneStatus = runningOp === "clone" ? "cloning" : cloneState;
   const [clonedSlug, setClonedSlug] = useState<string | null>(savedSlug || null);
 
   // ── Git-toolbar state ─────────────────────────────────────────────────────
   const [currentBranch, setCurrentBranch] = useState(savedBranch);
-  const [gitOp, setGitOp] = useState<"checkout" | "pull" | "fetch" | null>(null);
+  const gitOp = runningOp === "checkout" || runningOp === "pull" || runningOp === "fetch" ? runningOp : null;
 
   // ── Extract state ─────────────────────────────────────────────────────────
-  const [extractStatus, setExtractStatus] = useState<"idle" | "extracting" | "done" | "error">("idle");
+  // Extract / Clear turn TWX package XML into Code/ folders: the TWX page only.
+  const canExtract = slot === 1;
+  const extractStatus = runningOp === "extract" ? "extracting" : "idle";
 
   // ── Clear extracted state ─────────────────────────────────────────────────
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const [clearStatus, setClearStatus] = useState<"idle" | "clearing" | "done" | "error">("idle");
+  const clearStatus = runningOp === "clear" ? "clearing" : "idle";
   const [changesPanelRefresh, setChangesPanelRefresh] = useState(0);
 
   // ── Console Output Drawer State ───────────────────────────────────────────
-  const [consoleOpen, setConsoleOpen] = useState(false);
-  const [consoleTitle, setConsoleTitle] = useState("Process Console");
-  const [consoleStatus, setConsoleStatus] = useState<"idle" | "running" | "done" | "error">("idle");
-  const [consoleRunningLabel, setConsoleRunningLabel] = useState("Processing...");
-  const [consoleMessages, setConsoleMessages] = useState<string[]>([]);
-  const appendConsole = useCallback((line: string) => setConsoleMessages((prev) => [...prev, line]), []);
+  const [consoleOpen, setConsoleOpen] = useState(() => isJobRunning(REPO_JOB));
+  const consoleTitle = repoJob.meta?.title ?? "Process Console";
+  const consoleStatus = repoJob.status;
+  const consoleRunningLabel = repoJob.meta?.runningLabel ?? "Processing...";
+  const consoleMessages = useMemo(() => repoJob.log.map((l) => l.text), [repoJob.log]);
 
   // ── Timestamps ────────────────────────────────────────────────────────────
   const [lastPulled, setLastPulled] = useState<string | null>(null);
@@ -231,7 +240,7 @@ export function RepoExplorer({
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("singl:repo");
+      const raw = localStorage.getItem(storageKey);
       if (!raw) return;
       const s = JSON.parse(raw) as {
         treeWidth?: number;
@@ -259,21 +268,17 @@ export function RepoExplorer({
     }
     try {
       localStorage.setItem(
-        "singl:repo",
+        storageKey,
         JSON.stringify({ treeWidth, activeTab, wordWrap, minimapEnabled })
       );
     } catch {}
-  }, [treeWidth, activeTab, wordWrap, minimapEnabled]);
+  }, [storageKey, treeWidth, activeTab, wordWrap, minimapEnabled]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("singl:repo:ts");
-      if (!raw) return;
-      const s = JSON.parse(raw) as { lastPulled?: string; lastUpdated?: string };
-      if (s.lastPulled) setLastPulled(s.lastPulled);
-      if (s.lastUpdated) setLastUpdated(s.lastUpdated);
-    } catch {}
-  }, []);
+    const s = loadRepoTimes(slot);
+    if (s.lastPulled) setLastPulled(s.lastPulled);
+    if (s.lastUpdated) setLastUpdated(s.lastUpdated);
+  }, [slot]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const resetFileTree = useCallback(() => {
@@ -329,13 +334,13 @@ export function RepoExplorer({
   const loadDir = useCallback(async () => {
     setTreeLoading(true);
     try {
-      setTreePaths(await listRepoFiles());
+      setTreePaths(await listRepoFiles(slot));
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setTreeLoading(false);
     }
-  }, []);
+  }, [slot]);
 
   useEffect(() => {
     if (savedSlug) loadDir();
@@ -372,186 +377,95 @@ export function RepoExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloneStatus]);
 
-  const handleClone = async () => {
-    setCloneStatus("cloning");
+  const handleClone = () => {
+    if (isJobRunning(REPO_JOB)) return;
     setClonedSlug(null);
     resetFileTree();
-
-    setConsoleTitle("Clone Repository");
-    setConsoleRunningLabel("Cloning...");
-    setConsoleStatus("running");
-    setConsoleMessages([`Cloning branch "${selectedBranch}" from ${repoUrl}...`]);
     setConsoleOpen(true);
-
-    try {
-      const slug = await cloneRepo(repoUrl, selectedBranch, appendConsole);
-      setCloneStatus("done");
-      setClonedSlug(slug);
-      setCurrentBranch(selectedBranch);
-      setConsoleStatus("done");
-      toast.success("Repository cloned successfully", { description: `Branch "${selectedBranch}" for ${slug} is ready.` });
-      const cloneNow = new Date().toISOString();
-      setLastUpdated(cloneNow);
-      try {
-        localStorage.setItem("singl:repo:ts", JSON.stringify({ lastPulled, lastUpdated: cloneNow }));
-      } catch {}
-      await loadDir();
-    } catch (err) {
-      setCloneStatus("error");
-      setConsoleStatus("error");
-      const msg = errorMessage(err);
-      setConsoleMessages((prev) => [...prev, msg]);
-      toast.error("Repository clone failed", { description: msg });
-    }
+    void startClone(slot, repoUrl, selectedBranch);
   };
 
-  const handleExtract = useCallback(async () => {
+  const handleExtract = useCallback(() => {
     if (!clonedSlug) return;
-    setExtractStatus("extracting");
-    setConsoleTitle("TWX Package Extract");
-    setConsoleRunningLabel("Extracting packages...");
-    setConsoleStatus("running");
-    setConsoleMessages([`Extracting packages for ${clonedSlug}...`]);
     setConsoleOpen(true);
+    void startExtract(slot, clonedSlug);
+  }, [slot, clonedSlug]);
 
-    try {
-      await extractCode({ repoSlug: clonedSlug }, appendConsole);
-      setExtractStatus("done");
-      setConsoleStatus("done");
-      setChangesPanelRefresh((n) => n + 1);
-      toast.success("Package extraction complete");
-      resetFileTree();
-      await loadDir();
-    } catch (err) {
-      setExtractStatus("error");
-      setConsoleStatus("error");
-      const msg = errorMessage(err);
-      setConsoleMessages((prev) => [...prev, `Error: ${msg}`]);
-      toast.error(`Extract failed: ${msg}`);
-    }
-  }, [clonedSlug, appendConsole, loadDir, resetFileTree]);
-
-  const handleClearExtracted = useCallback(async () => {
-    setClearStatus("clearing");
-    setConsoleTitle("Clear Extracted Code");
-    setConsoleRunningLabel("Clearing...");
-    setConsoleStatus("running");
-    setConsoleMessages(["Removing generated Code/ directories..."]);
+  const handleClearExtracted = useCallback(() => {
     setConsoleOpen(true);
-
-    try {
-      const deleted = await clearExtracted();
-      setClearStatus("done");
-      setConsoleStatus("done");
-      setConsoleMessages((prev) => [...prev, `[DONE] Removed ${deleted} extracted directories.`]);
-      setChangesPanelRefresh((n) => n + 1);
-      toast.success(`Cleared ${deleted} extracted directories`);
-      if (clonedSlug) {
-        resetFileTree();
-        await loadDir();
-      }
-    } catch (err) {
-      setClearStatus("error");
-      setConsoleStatus("error");
-      const msg = errorMessage(err);
-      setConsoleMessages((prev) => [...prev, `[ERROR] ${msg}`]);
-      toast.error(msg);
-    }
-  }, [clonedSlug, loadDir, resetFileTree]);
+    void startClear(slot);
+  }, [slot]);
 
   const handleChangeRepo = useCallback(() => {
+    if (isJobRunning(REPO_JOB)) return;
     setCloneStatus("idle");
     setClonedSlug(null);
-    setGitOp(null);
-    setConsoleMessages([]);
-    setConsoleStatus("idle");
+    clearJob(REPO_JOB);
     resetFileTree();
-  }, [resetFileTree]);
+  }, [REPO_JOB, resetFileTree]);
 
   // ── Git-toolbar handlers ──────────────────────────────────────────────────
   const handleCheckout = useCallback(
-    async (branch: string) => {
+    (branch: string) => {
       if (!clonedSlug || branch === currentBranch) return;
-      setGitOp("checkout");
-      setConsoleTitle(`Switch Branch: ${branch}`);
-      setConsoleRunningLabel("Checking out...");
-      setConsoleStatus("running");
-      setConsoleMessages([`Checking out branch "${branch}"...`]);
       setConsoleOpen(true);
-
-      try {
-        await checkoutBranch(branch, appendConsole);
-        setCurrentBranch(branch);
-        setConsoleStatus("done");
-        toast.success(`Switched to branch "${branch}"`);
-        resetFileTree();
-        await loadDir();
-      } catch (err) {
-        setConsoleStatus("error");
-        const msg = errorMessage(err);
-        setConsoleMessages((prev) => [...prev, msg]);
-        toast.error(`Checkout failed: ${msg}`);
-      } finally {
-        setGitOp(null);
-      }
+      void startCheckout(slot, branch);
     },
-    [clonedSlug, currentBranch, appendConsole, loadDir, resetFileTree]
+    [slot, clonedSlug, currentBranch]
   );
 
-  const handlePull = useCallback(async () => {
+  const handlePull = useCallback(() => {
     if (!clonedSlug) return;
-    setGitOp("pull");
-    setConsoleTitle("Git Pull");
-    setConsoleRunningLabel("Pulling latest changes...");
-    setConsoleStatus("running");
-    setConsoleMessages([`Pulling latest changes for branch "${currentBranch}"...`]);
     setConsoleOpen(true);
+    void startPull(slot, clonedSlug, currentBranch);
+  }, [slot, clonedSlug, currentBranch]);
 
-    try {
-      // git's own output, summary line included, has already streamed to the console.
-      const summary = await pullRepo(appendConsole);
-      resetFileTree();
-      await loadDir();
-      const pullNow = new Date().toISOString();
-      setLastPulled(pullNow);
-      setLastUpdated(pullNow);
-      setConsoleStatus("done");
-      toast.success(`Git Pull: ${clonedSlug}`, { description: summary });
-      try {
-        localStorage.setItem("singl:repo:ts", JSON.stringify({ lastPulled: pullNow, lastUpdated: pullNow }));
-      } catch {}
-    } catch (err) {
-      setConsoleStatus("error");
-      const msg = errorMessage(err);
-      setConsoleMessages((prev) => [...prev, msg]);
-      toast.error(`Git Pull Failed: ${clonedSlug}`, { description: msg });
-    } finally {
-      setGitOp(null);
-    }
-  }, [clonedSlug, currentBranch, appendConsole, loadDir, resetFileTree]);
-
-  const handleFetch = useCallback(async () => {
+  const handleFetch = useCallback(() => {
     if (!clonedSlug) return;
-    setGitOp("fetch");
-    setConsoleTitle("Git Fetch");
-    setConsoleRunningLabel("Fetching origin...");
-    setConsoleStatus("running");
-    setConsoleMessages(["Fetching remote branches and references..."]);
     setConsoleOpen(true);
+    void startFetch(slot);
+  }, [slot, clonedSlug]);
 
-    try {
-      await fetchRepo(appendConsole);
-      setConsoleStatus("done");
-      toast.success("Fetched latest refs from remote");
-    } catch (err) {
-      setConsoleStatus("error");
-      const msg = errorMessage(err);
-      setConsoleMessages((prev) => [...prev, msg]);
-      toast.error(`Fetch failed: ${msg}`);
-    } finally {
-      setGitOp(null);
-    }
-  }, [clonedSlug, appendConsole]);
+  // An operation ended while this page is open: bring the page up to date.
+  // (One that ended while it was closed is picked up by the mount-time loads.)
+  useJobFinished<RepoJobMeta>(
+    REPO_JOB,
+    useCallback(
+      (job: Job<RepoJobMeta>) => {
+        const meta = job.meta;
+        if (!meta) return;
+        if (job.status !== "done") {
+          if (meta.op === "clone") setCloneStatus("error");
+          return;
+        }
+        const times = loadRepoTimes(slot);
+        switch (meta.op) {
+          case "clone":
+            setCloneStatus("done");
+            setClonedSlug(job.result as string);
+            if (meta.branch) setCurrentBranch(meta.branch);
+            if (times.lastUpdated) setLastUpdated(times.lastUpdated);
+            break;
+          case "checkout":
+            if (meta.branch) setCurrentBranch(meta.branch);
+            break;
+          case "pull":
+            if (times.lastPulled) setLastPulled(times.lastPulled);
+            if (times.lastUpdated) setLastUpdated(times.lastUpdated);
+            break;
+          case "extract":
+          case "clear":
+            setChangesPanelRefresh((n) => n + 1);
+            break;
+          case "fetch":
+            return;
+        }
+        resetFileTree();
+        void loadDir();
+      },
+      [slot, loadDir, resetFileTree]
+    )
+  );
 
   const handleFileClick = useCallback(async (filePath: string) => {
     if (openTabsRef.current.has(filePath)) {
@@ -562,7 +476,7 @@ export function RepoExplorer({
     setActiveTab(filePath);
     try {
       // Tabs are keyed "<slug>/<path>"; the command takes the path inside the clone.
-      const content = await readRepoFile(filePath.slice(filePath.indexOf("/") + 1));
+      const content = await readRepoFile(slot, filePath.slice(filePath.indexOf("/") + 1));
       setOpenTabs((prev) => {
         const next = new Map(prev);
         next.set(filePath, { content, error: null, loading: false });
@@ -579,19 +493,19 @@ export function RepoExplorer({
         return next;
       });
     }
-  }, []);
+  }, [slot]);
 
   // ── Search handlers ───────────────────────────────────────────────────────
   const handleSearch = useCallback(
     async (query: string, opts: SearchOptions): Promise<SearchFileResult[]> => {
       if (!clonedSlug) return [];
       try {
-        return await searchRepo(query, opts);
+        return await searchRepo(slot, query, opts);
       } catch (err) {
         throw new Error(errorMessage(err));
       }
     },
-    [clonedSlug]
+    [slot, clonedSlug]
   );
 
   const handleSearchResultClick = useCallback(
@@ -850,7 +764,9 @@ export function RepoExplorer({
                 </Tooltip>
               </div>
 
-              {/* Build / Extract Actions */}
+              {/* Build / Extract Actions: TWX packages only, so not on the Windchill page */}
+              {canExtract && (
+              <>
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -915,6 +831,8 @@ export function RepoExplorer({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
+              </>
+              )}
 
               <div className="h-4 w-px bg-border/60 mx-0.5" />
 
@@ -1035,6 +953,7 @@ export function RepoExplorer({
                           }
                         >
                           <RepoFileTree
+                            slot={slot}
                             title={repoName}
                             paths={treePaths}
                             rootPrefix={clonedSlug ?? ""}
@@ -1316,7 +1235,7 @@ export function RepoExplorer({
             )}
 
             {/* Changes View */}
-            {view === "changes" && <ChangesPanel refreshTrigger={changesPanelRefresh} />}
+            {view === "changes" && <ChangesPanel slot={slot} refreshTrigger={changesPanelRefresh} />}
           </div>
         </>
       )}
@@ -1327,10 +1246,7 @@ export function RepoExplorer({
         status={consoleStatus}
         runningLabel={consoleRunningLabel}
         messages={consoleMessages}
-        onClear={() => {
-          setConsoleMessages([]);
-          if (consoleStatus !== "running") setConsoleStatus("idle");
-        }}
+        onClear={() => clearJob(REPO_JOB)}
         isOpen={consoleOpen}
         onToggleOpen={() => setConsoleOpen((v) => !v)}
       />

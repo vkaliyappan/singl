@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
-import { errorMessage } from "@/lib/settings";
+import { forgetJob, getShared, runJob, sharedRef, useSharedState } from "@/lib/background-jobs";
 import { cn } from "@/lib/utils";
 import {
   newId,
@@ -149,14 +149,17 @@ export function FlowEditor({
     connectPort?: EdgePort;
     at?: { x: number; y: number };
   }>({ open: false });
-  const [runStates, setRunStates] = useState<Record<string, NodeRunState>>({});
-  const [progress, setProgress] = useState<Progress>(null);
-  const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState("");
+  // Run state lives outside this component (@/lib/background-jobs), keyed by
+  // flow, so a run keeps going and showing after the user leaves and returns.
+  const runKey = `flow:${flowId}`;
+  const [runStates, setRunStates] = useSharedState<Record<string, NodeRunState>>(`${runKey}:states`, {});
+  const [progress, setProgress] = useSharedState<Progress>(`${runKey}:progress`, null);
+  const [running, setRunning] = useSharedState(`${runKey}:running`, false);
+  const [runError, setRunError] = useSharedState(`${runKey}:error`, "");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [runOrder, setRunOrder] = useState<string[]>([]);
-  const [runMs, setRunMs] = useState<number | null>(null);
-  const [logOpen, setLogOpen] = useState(false);
+  const [runOrder, setRunOrder] = useSharedState<string[]>(`${runKey}:order`, []);
+  const [runMs, setRunMs] = useSharedState<number | null>(`${runKey}:ms`, null);
+  const [logOpen, setLogOpen] = useState(() => getShared(`${runKey}:running`, false));
   const [logNodeId, setLogNodeId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -164,10 +167,10 @@ export function FlowEditor({
   const clipboard = useRef<{ nodes: FlowNode[]; edges: FlowEdge[] } | null>(null);
   const dirty = useRef(false);
   /** Id of the run in flight, which `job_cancel` stops. */
-  const abort = useRef<string | null>(null);
+  const abortRef = sharedRef<string | null>(`${runKey}:abort`, null);
   /** Runs the user stopped; their late events are dropped. */
-  const stoppedRuns = useRef(new Set<string>());
-  const startedAt = useRef(0);
+  const stoppedRunsRef = sharedRef(`${runKey}:stopped`, new Set<string>());
+  const startedAtRef = sharedRef(`${runKey}:startedAt`, 0);
 
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph.nodes]);
 
@@ -815,7 +818,7 @@ export function FlowEditor({
           for (const id of [...event.order, ...event.cycle]) delete next[id];
           return next;
         });
-        startedAt.current = performance.now();
+        startedAtRef.current = performance.now();
         setRunMs(null);
         setRunOrder([...event.order, ...event.cycle]);
         setLogOpen(true);
@@ -850,12 +853,12 @@ export function FlowEditor({
         setRunError(event.message);
         break;
       case "done":
-        setRunMs(Math.round(performance.now() - startedAt.current));
+        setRunMs(Math.round(performance.now() - startedAtRef.current));
         setProgress(null);
         setRunning(false);
         break;
     }
-  }, []);
+  }, [setProgress, setRunError, setRunMs, setRunOrder, setRunStates, setRunning, startedAtRef]);
 
   const run = useCallback(
     async (options?: RunOptions): Promise<RunSummary | null> => {
@@ -863,7 +866,7 @@ export function FlowEditor({
       setRunning(true);
       setRunError("");
       const runId = newId();
-      abort.current = runId;
+      abortRef.current = runId;
 
       const seed: Record<string, unknown> = {};
       const seedPorts: Record<string, unknown> = {};
@@ -879,7 +882,7 @@ export function FlowEditor({
         // A stopped run's stragglers must not repaint the board. Finished runs
         // still take theirs: Tauri fetches large channel messages on its own,
         // so a big node-end can land after `flow_run` has already resolved.
-        if (stoppedRuns.current.has(runId)) return;
+        if (stoppedRunsRef.current.has(runId)) return;
         let event: RunEvent;
         try {
           event = JSON.parse(raw) as RunEvent;
@@ -892,8 +895,9 @@ export function FlowEditor({
         else if (event.type === "error") summary.error = event.message;
       };
 
-      try {
-        await invoke("flow_run", {
+      // As a background job so the sidebar shows it running from any page.
+      const outcome = await runJob(`${runKey}:${runId}`, () =>
+        invoke("flow_run", {
           env,
           runId,
           request: JSON.stringify({
@@ -904,26 +908,28 @@ export function FlowEditor({
             seedPorts,
           }),
           onEvent,
-        });
-        if (stoppedRuns.current.has(runId)) summary.stopped = true;
-      } catch (e) {
-        summary.error = errorMessage(e);
+        })
+      );
+      forgetJob(`${runKey}:${runId}`);
+      if (outcome?.ok) {
+        if (stoppedRunsRef.current.has(runId)) summary.stopped = true;
+      } else if (outcome) {
+        summary.error = outcome.error;
         setRunError(summary.error);
-      } finally {
-        if (abort.current === runId) abort.current = null;
-        setRunning(false);
-        setProgress(null);
       }
+      if (abortRef.current === runId) abortRef.current = null;
+      setRunning(false);
+      setProgress(null);
       return summary;
     },
-    [applyEvent, env, graph, runStates, running]
+    [applyEvent, env, graph, runStates, running, abortRef, runKey, setProgress, setRunError, setRunning, stoppedRunsRef]
   );
 
   const stop = useCallback(() => {
-    const runId = abort.current;
-    abort.current = null;
+    const runId = abortRef.current;
+    abortRef.current = null;
     if (runId) {
-      stoppedRuns.current.add(runId);
+      stoppedRunsRef.current.add(runId);
       void invoke("job_cancel", { id: runId });
     }
     setRunning(false);
@@ -941,7 +947,7 @@ export function FlowEditor({
       }
       return stopped ? next : prev;
     });
-  }, []);
+  }, [abortRef, setProgress, setRunStates, setRunning, stoppedRunsRef]);
 
   const runSelection = useCallback(
     (includeAncestors: boolean) => {
@@ -957,7 +963,7 @@ export function FlowEditor({
     setRunMs(null);
     setRunError("");
     setLogNodeId(null);
-  }, []);
+  }, [setRunError, setRunMs, setRunOrder, setRunStates]);
 
   /* -------------------------------------------------------------- keyboard -- */
 

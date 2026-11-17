@@ -13,7 +13,7 @@ import {
   useAppFileTree,
   type GitStatusEntry,
 } from "@/components/pierre-file-tree";
-import { getRepoStatus } from "@/lib/repo";
+import { getRepoStatus, type RepoSlot } from "@/lib/repo";
 
 // repo_status codes → the tree's git statuses.
 const GIT_STATUS: Record<string, GitStatusEntry["status"]> = {
@@ -35,6 +35,7 @@ function copy(text: string) {
  * "/"); `rootPrefix` turns them into the app's file paths.
  */
 export function RepoFileTree({
+  slot,
   title,
   paths,
   rootPrefix,
@@ -42,6 +43,7 @@ export function RepoFileTree({
   statusKey,
   onFileOpen,
 }: {
+  slot: RepoSlot;
   title: string;
   paths: readonly string[];
   rootPrefix: string;
@@ -64,7 +66,7 @@ export function RepoFileTree({
   useEffect(() => {
     if (paths.length === 0) return;
     let cancelled = false;
-    getRepoStatus()
+    getRepoStatus(slot)
       .then((files) => {
         if (cancelled) return;
         const known = new Set(paths);
@@ -78,7 +80,7 @@ export function RepoFileTree({
     return () => {
       cancelled = true;
     };
-  }, [paths, statusKey]);
+  }, [slot, paths, statusKey]);
 
   return (
     <AppFileTree

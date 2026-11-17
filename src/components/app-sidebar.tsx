@@ -5,6 +5,34 @@ import { usePathname } from "next/navigation"
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { navSections, isNavActive } from "@/components/nav-config"
+import { Spinner } from "@/components/ui/spinner"
+import { useJobsRunning } from "@/lib/background-jobs"
+import { useEffect, useState } from "react"
+import { getVersion } from "@tauri-apps/api/app"
+
+/** Installed app version from tauri.conf.json; blank until Tauri answers. */
+function useAppVersion() {
+  const [version, setVersion] = useState("")
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {})
+  }, [])
+  return version
+}
+
+/** Background-job key prefix of each page that runs jobs (see @/lib/background-jobs). */
+const JOB_PREFIX: Record<string, string> = {
+  "/twx-entities": "entities:",
+  "/deploy": "deploy:",
+  "/repo": "repo:",
+  "/repo2": "repo2:",
+  "/twx-flow": "flow:",
+}
+
+/** Spins while a job of the page runs, so it shows from any page. */
+function JobSpinner({ prefix }: { prefix: string }) {
+  if (!useJobsRunning(prefix)) return null
+  return <Spinner aria-label="Running in the background" className="ml-auto size-3.5 text-primary" />
+}
 
 import {
   Sidebar,
@@ -25,6 +53,7 @@ export function AppSidebar() {
   const pathname = usePathname()
   const { state, toggleSidebar } = useSidebar()
   const collapsed = state === "collapsed"
+  const version = useAppVersion()
   const ToggleIcon = collapsed ? IconLayoutSidebarLeftExpand : IconLayoutSidebarLeftCollapse
 
   return (
@@ -88,6 +117,7 @@ export function AppSidebar() {
                           )}
                         />
                         <span className="truncate">{item.title}</span>
+                        {JOB_PREFIX[item.href] && <JobSpinner prefix={JOB_PREFIX[item.href]} />}
                         {item.badge && (
                           <span className="ml-auto rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                             {item.badge}
@@ -111,7 +141,7 @@ export function AppSidebar() {
           </span>
           <div className="flex min-w-0 flex-col leading-tight">
             <span className="text-[12px] font-medium text-foreground/90">Local workspace</span>
-            <span className="text-[10.5px] text-muted-foreground">v0.1.0</span>
+            <span className="text-[10.5px] text-muted-foreground">{version ? `v${version}` : "…"}</span>
           </div>
         </div>
       </SidebarFooter>

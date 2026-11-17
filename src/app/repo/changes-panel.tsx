@@ -22,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { FileIcon, getLanguage } from "@/components/file-tree";
 import { toast } from "sonner";
-import { getRepoDiff, getRepoStatus, type ChangedFile } from "@/lib/repo";
+import { getRepoDiff, getRepoStatus, type ChangedFile, type RepoSlot } from "@/lib/repo";
 import { errorMessage } from "@/lib/settings";
 
 const MonacoDiffEditor = dynamic(
@@ -72,7 +72,7 @@ function statusReducer(_state: StatusState, action: StatusAction): StatusState {
   }
 }
 
-export function ChangesPanel({ refreshTrigger }: { refreshTrigger?: number }) {
+export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refreshTrigger?: number }) {
   const { resolvedTheme } = useTheme();
   const [status, dispatch] = useReducer(statusReducer, { loading: false, files: [], error: null });
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -107,11 +107,11 @@ export function ChangesPanel({ refreshTrigger }: { refreshTrigger?: number }) {
   const fetchStatus = useCallback(async () => {
     dispatch({ type: "loading" });
     try {
-      dispatch({ type: "loaded", files: await getRepoStatus() });
+      dispatch({ type: "loaded", files: await getRepoStatus(slot) });
     } catch (err) {
       dispatch({ type: "error", error: errorMessage(err) });
     }
-  }, []);
+  }, [slot]);
 
   useEffect(() => {
     fetchStatus();
@@ -123,13 +123,13 @@ export function ChangesPanel({ refreshTrigger }: { refreshTrigger?: number }) {
     setDiffError(null);
     setDiffLoading(true);
     try {
-      setDiffContent(await getRepoDiff(filePath));
+      setDiffContent(await getRepoDiff(slot, filePath));
     } catch (err) {
       setDiffError(errorMessage(err));
     } finally {
       setDiffLoading(false);
     }
-  }, []);
+  }, [slot]);
 
   const handleCopyPath = () => {
     if (!selectedFile) return;

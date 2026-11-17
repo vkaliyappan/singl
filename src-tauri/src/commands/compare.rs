@@ -35,7 +35,7 @@ async fn roots(state: &AppState, env: &str) -> IpcResult<Roots> {
   };
 
   let pool = state.db().await;
-  let repo = db::repo::get(&pool).await?;
+  let repo = db::repo::get(&pool, 1).await?;
   if repo.repo_slug.is_empty() {
     return Err(CoreError::Invalid("No repository configured. Clone a repo first.".into()).into());
   }

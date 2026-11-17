@@ -110,6 +110,8 @@ export async function openClockWidget(): Promise<void> {
     resizable: false,
     maximizable: false,
     alwaysOnTop: settings.pinned,
+    // Widget, not an app window: keep it out of the taskbar / Alt+Tab grouping
+    skipTaskbar: true,
     // Shown by the widget once it has sized itself to its content
     visible: false,
   })
