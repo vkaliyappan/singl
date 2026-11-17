@@ -432,6 +432,8 @@ impl Assistant {
     let on_text = move |t: &str| this.emit(AssistantEvent::Text { chat_id: chat_id.clone(), text: t.to_string() });
     let (chat_id, this) = (chat.id.clone(), self.clone());
     let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
+    let (chat_id, this) = (chat.id.clone(), self.clone());
+    let on_status = move |t: &str| this.emit(AssistantEvent::Status { chat_id: chat_id.clone(), text: t.to_string() });
     let cwd =crate::agents::agent_root(self.workspace_root().as_deref());
     let result = providers::cli::run(
       &self.procs,
@@ -455,6 +457,7 @@ impl Assistant {
       },
       &on_text,
       &on_thinking,
+      &on_status,
       cancel,
     )
     .await;

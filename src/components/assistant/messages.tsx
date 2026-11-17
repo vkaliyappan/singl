@@ -2,7 +2,7 @@
 
 import { PinIcon } from "./pin-icon";
 import { ImagePreview } from "./image-preview";
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -773,10 +773,33 @@ function AssistantBlocks({
   );
 }
 
+/** "Working…" plus what the agent is doing, if it said, and for how long.
+ * Keyed by status, so the clock counts time spent on *this* step. */
+function Activity({ status }: { status: string }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div
+      className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+      role="status"
+    >
+      <IconLoader2 className="size-3 shrink-0 animate-spin" />
+      <span className="min-w-0 truncate" title={status || undefined}>
+        {status ? `${status}…` : "Working…"}
+      </span>
+      {secs >= 3 && <span className="shrink-0 tabular-nums opacity-70">{secs}s</span>}
+    </div>
+  );
+}
+
 export function MessageList({
   messages,
   streaming,
   thinking = "",
+  status = "",
   running,
   runningProvider,
   liveCalls,
@@ -786,6 +809,8 @@ export function MessageList({
   streaming: string;
   /** Reasoning streamed for the reply being written. */
   thinking?: string;
+  /** What an agent CLI is doing between visible output. */
+  status?: string;
   running: boolean;
   runningProvider: { provider: string; model: string; effort?: string } | null;
   liveCalls: Record<string, LiveCall>;
@@ -916,12 +941,7 @@ export function MessageList({
             ),
           )}
           {running && !streaming && !thinking.trim() && pending.every((c) => c.done) && (
-            <div
-              className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
-              role="status"
-            >
-              <IconLoader2 className="size-3 animate-spin" /> Working…
-            </div>
+            <Activity key={status} status={status} />
           )}
           <ProviderLabel
             provider={runningProvider?.provider}

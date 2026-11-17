@@ -244,6 +244,8 @@ pub struct Parser {
   error: Option<String>,
   /// Only explains an empty answer (codex also reports retried hiccups as errors).
   soft_error: Option<String>,
+  /// Activity line not yet reported (see `take_status`).
+  status: Option<String>,
 }
 
 impl Parser {
@@ -261,7 +263,17 @@ impl Parser {
       final_text: None,
       error: None,
       soft_error: None,
+      status: None,
     }
+  }
+
+  /// The newest activity line since the last call, if it changed.
+  pub fn take_status(&mut self) -> Option<String> {
+    self.status.take()
+  }
+
+  fn set_status(&mut self, text: String) {
+    self.status = Some(text);
   }
 
   fn start_segment(&mut self) {
@@ -318,17 +330,26 @@ impl Parser {
   }
 
   fn claude(&mut self, ev: &Value, on_text: TextSink<'_>, on_thinking: TextSink<'_>) {
-    // Sub-agents' own chatter is not the answer.
+    // Sub-agents' own chatter is not the answer, but what they do is news.
     if !ev["parent_tool_use_id"].is_null() {
+      if ev["type"] == "assistant" {
+        if let Some(what) = ev["message"]["content"].as_array().into_iter().flatten().filter_map(claude_activity).last() {
+          self.set_status(format!("Sub-agent: {what}"));
+        }
+      }
       return;
     }
     match ev["type"].as_str().unwrap_or("") {
-      "system" if ev["subtype"] == "init" => self.set_session(ev["session_id"].as_str()),
+      "system" if ev["subtype"] == "init" => {
+        self.set_session(ev["session_id"].as_str());
+        self.set_status("Starting".into());
+      }
       "stream_event" => {
         let e = &ev["event"];
         match e["type"].as_str() {
           Some("content_block_start") if e["content_block"]["type"] == "text" => self.start_segment(),
           Some("content_block_start") if e["content_block"]["type"] == "thinking" => {
+            self.set_status("Thinking".into());
             self.think_sep = true;
             self.think(e["content_block"]["thinking"].as_str().unwrap_or(""), on_thinking);
           }
@@ -344,6 +365,11 @@ impl Parser {
       }
       // Without partial messages (older CLI) each whole message is all there is.
       "assistant" => {
+        // Whole tool calls (input included) arrive here; the app's own MCP
+        // tools get a card instead, so they are not repeated as a status.
+        if let Some(what) = ev["message"]["content"].as_array().into_iter().flatten().filter_map(claude_activity).last() {
+          self.set_status(what);
+        }
         if !self.partial_seen {
           for b in ev["message"]["content"].as_array().into_iter().flatten() {
             if b["type"] == "text" {
@@ -371,6 +397,12 @@ impl Parser {
   fn codex(&mut self, ev: &Value, on_text: TextSink<'_>, on_thinking: TextSink<'_>) {
     match ev["type"].as_str().unwrap_or("") {
       "thread.started" => self.set_session(ev["thread_id"].as_str()),
+      "turn.started" => self.set_status("Starting".into()),
+      "item.started" | "item.updated" => {
+        if let Some(what) = codex_activity(&ev["item"]) {
+          self.set_status(what);
+        }
+      }
       "item.completed" if ev["item"]["type"] == "reasoning" => {
         self.think_sep = true;
         self.think(ev["item"]["text"].as_str().unwrap_or(""), on_thinking);
@@ -392,6 +424,13 @@ impl Parser {
     let data = &ev["data"];
     match ty {
       "session.start" => self.set_session(data["sessionId"].as_str()),
+      t if t.starts_with("tool.") && (t.ends_with("start") || t.ends_with("started")) => {
+        let name = ["toolName", "name", "tool"].iter().find_map(|k| data[*k].as_str()).unwrap_or("a tool");
+        if !name.contains(SERVER) {
+          self.set_status(format!("Using {name}"));
+        }
+      }
+      t if t.contains("reasoning") || t.contains("thinking") => self.set_status("Thinking".into()),
       "assistant.message" => {
         self.start_segment();
         self.emit(data["content"].as_str().unwrap_or(""), on_text);
@@ -414,6 +453,13 @@ impl Parser {
       "init" => self.set_session(ev["conversation_id"].as_str()),
       "step_update" => {
         let s = &ev["step_update"];
+        if s["step_type"] != "agent_response" && s["state"] == "ACTIVE" {
+          if let Some(kind) = s["step_type"].as_str().filter(|k| !k.is_empty()) {
+            let words = kind.to_lowercase().replace('_', " ");
+            let mut c = words.chars();
+            self.set_status(c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or(words));
+          }
+        }
         if s["step_type"] == "agent_response" {
           let step = s["step_index"].as_i64();
           if step != self.last_step {
@@ -467,11 +513,67 @@ impl Parser {
   }
 }
 
+/// A short line for a Codex item that is not the answer itself.
+fn codex_activity(item: &Value) -> Option<String> {
+  let arg = |k: &str| item[k].as_str().map(str::trim).filter(|v| !v.is_empty());
+  let first_line = |t: &str| {
+    let t = t.lines().next().unwrap_or("");
+    if t.chars().count() > 80 { format!("{}…", t.chars().take(80).collect::<String>()) } else { t.to_string() }
+  };
+  Some(match item["type"].as_str()? {
+    "reasoning" => "Thinking".into(),
+    "command_execution" => arg("command").map_or("Running a command".into(), |c| format!("Running {}", first_line(c))),
+    "file_change" => "Changing files".into(),
+    "web_search" => arg("query").map_or("Searching the web".into(), |q| format!("Searching the web: {}", first_line(q))),
+    "todo_list" => "Updating its plan".into(),
+    // The app's own tools show as cards; other servers do not.
+    "mcp_tool_call" if arg("server") == Some(SERVER) => return None,
+    "mcp_tool_call" => format!("Using {}: {}", arg("server").unwrap_or("MCP"), arg("tool").unwrap_or("a tool")),
+    _ => return None,
+  })
+}
+
+/// A short line for one of Claude Code's own tool calls ("Reading a.js"), or
+/// None for the app's MCP tools, which the UI shows as cards.
+fn claude_activity(block: &Value) -> Option<String> {
+  if block["type"] != "tool_use" {
+    return None;
+  }
+  let name = block["name"].as_str().unwrap_or("");
+  if name.starts_with(&format!("mcp__{SERVER}__")) {
+    return None;
+  }
+  let input = &block["input"];
+  let arg = |k: &str| input[k].as_str().map(str::trim).filter(|v| !v.is_empty());
+  let clip = |t: &str| {
+    let t = t.lines().next().unwrap_or("");
+    if t.chars().count() > 80 { format!("{}…", t.chars().take(80).collect::<String>()) } else { t.to_string() }
+  };
+  let file = |p: &str| p.rsplit(['/', '\\']).next().unwrap_or(p).to_string();
+  Some(match name {
+    "Read" => arg("file_path").map_or("Reading a file".into(), |p| format!("Reading {}", file(p))),
+    "Grep" => arg("pattern").map_or("Searching files".into(), |p| format!("Searching for \"{}\"", clip(p))),
+    "Glob" => arg("pattern").map_or("Finding files".into(), |p| format!("Finding files {}", clip(p))),
+    "LS" => "Listing files".into(),
+    "Task" | "Agent" => {
+      arg("description").map_or("Starting a sub-agent".into(), |d| format!("Starting a sub-agent: {}", clip(d)))
+    }
+    "WebFetch" => arg("url").map_or("Fetching a page".into(), |u| format!("Fetching {}", clip(u))),
+    "WebSearch" => arg("query").map_or("Searching the web".into(), |q| format!("Searching the web: {}", clip(q))),
+    "TodoWrite" => "Updating its plan".into(),
+    "ToolSearch" => "Loading tools".into(),
+    "Skill" => arg("skill").map_or("Using a skill".into(), |s| format!("Using the {s} skill")),
+    _ if name.starts_with("mcp__") => format!("Using {}", name.trim_start_matches("mcp__").replacen("__", ": ", 1)),
+    _ => format!("Using {name}"),
+  })
+}
+
 pub async fn run(
   procs: &ProcRegistry,
   mut req: CliRequest,
   on_text: TextSink<'_>,
   on_thinking: TextSink<'_>,
+  on_status: TextSink<'_>,
   cancel: &CancellationToken,
 ) -> Result<CliReply> {
   check_cancel(cancel)?;
@@ -529,7 +631,12 @@ pub async fn run(
         return Err(CoreError::Cancelled);
       }
       event = rx.recv() => match event {
-        Some(ProcEvent::Stdout { line }) => parser.feed_line(&line, on_text, on_thinking),
+        Some(ProcEvent::Stdout { line }) => {
+          parser.feed_line(&line, on_text, on_thinking);
+          if let Some(s) = parser.take_status() {
+            on_status(&s);
+          }
+        }
         Some(ProcEvent::Stderr { line }) => {
           if stderr.len() == 20 {
             stderr.pop_front();
@@ -779,6 +886,39 @@ mod tests {
   }
 
   #[test]
+  fn claude_reports_activity_without_a_card() {
+    let mut p = Parser::new("claude");
+    let mut seen = Vec::new();
+    for l in [
+      r#"{"type":"system","subtype":"init","session_id":"s"}"#,
+      r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}}"#,
+      r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"C:/x/GetFloorplanVS.js"}}]}}"#,
+      r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__singl__flow_get","input":{}}]}}"#,
+      r#"{"type":"assistant","parent_tool_use_id":"t1","message":{"content":[{"type":"tool_use","name":"Grep","input":{"pattern":"GetHierarchy"}}]}}"#,
+    ] {
+      p.feed_line(l, &|_| {}, &|_| {});
+      seen.extend(p.take_status());
+    }
+    assert_eq!(seen, ["Starting", "Thinking", "Reading GetFloorplanVS.js", "Sub-agent: Searching for \"GetHierarchy\""]);
+
+    let mut p = Parser::new("codex");
+    let mut seen = Vec::new();
+    for l in [
+      r#"{"type":"turn.started"}"#,
+      r#"{"type":"item.started","item":{"type":"command_execution","command":"rg GetHierarchy"}}"#,
+      r#"{"type":"item.started","item":{"type":"mcp_tool_call","server":"singl","tool":"flow_get"}}"#,
+    ] {
+      p.feed_line(l, &|_| {}, &|_| {});
+      seen.extend(p.take_status());
+    }
+    assert_eq!(seen, ["Starting", "Running rg GetHierarchy"]);
+
+    let mut p = Parser::new("antigravity");
+    p.feed_line(r#"{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"VIEW_FILE"}}"#, &|_| {}, &|_| {});
+    assert_eq!(p.take_status().as_deref(), Some("View file"));
+  }
+
+  #[test]
   fn images_reach_each_cli() {
     let img = super::super::CliImage { name: "a.png".into(), media_type: "image/png".into(), data: "iVBORw0KGgo=".into() };
     let mut r = req("claude");
@@ -1017,7 +1157,7 @@ mod tests {
     r.model = "haiku".into();
     r.prompt = "Reply with the single word pong.".into();
     r.mcp_url = "http://127.0.0.1:1/mcp".into();
-    let reply = run(&procs, r, &|_| {}, &|_| {}, &CancellationToken::new()).await.unwrap();
+    let reply = run(&procs, r, &|_| {}, &|_| {}, &|_| {}, &CancellationToken::new()).await.unwrap();
     assert!(reply.text.to_lowercase().contains("pong"));
     assert!(reply.session_id.is_some());
     assert!(models(&procs, "claude").await.unwrap().len() >= 4);

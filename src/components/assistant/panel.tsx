@@ -727,6 +727,7 @@ export function AssistantPanel({
               messages={chat.messages}
               streaming={chat.streaming}
               thinking={chat.thinking}
+              status={chat.status}
               running={chat.running}
               runningProvider={chat.runningProvider ?? choice}
               liveCalls={chat.liveCalls}

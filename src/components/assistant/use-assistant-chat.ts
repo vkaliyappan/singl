@@ -64,12 +64,14 @@ const EXTERNAL_LIMIT = 25;
 
 /** What a running turn has shown so far, kept for every chat, on screen or not. */
 type Live = {
+  /** What an agent CLI is doing between visible output ("Reading a.js"). */
+  status: string;
   streaming: string;
   thinking: string;
   liveCalls: Record<string, LiveCall>;
   provider: ChatChoice | null;
 };
-const emptyLive = (): Live => ({ streaming: "", thinking: "", liveCalls: {}, provider: null });
+const emptyLive = (): Live => ({ status: "", streaming: "", thinking: "", liveCalls: {}, provider: null });
 
 export function useAssistantChat(opts: {
   onNeedPanel: () => void;
@@ -80,6 +82,7 @@ export function useAssistantChat(opts: {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
   const [thinking, setThinking] = useState("");
+  const [status, setStatus] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [liveCalls, setLiveCalls] = useState<Record<string, LiveCall>>({});
@@ -171,12 +174,22 @@ export function useAssistantChat(opts: {
           }
           break;
         case "text":
-          track(e.chatId, (l) => ({ ...l, streaming: l.streaming + e.text }));
-          if (e.chatId === chatIdRef.current) setStreaming((s) => s + e.text);
+          track(e.chatId, (l) => ({ ...l, status: "", streaming: l.streaming + e.text }));
+          if (e.chatId === chatIdRef.current) {
+            setStatus("");
+            setStreaming((s) => s + e.text);
+          }
           break;
         case "thinking":
-          track(e.chatId, (l) => ({ ...l, thinking: l.thinking + e.text }));
-          if (e.chatId === chatIdRef.current) setThinking((s) => s + e.text);
+          track(e.chatId, (l) => ({ ...l, status: "", thinking: l.thinking + e.text }));
+          if (e.chatId === chatIdRef.current) {
+            setStatus("");
+            setThinking((s) => s + e.text);
+          }
+          break;
+        case "status":
+          track(e.chatId, (l) => ({ ...l, status: e.text }));
+          if (e.chatId === chatIdRef.current) setStatus(e.text);
           break;
         case "toolCall": {
           const call: LiveCall = {
@@ -190,8 +203,10 @@ export function useAssistantChat(opts: {
             if (e.source === "mcp")
               setExternal((x) => [call, ...x].slice(0, EXTERNAL_LIMIT));
           } else {
-            track(e.chatId, (l) => ({ ...l, liveCalls: { ...l.liveCalls, [e.callId]: call } }));
+            // The card says what is happening now; an older status would be stale.
+            track(e.chatId, (l) => ({ ...l, status: "", liveCalls: { ...l.liveCalls, [e.callId]: call } }));
             if (e.chatId === chatIdRef.current) {
+              setStatus("");
               setLiveCalls((c) => ({ ...c, [e.callId]: call }));
             }
           }
@@ -247,6 +262,7 @@ export function useAssistantChat(opts: {
           live.current.delete(e.chatId);
           if (e.chatId !== chatIdRef.current) break;
           setRunning(false);
+          setStatus("");
           setStreaming("");
           setThinking("");
           setLiveCalls({});
@@ -321,6 +337,7 @@ export function useAssistantChat(opts: {
     setMessages([]);
     setStreaming("");
     setThinking("");
+    setStatus("");
     setLiveCalls({});
     setRunning(false);
     setRunningProvider(null);
@@ -344,6 +361,7 @@ export function useAssistantChat(opts: {
         if (!isRunning) live.current.delete(id);
         if (soFar) {
           // Events that arrived during the fetch are already in soFar.
+          setStatus(soFar.status);
           setStreaming(soFar.streaming);
           setThinking(soFar.thinking);
           setLiveCalls(soFar.liveCalls);
@@ -367,6 +385,7 @@ export function useAssistantChat(opts: {
       setError("");
       setStreaming("");
       setThinking("");
+      setStatus("");
       setLiveCalls({});
       setRunning(true);
       setRunningProvider(choice);
@@ -451,6 +470,7 @@ export function useAssistantChat(opts: {
     messages,
     streaming,
     thinking,
+    status,
     running,
     runningProvider,
     error,
