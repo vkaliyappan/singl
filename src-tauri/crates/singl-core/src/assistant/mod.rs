@@ -435,6 +435,11 @@ impl Assistant {
     true
   }
 
+  /// Ids of the chats with a turn in progress.
+  pub fn running_chats(&self) -> Vec<String> {
+    self.running.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect()
+  }
+
   pub fn is_running(&self, chat_id: &str) -> bool {
     self.running.lock().unwrap_or_else(|e| e.into_inner()).contains_key(chat_id)
   }

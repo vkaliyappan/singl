@@ -12,6 +12,7 @@ import {
   assistantCancel,
   assistantChatGet,
   assistantChatRunning,
+  assistantRunningChats,
   assistantSend,
   onAssistantEvent,
   type AssistantEvent,
@@ -61,6 +62,15 @@ export type ChatChoice = { provider: string; model: string; effort?: string };
 
 const EXTERNAL_LIMIT = 25;
 
+/** What a running turn has shown so far, kept for every chat, on screen or not. */
+type Live = {
+  streaming: string;
+  thinking: string;
+  liveCalls: Record<string, LiveCall>;
+  provider: ChatChoice | null;
+};
+const emptyLive = (): Live => ({ streaming: "", thinking: "", liveCalls: {}, provider: null });
+
 export function useAssistantChat(opts: {
   onNeedPanel: () => void;
   panelOpen: boolean;
@@ -76,12 +86,29 @@ export function useAssistantChat(opts: {
   const [external, setExternal] = useState<LiveCall[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [chatsVersion, setChatsVersion] = useState(0);
+  /** Every chat with a turn in progress, not just the open one. */
+  const [runningIds, setRunningIds] = useState<ReadonlySet<string>>(new Set());
+  const markRunning = useCallback((id: string, on: boolean) => {
+    setRunningIds((s) => {
+      if (s.has(id) === on) return s;
+      const next = new Set(s);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   const [runningProvider, setRunningProvider] = useState<ChatChoice | null>(
     null,
   );
 
   const chatIdRef = useRef<string | null>(null);
   const adoptNext = useRef(false);
+  // Opening a chat mid-turn restores its live state from here instead of
+  // showing only what streams after the switch.
+  const live = useRef(new Map<string, Live>());
+  const track = (id: string, change: (l: Live) => Live) => {
+    live.current.set(id, change(live.current.get(id) ?? emptyLive()));
+  };
   const panelOpenRef = useRef(opts.panelOpen);
   const needPanelRef = useRef(opts.onNeedPanel);
   useEffect(() => {
@@ -125,6 +152,11 @@ export function useAssistantChat(opts: {
     const handle = (e: AssistantEvent) => {
       switch (e.type) {
         case "turnStarted":
+          markRunning(e.chatId, true);
+          live.current.set(e.chatId, {
+            ...emptyLive(),
+            provider: { provider: e.provider, model: e.model },
+          });
           if (!chatIdRef.current && adoptNext.current) {
             adoptNext.current = false;
             setChat(e.chatId);
@@ -139,9 +171,11 @@ export function useAssistantChat(opts: {
           }
           break;
         case "text":
+          track(e.chatId, (l) => ({ ...l, streaming: l.streaming + e.text }));
           if (e.chatId === chatIdRef.current) setStreaming((s) => s + e.text);
           break;
         case "thinking":
+          track(e.chatId, (l) => ({ ...l, thinking: l.thinking + e.text }));
           if (e.chatId === chatIdRef.current) setThinking((s) => s + e.text);
           break;
         case "toolCall": {
@@ -155,8 +189,11 @@ export function useAssistantChat(opts: {
           if (e.chatId === null) {
             if (e.source === "mcp")
               setExternal((x) => [call, ...x].slice(0, EXTERNAL_LIMIT));
-          } else if (e.chatId === chatIdRef.current) {
-            setLiveCalls((c) => ({ ...c, [e.callId]: call }));
+          } else {
+            track(e.chatId, (l) => ({ ...l, liveCalls: { ...l.liveCalls, [e.callId]: call } }));
+            if (e.chatId === chatIdRef.current) {
+              setLiveCalls((c) => ({ ...c, [e.callId]: call }));
+            }
           }
           break;
         }
@@ -169,8 +206,8 @@ export function useAssistantChat(opts: {
                   : c,
               ),
             );
-          } else if (e.chatId === chatIdRef.current) {
-            setLiveCalls((c) =>
+          } else {
+            const finish = (c: Record<string, LiveCall>) =>
               c[e.callId]
                 ? {
                     ...c,
@@ -181,11 +218,15 @@ export function useAssistantChat(opts: {
                       done: true,
                     },
                   }
-                : c,
-            );
+                : c;
+            track(e.chatId, (l) => ({ ...l, liveCalls: finish(l.liveCalls) }));
+            if (e.chatId === chatIdRef.current) setLiveCalls(finish);
           }
           break;
         case "messageSaved":
+          if (e.message.role === "assistant" && live.current.has(e.chatId)) {
+            track(e.chatId, (l) => ({ ...l, streaming: "", thinking: "" }));
+          }
           if (e.chatId !== chatIdRef.current) break;
           setMessages((m) => {
             const base =
@@ -202,6 +243,8 @@ export function useAssistantChat(opts: {
           }
           break;
         case "turnEnded":
+          markRunning(e.chatId, false);
+          live.current.delete(e.chatId);
           if (e.chatId !== chatIdRef.current) break;
           setRunning(false);
           setStreaming("");
@@ -257,13 +300,20 @@ export function useAssistantChat(opts: {
       }
     };
     onAssistantEvent(handle)
-      .then((fn) => (cancelled ? fn() : (unlisten = fn)))
+      .then((fn) => {
+        if (cancelled) return fn();
+        unlisten = fn;
+        // Turns that started before this window (re)loaded.
+        return assistantRunningChats().then((ids) => {
+          if (!cancelled) ids.forEach((id) => markRunning(id, true));
+        });
+      })
       .catch((err) => console.warn("assistant events unavailable", err));
     return () => {
       cancelled = true;
       unlisten?.();
     };
-  }, [setChat, sync]);
+  }, [setChat, sync, markRunning]);
 
   const newChat = useCallback(() => {
     setChat(null);
@@ -290,6 +340,15 @@ export function useAssistantChat(opts: {
         setMessages(chat.messages);
         setTitle(chat.title);
         setRunning(isRunning);
+        const soFar = isRunning ? live.current.get(id) : undefined;
+        if (!isRunning) live.current.delete(id);
+        if (soFar) {
+          // Events that arrived during the fetch are already in soFar.
+          setStreaming(soFar.streaming);
+          setThinking(soFar.thinking);
+          setLiveCalls(soFar.liveCalls);
+          setRunningProvider(soFar.provider);
+        }
       } catch (e) {
         setError(errorMessage(e));
       }
@@ -401,6 +460,7 @@ export function useAssistantChat(opts: {
     approvals,
     resolveApproval,
     chatsVersion,
+    runningIds,
     newChat,
     openChat,
     send,

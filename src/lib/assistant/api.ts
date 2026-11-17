@@ -270,6 +270,8 @@ export const assistantChatRename = (chatId: string, title: string) =>
   invoke<void>("assistant_chat_rename", { chatId, title });
 export const assistantChatDelete = (chatId: string) =>
   invoke<void>("assistant_chat_delete", { chatId });
+export const assistantRunningChats = () =>
+  invoke<string[]>("assistant_running_chats");
 export const assistantChatRunning = (chatId: string) =>
   invoke<boolean>("assistant_chat_running", { chatId });
 export const assistantContextSet = (context: ScreenContext) =>

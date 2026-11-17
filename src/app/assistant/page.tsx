@@ -476,7 +476,7 @@ export default function AssistantPage() {
                       key={c.id}
                       c={c}
                       active={c.id === chat.chatId}
-                      running={chat.running && c.id === chat.chatId}
+                      running={chat.runningIds.has(c.id)}
                       selecting={selecting}
                       selected={selected.has(c.id)}
                       onToggle={() => toggle(c.id)}

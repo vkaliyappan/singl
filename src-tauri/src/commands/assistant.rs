@@ -36,6 +36,11 @@ pub fn assistant_turn_mode(state: State<'_, AppState>, chat_id: String, mode: Ap
 }
 
 #[tauri::command]
+pub fn assistant_running_chats(state: State<'_, AppState>) -> Vec<String> {
+  state.assistant.running_chats()
+}
+
+#[tauri::command]
 pub fn assistant_chat_running(state: State<'_, AppState>, chat_id: String) -> bool {
   state.assistant.is_running(&chat_id)
 }
