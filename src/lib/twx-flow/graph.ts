@@ -107,6 +107,9 @@ function normalizeNode(raw: FlowNode): FlowNode {
         ...service,
         kind: "service",
         params: Array.isArray(service.params) ? service.params : [],
+        // Boards written outside the palette (the assistant, a hand-edited
+        // export) may lack it; the editor fills it in from the server.
+        resultType: service.resultType ?? { name: "result", description: "", baseType: "JSON", aspects: {} },
       };
     }
   }

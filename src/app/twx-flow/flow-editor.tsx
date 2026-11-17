@@ -64,7 +64,9 @@ import type {
   NodePatch,
   NodeRunState,
   RunEvent,
+  ServiceNode,
 } from "@/lib/twx-flow/types";
+import type { ServiceDef } from "@/lib/twx/types";
 import { LogPanel } from "./log-panel";
 import { Minimap } from "./minimap";
 import { NodeCard } from "./node-card";
@@ -73,6 +75,7 @@ import { NodePanel } from "./node-panel";
 import { useFlowHistory } from "./use-flow-history";
 import { WireBadge } from "./wire-badge";
 import { renameFlow, saveFlow } from "./actions";
+import { getServiceDefinitions } from "@/lib/services";
 
 type Env = { environment: string; twxBaseUrl: string; hasAppKey: boolean };
 
@@ -430,6 +433,60 @@ export function FlowEditor({
   useEffect(() => {
     void resolveSchemas(graph.nodes);
   }, [env, resolveSchemas]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Service nodes the palette never touched (written by the assistant or by
+  // hand) have no parameter list, so a run would send them no inputs. Fill
+  // params, resultType and the declared output from the server, once per env.
+  useEffect(() => {
+    const bare = graph.nodes.filter(
+      (n): n is ServiceNode => n.kind === "service" && !n.outputSchema
+    );
+    if (!env || !bare.length) return;
+    let cancelled = false;
+    void (async () => {
+      const keys = [...new Set(bare.map((n) => `${n.collection} ${n.entityName}`))];
+      const found = new Map<string, ServiceDef>();
+      await Promise.all(
+        keys.map(async (key) => {
+          const [collection, entity] = key.split(" ");
+          try {
+            for (const def of await getServiceDefinitions(env, collection, entity)) {
+              found.set(`${key} ${def.name}`, def);
+            }
+          } catch {
+            // Unknown entity or offline: leave the node as it is.
+          }
+        })
+      );
+      if (cancelled) return;
+      const filled = new Map<string, ServiceNode>();
+      for (const n of bare) {
+        const def = found.get(`${n.collection} ${n.entityName} ${n.serviceName}`);
+        if (!def) continue;
+        filled.set(n.id, {
+          ...n,
+          params: def.parameterDefinitions,
+          resultType: def.resultType,
+          outputSchema: schemaFromResultType(def.resultType),
+        });
+      }
+      if (!filled.size) return;
+      mutate((g) => ({
+        ...g,
+        nodes: g.nodes.map((n) => {
+          const next = filled.get(n.id);
+          // Keep edits made while the definitions loaded; add only what was missing.
+          return next && n.kind === "service" && !n.outputSchema
+            ? { ...n, params: next.params, resultType: next.resultType, outputSchema: next.outputSchema }
+            : n;
+        }),
+      }));
+      void resolveSchemas([...filled.values()]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [env]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------------------------------------------------------ mutations -- */
 

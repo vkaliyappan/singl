@@ -425,6 +425,16 @@ impl Assistant {
     }
   }
 
+  /// Switches a running turn's approval mode, for calls it has not made yet.
+  /// False when the chat has no turn running.
+  pub fn change_turn_mode(&self, chat_id: &str, mode: ApprovalMode) -> bool {
+    if !self.is_running(chat_id) {
+      return false;
+    }
+    self.set_turn_mode(chat_id, Some(mode));
+    true
+  }
+
   pub fn is_running(&self, chat_id: &str) -> bool {
     self.running.lock().unwrap_or_else(|e| e.into_inner()).contains_key(chat_id)
   }

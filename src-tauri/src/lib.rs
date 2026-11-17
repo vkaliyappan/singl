@@ -146,6 +146,7 @@ pub fn run() {
       commands::assistant::assistant_suggestions,
       commands::assistant::assistant_ui_reply,
       commands::assistant::assistant_approve,
+      commands::assistant::assistant_turn_mode,
       commands::assistant::assistant_settings_get,
       commands::assistant::assistant_settings_set,
       commands::assistant::assistant_providers,

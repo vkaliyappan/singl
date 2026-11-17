@@ -316,9 +316,15 @@ const rehypePlugins: MdProps["rehypePlugins"] = [
   [rehypeHighlight, { plainText: RICH_FENCES }],
 ];
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
   return (
-    <div className="md-rich selectable text-[13px]/relaxed break-words">
+    <div className={cn("md-rich selectable text-[13px]/relaxed break-words", className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
@@ -462,8 +468,8 @@ function ThinkingBlock({ text, live }: { text: string; live?: boolean }) {
         <span>{live ? "Thinking…" : "Thought"}</span>
       </button>
       {shown && (
-        <div className="selectable mt-1 max-h-64 overflow-auto border-l-2 pl-2.5 text-[12px]/relaxed whitespace-pre-wrap text-muted-foreground">
-          {text}
+        <div className="mt-1 max-h-64 overflow-auto border-l-2 pl-2.5 text-muted-foreground">
+          <Markdown text={text} className="text-[12px]/relaxed" />
         </div>
       )}
     </div>
@@ -852,10 +858,12 @@ export function MessageList({
             <UserImages message={m} />
             <UserChips message={m} />
             {m.blocks.some((b) => b.type === "text" && b.text) && (
-              <div className="selectable max-w-[85%] rounded-2xl rounded-br-md border bg-muted/60 px-3.5 py-2 text-[13px]/relaxed whitespace-pre-wrap">
-                {m.blocks
-                  .map((b) => (b.type === "text" ? b.text : ""))
-                  .join("\n")}
+              <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md border bg-muted/60 px-3.5 py-2">
+                <Markdown
+                  text={m.blocks
+                    .map((b) => (b.type === "text" ? b.text : ""))
+                    .join("\n\n")}
+                />
               </div>
             )}
           </div>

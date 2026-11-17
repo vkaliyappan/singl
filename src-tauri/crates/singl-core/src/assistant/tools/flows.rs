@@ -1,7 +1,7 @@
 //! Assistant tools: flows. Service Flows, their folders, and running a flow.
 //! Each tool calls the same singl-core function as `src-tauri/src/commands/flows.rs`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
@@ -11,12 +11,13 @@ use super::{Args, Risk, Tool, schema, ser, tool, twx};
 use crate::assistant::Assistant;
 use crate::db::models::ServiceFlow;
 use crate::db::{self, flows};
+use crate::twx::api::{Client, ServiceDef};
 use crate::twx::projects;
 use crate::{CoreError, Result, agents, flow};
 
 const GRAPH_DOC: &str = "A flow graph: {\"nodes\": [...], \"edges\": [...]}. Each node has id (unique string), kind, \
   label (unique, used by expressions), x, y, inputs (object of string values: literals or {{ expression }}). Kinds: \
-  \"service\" (collection, entityName, serviceName, resultType), \"code\" (code: JS whose return value is the output), \
+  \"service\" (collection, entityName, serviceName; params and resultType are filled from the server on save), \"code\" (code: JS whose return value is the output), \
   \"if\" (condition), \"switch\" (rules), \"filter\" (mode, conditions), \"loop\" (batchSize), \"merge\" (mode), \
   \"compare\" (keyA, keyB), \"subflow\" (flowId), \"stop\" (message), \"wait\" (mode, waitMs or until), \"agent\" \
   (provider, prompt). Each edge: {id, source, target, sourcePort?} with node ids. flow_get shows a real example.";
@@ -34,6 +35,64 @@ fn graph_arg(args: &Value) -> Result<Option<Value>> {
     return Err(CoreError::Invalid("\"graph\" must have \"nodes\" and \"edges\" arrays.".into()));
   }
   Ok(Some(graph))
+}
+
+/// Fills each service node's `params` and `resultType` from the server, the way
+/// the editor's palette does when a service is dropped on the canvas: the run
+/// engine only sends inputs named in `params`, and the editor reads
+/// `resultType`. Returns a note for each node it could not fill.
+async fn fill_services(a: &Assistant, env: &str, graph: &mut Value) -> Vec<String> {
+  let mut notes = Vec::new();
+  let Some(nodes) = graph["nodes"].as_array_mut() else { return notes };
+  let mut client: Option<Result<Client>> = None;
+  let mut defs: HashMap<(String, String), std::result::Result<Vec<ServiceDef>, String>> = HashMap::new();
+  for node in nodes.iter_mut() {
+    if node["kind"].as_str().is_some_and(|k| k != "service") {
+      continue;
+    }
+    let field = |k: &str| node[k].as_str().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+    let label = field("label").or_else(|| field("id")).unwrap_or_default();
+    let (Some(collection), Some(entity), Some(service)) = (field("collection"), field("entityName"), field("serviceName"))
+    else {
+      notes.push(format!("Node \"{label}\" needs collection, entityName and serviceName."));
+      continue;
+    };
+    let key = (collection.clone(), entity.clone());
+    if !defs.contains_key(&key) {
+      if client.is_none() {
+        client = Some(projects::connect(&a.pool().await, env).await);
+      }
+      let fetched = match client.as_ref() {
+        Some(Ok(c)) => c.service_definitions(&collection, &entity).await.map_err(|e| e.to_string()),
+        Some(Err(e)) => Err(e.to_string()),
+        None => unreachable!(),
+      };
+      defs.insert(key.clone(), fetched);
+    }
+    match &defs[&key] {
+      Ok(list) => match list.iter().find(|d| d.name == service) {
+        Some(def) => {
+          node["kind"] = json!("service");
+          node["params"] = json!(def.parameter_definitions);
+          node["resultType"] = json!(def.result_type);
+        }
+        None => notes.push(format!("Node \"{label}\": {entity} has no service {service} on {env}.")),
+      },
+      Err(e) => notes.push(format!("Node \"{label}\": could not read {entity}'s services on {env} ({e}).")),
+    }
+  }
+  notes
+}
+
+/// "Saved." plus any nodes `fill_services` could not complete.
+fn with_notes(done: Value, notes: Vec<String>) -> Result<String> {
+  if notes.is_empty() {
+    return match done {
+      Value::String(text) => Ok(text),
+      other => ser(&other),
+    };
+  }
+  ser(&json!({ "result": done, "warnings": notes, "hint": "Those service nodes have no parameter list, so a run sends them no inputs. Fix the names and save again." }))
 }
 
 fn flow_json(f: &ServiceFlow) -> Value {
@@ -108,16 +167,19 @@ pub fn tools() -> Vec<Tool> {
       Risk::Write,
       |a, args, _| async move {
         let x = Args(&args);
-        let graph = graph_arg(&args)?.map(|g| g.to_string());
-        let id = flows::create(
-          &a.pool().await,
-          x.need("name")?,
-          x.str("environment").unwrap_or(""),
-          x.str("folderId"),
-          graph.as_deref(),
-        )
-        .await?;
-        ser(&json!({ "id": id }))
+        let environment = x.str("environment").unwrap_or("");
+        let mut graph = graph_arg(&args)?;
+        let mut notes = Vec::new();
+        if let Some(g) = graph.as_mut() {
+          let env = match environment {
+            "" => twx::resolve_env(&a, &json!({})).await?,
+            e => e.to_string(),
+          };
+          notes = fill_services(&a, &env, g).await;
+        }
+        let graph = graph.map(|g| g.to_string());
+        let id = flows::create(&a.pool().await, x.need("name")?, environment, x.str("folderId"), graph.as_deref()).await?;
+        with_notes(json!({ "id": id }), notes)
       },
     ),
     tool(
@@ -161,11 +223,16 @@ pub fn tools() -> Vec<Tool> {
         let x = Args(&args);
         let id = x.need("id")?;
         let current = existing(&a, id).await?;
-        let graph =
+        let mut graph =
           graph_arg(&args)?.ok_or_else(|| CoreError::Invalid("Missing required argument \"graph\".".into()))?;
         let environment = x.str("environment").map(str::to_string).unwrap_or(current.environment);
+        let env = match environment.as_str() {
+          "" => twx::resolve_env(&a, &json!({})).await?,
+          e => e.to_string(),
+        };
+        let notes = fill_services(&a, &env, &mut graph).await;
         flows::save(&a.pool().await, id, &graph.to_string(), &environment).await?;
-        Ok("Saved.".into())
+        with_notes(json!("Saved."), notes)
       },
     ),
     tool(

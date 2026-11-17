@@ -2,6 +2,7 @@
 //! the Tauri event `assistant://event` (see `lib.rs`), not per command.
 
 use serde_json::Value;
+use singl_core::assistant::ApprovalMode;
 use singl_core::assistant::context::ScreenContext;
 use singl_core::assistant::mcp::client::McpServerStatus;
 use singl_core::assistant::mcp::{McpInfo, discovery_path};
@@ -26,6 +27,12 @@ pub async fn assistant_send(state: State<'_, AppState>, request: SendRequest) ->
 #[tauri::command]
 pub fn assistant_cancel(state: State<'_, AppState>, chat_id: String) -> bool {
   state.assistant.cancel(&chat_id)
+}
+
+/// Changes the approval mode of a chat's running turn (the composer's picker).
+#[tauri::command]
+pub fn assistant_turn_mode(state: State<'_, AppState>, chat_id: String, mode: ApprovalMode) -> bool {
+  state.assistant.change_turn_mode(&chat_id, mode)
 }
 
 #[tauri::command]

@@ -255,6 +255,9 @@ export const assistantFilesSearch = (query: string, limit = 30) =>
 export const assistantSkills = () => invoke<SkillInfo[]>("assistant_skills");
 export const assistantSend = (request: SendRequest) =>
   invoke<string>("assistant_send", { request });
+/** Changes a running turn's approval mode; false when nothing is running. */
+export const assistantTurnMode = (chatId: string, mode: ApprovalMode) =>
+  invoke<boolean>("assistant_turn_mode", { chatId, mode });
 export const assistantCancel = (chatId: string) =>
   invoke<boolean>("assistant_cancel", { chatId });
 export const assistantChats = (limit = 200) =>

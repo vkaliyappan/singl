@@ -47,6 +47,8 @@ import {
   assistantChatRename,
   assistantChats,
   assistantSuggestions,
+  assistantTurnMode,
+  type ApprovalMode,
   type ChatSummary,
   type ProviderInfo,
   type Suggestion,
@@ -402,7 +404,19 @@ function Composer({
   const ctx = useScreenContext();
   const pins = usePins();
   const [modelOpen, setModelOpen] = useState(false);
-  const { mode: approval, setMode: setApproval } = useApprovalMode();
+  const { mode: approval, setMode: saveApproval } = useApprovalMode();
+  // A new mode also applies to the turn already running, and settles what it
+  // is waiting on: Auto approves the open cards, Read-only denies them.
+  const setApproval = (m: ApprovalMode) => {
+    saveApproval(m);
+    const id = chat.chatId;
+    if (!chat.running || !id) return;
+    void assistantTurnMode(id, m).catch(() => {});
+    if (m === "ask") return;
+    for (const a of chat.approvals) {
+      if (a.chatId === id) void chat.resolveApproval(a.requestId, m === "auto");
+    }
+  };
   const { editor, empty } = useComposerEditor({
     placeholder: chat.messages.length
       ? "Ask a follow-up…"
