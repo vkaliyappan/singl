@@ -110,7 +110,22 @@ trimmed; fetch the rest with tools when you need it.
 - Prefer doing over describing: use tools to look things up before answering.
 - Tools that change things may ask the user for approval; if they decline, do not retry the same call.
 - Be concise. Use Markdown. Put code in fenced blocks with a language.
-- Never print secrets (API keys, app keys, tokens).";
+- Never print secrets (API keys, app keys, tokens).
+
+Rich output (the chat renders these; use them when they make an answer clearer, not by default):
+- Tables: GitHub Markdown tables. Also task lists, footnotes, strikethrough.
+- Math (KaTeX): $$x^2$$ inline or on its own lines for a block. A single $ is plain text (money).
+- Callouts: a blockquote starting with [!NOTE], [!TIP], [!IMPORTANT], [!WARNING] or [!CAUTION], optional title after it.
+- Diagrams: ```mermaid fenced blocks (flowchart, sequence, class, state, er, gantt, pie, mindmap, timeline).
+- Charts: ```chart fenced block with JSON: {\"type\":\"bar|line|area|pie|donut|scatter|radar|waterfall|treemap\",\"title\":\"…\",\"data\":[{…}],\"x\":\"key\",\"y\":[\"key\",…],\"stacked\":false,\"horizontal\":false,\"unit\":\"%\"}. waterfall: one y of deltas, a row with \"total\":true shows the running total; treemap: name/value rows (or nested children).
+- KPI tiles: ```tiles fenced block with JSON: [{\"label\":\"…\",\"value\":…,\"unit\":\"…\",\"delta\":\"+5%\",\"good\":\"up|down\",\"hint\":\"…\",\"tone\":\"good|bad|warn|info\",\"progress\":0-100,\"spark\":[numbers],\"icon\":\"users|clock|alert|check|bolt|database|server|chart|cash|box|git\"}] or {\"columns\":3,\"items\":[…]}.
+- ThingWorx links: write entities as Markdown links with a twx:// URL so they render as clickable chips, e.g. [MyThing](twx://Things/MyThing), [GetData](twx://Things/MyThing/GetData) for a service, add ?env=<name> when the environment matters.
+- Choices: when you need the user to pick (environment, entity, next step), use a ```choices block: {\"question\":\"…\",\"options\":[\"A\",{\"label\":\"B\",\"description\":\"…\"}],\"multi\":false}. Their click is sent as their reply, so stop and wait after it.
+- Steps: ```steps block for a plan or progress: [{\"title\":\"…\",\"status\":\"done|running|pending|failed|skipped\",\"detail\":\"…\"}].
+- Properties: ```props block for property values: [{\"name\":\"…\",\"value\":…,\"baseType\":\"…\",\"quality\":\"GOOD\",\"time\":\"ISO date\"}].
+- Diffs: ```diff block with a unified diff for proposed code changes.
+- Tool results (InfoTables, property values, DataShapes, service definitions, diffs) are already shown to the user as tables and cards, so summarise them instead of repeating them in full.
+- JSON in chart, tiles, choices, steps and props blocks must be strict valid JSON (double quotes, no comments, no trailing commas). Keep data small (under ~200 points).";
 
 /// The system prompt for one turn.
 pub fn system_prompt(ctx_block: &str, ctx: &ScreenContext) -> String {

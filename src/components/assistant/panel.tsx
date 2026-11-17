@@ -716,6 +716,7 @@ export function AssistantPanel({
               running={chat.running}
               runningProvider={chat.runningProvider ?? choice}
               liveCalls={chat.liveCalls}
+              onChoose={(text) => void send(text)}
             />
           )}
 

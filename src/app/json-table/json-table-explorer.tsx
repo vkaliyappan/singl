@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAssistantContext } from "@/lib/assistant/context";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
@@ -51,6 +51,7 @@ import {
   type TableSource,
 } from "@/lib/json-table";
 import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
+import { takePendingJson } from "@/lib/json-handoff";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -131,6 +132,12 @@ type ParseState =
 export function JsonTableExplorer() {
   const { resolvedTheme } = useTheme();
   const [text, setText] = useState("");
+  // JSON handed over from the assistant; read after mount to keep hydration stable.
+  useEffect(() => {
+    const pending = takePendingJson();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (pending) setText(pending);
+  }, []);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [flatten, setFlatten] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);

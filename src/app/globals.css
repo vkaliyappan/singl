@@ -237,3 +237,76 @@ html.widget-window body {
 }
 .composer-editor a { color: var(--primary); text-decoration: underline; }
 .composer-editor hr { border-color: var(--border); }
+
+/* ===== Assistant rich markdown (.md-rich): code highlight, KaTeX, tasks, footnotes ===== */
+.md-rich .hljs { color: #24292f; }
+.md-rich .hljs-keyword,
+.md-rich .hljs-literal,
+.md-rich .hljs-meta .hljs-keyword { color: #cf222e; }
+.md-rich .hljs-string,
+.md-rich .hljs-regexp { color: #0a3069; }
+.md-rich .hljs-number,
+.md-rich .hljs-symbol { color: #0550ae; }
+.md-rich .hljs-comment { color: #6e7781; font-style: italic; }
+.md-rich .hljs-title,
+.md-rich .hljs-title.function_,
+.md-rich .hljs-section { color: #8250df; }
+.md-rich .hljs-attr,
+.md-rich .hljs-attribute,
+.md-rich .hljs-variable,
+.md-rich .hljs-template-variable { color: #0550ae; }
+.md-rich .hljs-built_in,
+.md-rich .hljs-type,
+.md-rich .hljs-title.class_ { color: #953800; }
+.md-rich .hljs-meta { color: #6e7781; }
+.md-rich .hljs-tag,
+.md-rich .hljs-name { color: #116329; }
+.md-rich .hljs-section { font-weight: 600; }
+.md-rich .hljs-deletion { color: #82071e; background: #ffebe9; }
+.md-rich .hljs-addition { color: #116329; background: #dafbe1; }
+.dark .md-rich .hljs { color: #e6edf3; }
+.dark .md-rich .hljs-keyword,
+.dark .md-rich .hljs-literal,
+.dark .md-rich .hljs-meta .hljs-keyword { color: #ff7b72; }
+.dark .md-rich .hljs-string,
+.dark .md-rich .hljs-regexp { color: #a5d6ff; }
+.dark .md-rich .hljs-number,
+.dark .md-rich .hljs-symbol { color: #79c0ff; }
+.dark .md-rich .hljs-comment { color: #8b949e; }
+.dark .md-rich .hljs-title,
+.dark .md-rich .hljs-title.function_,
+.dark .md-rich .hljs-section { color: #d2a8ff; }
+.dark .md-rich .hljs-attr,
+.dark .md-rich .hljs-attribute,
+.dark .md-rich .hljs-variable,
+.dark .md-rich .hljs-template-variable { color: #79c0ff; }
+.dark .md-rich .hljs-built_in,
+.dark .md-rich .hljs-type,
+.dark .md-rich .hljs-title.class_ { color: #ffa657; }
+.dark .md-rich .hljs-meta { color: #8b949e; }
+.dark .md-rich .hljs-tag,
+.dark .md-rich .hljs-name { color: #7ee787; }
+.dark .md-rich .hljs-deletion { color: #ffdcd7; background: #67060c; }
+.dark .md-rich .hljs-addition { color: #aff5b4; background: #033a16; }
+
+.md-rich .katex { font-size: 1em; }
+.md-rich .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.md-rich li.task-list-item { list-style: none; }
+.md-rich li.task-list-item input[type="checkbox"] { margin: 0 0.4em 0 -1.1em; vertical-align: middle; }
+.md-rich ul.contains-task-list { padding-left: 0.25rem; list-style: none; }
+
+.md-rich section.footnotes {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+.md-rich section.footnotes h2 { display: none; }
+.md-rich section.footnotes ol { padding-left: 1.25rem; }
+.md-rich sup a { text-decoration: none; color: var(--primary); }

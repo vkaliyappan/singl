@@ -3,8 +3,21 @@
 import { PinIcon } from "./pin-icon";
 import { ImagePreview } from "./image-preview";
 import { memo, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
+import "katex/dist/katex.min.css";
+import { Callout, remarkCallouts } from "./rich/callouts";
+import { ChoiceContext, ChoicesBlock } from "./rich/choices";
+import { EntityChip, urlTransform } from "./rich/entity-chip";
+import { PatchView } from "./rich/diff-view";
+import { StepsBlock, StepTracker, toolSteps } from "./rich/steps";
+import { ApprovalPreview } from "./rich/approval-preview";
+import { PropsBlock } from "./rich/tool-views/property-panel";
+import { ToolResultView } from "./rich/tool-views";
 import {
   IconAlertTriangle,
   IconCheck,
@@ -25,6 +38,45 @@ import type { Block, Message, Risk } from "@/lib/assistant/api";
 import type { Approval, LiveCall } from "./use-assistant-chat";
 
 const RESULT_LIMIT = 6000;
+
+// Heavy renderers load on first use, so chats without them stay light.
+const richFallback = () => (
+  <div className="my-2 h-24 animate-pulse rounded-md border bg-muted/40" />
+);
+const MermaidBlock = dynamic(
+  () => import("./rich/mermaid-block").then((m) => m.MermaidBlock),
+  { ssr: false, loading: richFallback },
+);
+const ChartBlock = dynamic(
+  () => import("./rich/chart-block").then((m) => m.ChartBlock),
+  { ssr: false, loading: richFallback },
+);
+const TilesBlock = dynamic(
+  () => import("./rich/tiles-block").then((m) => m.TilesBlock),
+  { ssr: false, loading: richFallback },
+);
+
+/** Fenced languages drawn as visuals instead of highlighted code. */
+const RICH_FENCES = [
+  "mermaid",
+  "chart",
+  "tiles",
+  "kpi",
+  "choices",
+  "steps",
+  "props",
+  "diff",
+];
+
+/** The language of a fenced block: `language-xyz` on its <code> child. */
+function fenceLang(children: React.ReactNode): string {
+  const child = Array.isArray(children) ? children[0] : children;
+  const cls =
+    child && typeof child === "object" && "props" in child
+      ? (child as React.ReactElement<{ className?: string }>).props.className
+      : undefined;
+  return /language-([\w-]+)/.exec(cls ?? "")?.[1]?.toLowerCase() ?? "";
+}
 
 export function CopyButton({
   text,
@@ -73,6 +125,14 @@ function textOf(node: React.ReactNode): string {
 const markdownComponents: Components = {
   pre({ children }) {
     const code = textOf(children).replace(/\n$/, "");
+    const lang = fenceLang(children);
+    if (lang === "mermaid") return <MermaidBlock source={code} />;
+    if (lang === "chart") return <ChartBlock source={code} />;
+    if (lang === "tiles" || lang === "kpi") return <TilesBlock source={code} />;
+    if (lang === "choices") return <ChoicesBlock source={code} />;
+    if (lang === "steps") return <StepsBlock source={code} />;
+    if (lang === "props") return <PropsBlock source={code} />;
+    if (lang === "diff" || lang === "patch") return <PatchView source={code} />;
     return (
       <div className="group/code relative my-2 overflow-hidden rounded-md border bg-muted/50">
         <CopyButton
@@ -86,7 +146,7 @@ const markdownComponents: Components = {
     );
   },
   code({ className, children, ...rest }) {
-    if (className?.startsWith("language-"))
+    if (className?.includes("language-"))
       return (
         <code className={className} {...rest}>
           {children}
@@ -119,7 +179,56 @@ const markdownComponents: Components = {
   h3: ({ children }) => (
     <h4 className="mt-2 mb-1 text-xs font-semibold">{children}</h4>
   ),
-  a: ({ children, href }) => (
+  h4: ({ children }) => (
+    <h5 className="mt-2 mb-1 text-xs font-medium">{children}</h5>
+  ),
+  h5: ({ children }) => (
+    <h6 className="mt-2 mb-1 text-xs font-medium text-muted-foreground">
+      {children}
+    </h6>
+  ),
+  h6: ({ children }) => (
+    <h6 className="mt-2 mb-1 text-[11px] font-medium text-muted-foreground uppercase">
+      {children}
+    </h6>
+  ),
+  hr: () => <hr className="my-3 border-border" />,
+  img: ({ src, alt }) =>
+    typeof src === "string" ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={alt ?? ""}
+        className="my-2 max-h-80 max-w-full rounded-md border"
+      />
+    ) : null,
+  input: ({ type, checked }) =>
+    type === "checkbox" ? (
+      <input
+        type="checkbox"
+        checked={!!checked}
+        readOnly
+        className="mr-1.5 size-3 translate-y-px accent-primary"
+      />
+    ) : null,
+  aside: ({ children, ...rest }) => {
+    const props = rest as Record<string, unknown>;
+    const type = props["data-callout"];
+    if (typeof type !== "string") return <aside>{children}</aside>;
+    const title = props["data-title"];
+    return (
+      <Callout
+        type={type}
+        title={typeof title === "string" && title ? title : undefined}
+      >
+        {children}
+      </Callout>
+    );
+  },
+  a: ({ children, href }) =>
+    href?.startsWith("twx:") ? (
+      <EntityChip href={href}>{children}</EntityChip>
+    ) : (
     <a
       href={href}
       target="_blank"
@@ -134,25 +243,87 @@ const markdownComponents: Components = {
       {children}
     </blockquote>
   ),
-  table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="w-full border-collapse text-[11px]">{children}</table>
-    </div>
+  table: ({ children }) => <MdTable>{children}</MdTable>,
+  tr: ({ children }) => (
+    <tr className="even:bg-muted/25 hover:bg-muted/40">{children}</tr>
   ),
-  th: ({ children }) => (
-    <th className="border bg-muted/50 px-2 py-1 text-left font-medium">
+  th: ({ children, style }) => (
+    <th
+      style={style}
+      className="border-b bg-muted/60 px-2 py-1 text-left font-medium whitespace-nowrap"
+    >
       {children}
     </th>
   ),
-  td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
+  td: ({ children, style }) => (
+    <td style={style} className="border-t px-2 py-1 align-top tabular-nums">
+      {children}
+    </td>
+  ),
 };
+
+/** A table in a scroll box, with a hover button to copy it as TSV (pastes into Excel). */
+function MdTable({ children }: { children: React.ReactNode }) {
+  const [el, setEl] = useState<HTMLTableElement | null>(null);
+  return (
+    <div className="group/table relative my-2 overflow-hidden rounded-md border">
+      <div className="max-h-[28rem] overflow-auto">
+        <table ref={setEl} className="w-full border-collapse text-[11px]">
+          {children}
+        </table>
+      </div>
+      {el && <TableCopy table={el} />}
+    </div>
+  );
+}
+
+function TableCopy({ table }: { table: HTMLTableElement }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy table"
+      title="Copy table (TSV)"
+      className="absolute top-1 right-1 flex size-5 items-center justify-center rounded bg-background/80 text-muted-foreground opacity-0 transition-opacity group-hover/table:opacity-100 hover:text-foreground focus-visible:opacity-100"
+      onClick={() => {
+        const tsv = Array.from(table.rows)
+          .map((r) =>
+            Array.from(r.cells)
+              .map((c) => c.innerText.replace(/\s+/g, " ").trim())
+              .join("\t"),
+          )
+          .join("\n");
+        void navigator.clipboard.writeText(tsv).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1200);
+        });
+      }}
+    >
+      {done ? <IconCheck className="size-3" /> : <IconCopy className="size-3" />}
+    </button>
+  );
+}
+
+type MdProps = React.ComponentProps<typeof ReactMarkdown>;
+const remarkPlugins: MdProps["remarkPlugins"] = [
+  remarkGfm,
+  // `$5 and $10` is money here, not math: inline math needs $$…$$.
+  [remarkMath, { singleDollarTextMath: false }],
+  remarkCallouts,
+];
+const rehypePlugins: MdProps["rehypePlugins"] = [
+  [rehypeKatex, { throwOnError: false, strict: "ignore" }],
+  [rehypeHighlight, { plainText: RICH_FENCES }],
+];
 
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <div className="selectable text-[13px]/relaxed break-words">
+    <div className="md-rich selectable text-[13px]/relaxed break-words">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         components={markdownComponents}
+        urlTransform={urlTransform}
       >
         {text}
       </ReactMarkdown>
@@ -360,6 +531,12 @@ export function ToolCard({
           <span className="text-[10px] text-destructive">failed</span>
         )}
       </button>
+      {/* A readable view of the result (InfoTable, properties, …); raw JSON stays one click away. */}
+      {content && !isError && !running && (
+        <div className="border-t px-2 py-2 empty:hidden">
+          <ToolResultView name={name} input={input} content={content} />
+        </div>
+      )}
       {open && (
         <div className="space-y-2 border-t px-2 py-2">
           <div>
@@ -413,9 +590,17 @@ export function ApprovalCard({
           Requested by an external client ({approval.source}).
         </p>
       )}
-      <pre className="selectable mb-2 max-h-40 overflow-auto rounded bg-background/60 p-1.5 font-mono text-[10.5px]">
-        {pretty(approval.input)}
-      </pre>
+      <div className="mb-2">
+        <ApprovalPreview tool={approval.tool} input={approval.input} />
+      </div>
+      <details className="mb-2">
+        <summary className="cursor-pointer text-[10px] text-muted-foreground">
+          Raw input
+        </summary>
+        <pre className="selectable mt-1 max-h-40 overflow-auto rounded bg-background/60 p-1.5 font-mono text-[10.5px]">
+          {pretty(approval.input)}
+        </pre>
+      </details>
       <div className="flex flex-wrap gap-1.5">
         <Button size="xs" onClick={() => onResolve(approval.requestId, true)}>
           Approve
@@ -466,14 +651,85 @@ function ProviderLabel({
   );
 }
 
+type Call = { id: string; name: string; input: unknown; source?: string };
+type Results = Map<string, { content: string; isError: boolean }>;
+/** Runs of deploy steps: first call id → the run, and the ids shown inside a run. */
+type Runs = { first: Map<string, Call[]>; inside: Set<string> };
+
+const isDeploy = (name: string) => name.startsWith("deploy_");
+
+/** Group consecutive deploy calls (no user message between them) into runs of two or more. */
+function deployRuns(calls: (Call | null)[]): Runs {
+  const first = new Map<string, Call[]>();
+  const inside = new Set<string>();
+  let run: Call[] = [];
+  const flush = () => {
+    if (run.length >= 2) {
+      first.set(run[0].id, run);
+      for (const c of run.slice(1)) inside.add(c.id);
+    }
+    run = [];
+  };
+  for (const c of calls) {
+    if (c && isDeploy(c.name)) run.push(c);
+    else flush();
+  }
+  flush();
+  return { first, inside };
+}
+
+/** A deploy run as one step tracker; each step's raw call stays expandable below. */
+function DeployRun({
+  calls,
+  results,
+  running,
+}: {
+  calls: Call[];
+  results: Results;
+  running: boolean;
+}) {
+  const items = calls.map((c) => {
+    const r = results.get(c.id);
+    return {
+      ...c,
+      content: r?.content,
+      isError: r?.isError,
+      running: !r && running,
+    };
+  });
+  return (
+    <div className="my-1.5">
+      <StepTracker title="Deployment" steps={toolSteps(items)} />
+      <details className="mt-1">
+        <summary className="cursor-pointer text-[10px] text-muted-foreground">
+          {calls.length} tool calls
+        </summary>
+        {items.map((c) => (
+          <ToolCard
+            key={c.id}
+            name={c.name}
+            input={c.input}
+            content={c.content}
+            isError={c.isError}
+            running={c.running}
+            source={c.source}
+          />
+        ))}
+      </details>
+    </div>
+  );
+}
+
 function AssistantBlocks({
   blocks,
   results,
   running,
+  runs,
 }: {
   blocks: Block[];
-  results: Map<string, { content: string; isError: boolean }>;
+  results: Results;
   running: boolean;
+  runs: Runs;
 }) {
   return (
     <>
@@ -482,6 +738,16 @@ function AssistantBlocks({
           return b.text.trim() ? <Markdown key={i} text={b.text} /> : null;
         const thought = thinkingText(b);
         if (thought) return <ThinkingBlock key={i} text={thought} />;
+        if (b.type === "tool_use" && runs.inside.has(b.id)) return null;
+        if (b.type === "tool_use" && runs.first.has(b.id))
+          return (
+            <DeployRun
+              key={b.id}
+              calls={runs.first.get(b.id)!}
+              results={results}
+              running={running}
+            />
+          );
         if (b.type === "tool_use") {
           const r = results.get(b.id);
           return (
@@ -508,6 +774,7 @@ export function MessageList({
   running,
   runningProvider,
   liveCalls,
+  onChoose,
 }: {
   messages: Message[];
   streaming: string;
@@ -516,6 +783,8 @@ export function MessageList({
   running: boolean;
   runningProvider: { provider: string; model: string; effort?: string } | null;
   liveCalls: Record<string, LiveCall>;
+  /** Send a reply for the user (a clicked choice). */
+  onChoose?: (text: string) => void;
 }) {
   const { visible, results, savedToolIds } = useMemo(() => {
     const results = new Map<string, { content: string; isError: boolean }>();
@@ -553,6 +822,28 @@ export function MessageList({
     return m;
   }, [results, liveCalls]);
 
+  const pendingKey = pending.map((c) => c.callId).join(",");
+  const runs = useMemo(() => {
+    const calls: (Call | null)[] = [];
+    for (const m of visible) {
+      if (m.role === "user") calls.push(null);
+      else
+        for (const b of m.blocks)
+          if (b.type === "tool_use")
+            calls.push({ id: b.id, name: b.name, input: b.input });
+    }
+    for (const c of pending)
+      calls.push({ id: c.callId, name: c.name, input: c.input, source: c.source });
+    return deployRuns(calls);
+    // pendingKey stands in for `pending`, which is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, pendingKey]);
+  const lastAssistant = visible.length - 1;
+  const choice = (i: number) => ({
+    send: onChoose ?? null,
+    active: !running && i === lastAssistant,
+  });
+
   return (
     <div className="flex flex-col gap-5">
       {visible.map((m, i) =>
@@ -570,11 +861,14 @@ export function MessageList({
           </div>
         ) : (
           <div key={m.id} className="min-w-0">
-            <AssistantBlocks
-              blocks={m.blocks}
-              results={merged}
-              running={running}
-            />
+            <ChoiceContext value={choice(i)}>
+              <AssistantBlocks
+                blocks={m.blocks}
+                results={merged}
+                running={running}
+                runs={runs}
+              />
+            </ChoiceContext>
             {/* One label per answer: under the last assistant message before the next user message. */}
             {visible[i + 1]?.role !== "assistant" &&
               !(running && i === visible.length - 1) && (
@@ -593,17 +887,26 @@ export function MessageList({
             <ThinkingBlock text={thinking.trim()} live={running && !streaming} />
           )}
           {streaming && <Markdown text={streaming} />}
-          {pending.map((c) => (
-            <ToolCard
-              key={c.callId}
-              name={c.name}
-              input={c.input}
-              content={c.content}
-              isError={c.isError}
-              running={!c.done}
-              source={c.source}
-            />
-          ))}
+          {pending.map((c) =>
+            runs.inside.has(c.callId) ? null : runs.first.has(c.callId) ? (
+              <DeployRun
+                key={c.callId}
+                calls={runs.first.get(c.callId)!}
+                results={merged}
+                running={running}
+              />
+            ) : (
+              <ToolCard
+                key={c.callId}
+                name={c.name}
+                input={c.input}
+                content={c.content}
+                isError={c.isError}
+                running={!c.done}
+                source={c.source}
+              />
+            ),
+          )}
           {running && !streaming && !thinking.trim() && pending.every((c) => c.done) && (
             <div
               className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
