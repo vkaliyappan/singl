@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/clock-widget"
 import { errorMessage, listEnvironments } from "@/lib/settings"
 import { FlowEditor } from "../flow-editor"
+import { onAssistantChange } from "@/lib/assistant/changes"
 
 type FlowRecord = { id: string; name: string; environment: string; graph: string }
 type EditorEnv = { environment: string; twxBaseUrl: string; hasAppKey: boolean }
@@ -26,6 +27,8 @@ function ServiceFlow() {
   const id = useSearchParams().get("id") ?? ""
   const [data, setData] = useState<{ flow: FlowRecord | null; envs: EditorEnv[] } | null>(null)
   const [error, setError] = useState("")
+  // Bumped when the assistant rewrites this flow, so the editor starts over from it.
+  const [version, setVersion] = useState(0)
 
   useEffect(() => {
     if (!isTauri()) {
@@ -50,6 +53,19 @@ function ServiceFlow() {
     if (data?.flow) document.title = data.flow.name
   }, [data])
 
+  useEffect(() => {
+    if (!id) return
+    return onAssistantChange("flows", (change) => {
+      if (change.input.id !== id) return
+      invoke<FlowRecord | null>("flow_get", { id })
+        .then((flow) => {
+          setData((d) => (d ? { ...d, flow } : d))
+          if (change.tool === "flow_save" || change.tool === "flow_rename") setVersion((v) => v + 1)
+        })
+        .catch(() => {})
+    })
+  }, [id])
+
   if (error) return <Message>{error}</Message>
   if (!id || (data && !data.flow)) {
     return (
@@ -66,7 +82,7 @@ function ServiceFlow() {
   return (
     <FlowEditor
       // Opening another flow from inside the editor must start from scratch.
-      key={data.flow.id}
+      key={`${data.flow.id}:${version}`}
       flowId={data.flow.id}
       flowName={data.flow.name}
       initialGraph={data.flow.graph}

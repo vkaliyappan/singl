@@ -119,6 +119,7 @@ import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/compon
 import { toast } from "sonner";
 import { parseTwxEntityXml, type ParsedTwxEntity } from "@/lib/twx/entity-xml-parser";
 import { safeEnvDir, type TwxEntityLink } from "@/lib/twx/links";
+import { onAssistantChange } from "@/lib/assistant/changes";
 import { EntityOverview } from "./components/entity-overview";
 import { OutputDrawer } from "./components/output-drawer";
 import { ExportPicker } from "./components/export-picker";
@@ -827,6 +828,27 @@ export function TwxExplorer({
   const [nameValue, setNameValue] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameBusy, setNameBusy] = useState(false);
+
+  // The assistant edits, creates and exports these files too: re-list the
+  // tree and reload open tabs without unsaved edits, so the screen shows disk.
+  useEffect(() => {
+    return onAssistantChange("entities", () => {
+      if (treeRoot) void loadTree(treeRoot, true);
+      for (const [path, tab] of openTabsRef.current) {
+        if (tab.loading || tab.saving || isDirty(tab)) continue;
+        readEntityFile(path)
+          .then((content) => {
+            setOpenTabs((prev) => {
+              const now = prev.get(path);
+              // Typed into while reading, or already current: leave it.
+              if (!now || isDirty(now) || now.saved === content) return prev;
+              return new Map(prev).set(path, { ...now, content, saved: content, error: null });
+            });
+          })
+          .catch(() => {});
+      }
+    });
+  }, [treeRoot, loadTree]);
 
   const openNameDialog = (state: NameDialogState) => {
     setNameDialog(state);

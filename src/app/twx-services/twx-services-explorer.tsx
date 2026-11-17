@@ -98,6 +98,7 @@ import type { TwxServiceLink } from "@/lib/twx/links";
 import { OutputValuePicker, infotableColumns } from "./output-value-picker";
 import { CodeSnippetDialog } from "./code-snippet-dialog";
 import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
+import { onAssistantChange } from "@/lib/assistant/changes";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -1114,6 +1115,8 @@ export function TwxServicesExplorer({
       toast.error(`Could not reload presets: ${errorMessage(e)}`);
     }
   }, []);
+
+  useEffect(() => onAssistantChange("presets", () => void reloadPresets()), [reloadPresets]);
 
   const savePreset = async (preset: Parameters<typeof saveServicePreset>[0]) => {
     setSavePending(true);

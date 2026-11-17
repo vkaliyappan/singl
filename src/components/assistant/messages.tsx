@@ -940,9 +940,13 @@ export function MessageList({
               />
             ),
           )}
-          {running && !streaming && !thinking.trim() && pending.every((c) => c.done) && (
-            <Activity key={status} status={status} />
-          )}
+          {/* Text clears the status, so one set after it is newer work
+              (e.g. writing a big tool call) and shows under the text. */}
+          {running &&
+            pending.every((c) => c.done) &&
+            (status || (!streaming && !thinking.trim())) && (
+              <Activity key={status} status={status} />
+            )}
           <ProviderLabel
             provider={runningProvider?.provider}
             model={runningProvider?.model}

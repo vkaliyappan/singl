@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/clock-widget"
 import { errorMessage, listEnvironments } from "@/lib/settings"
 import { onFlowsChanged } from "./actions"
+import { onAssistantChange } from "@/lib/assistant/changes"
 import { FlowHub } from "./flow-hub"
 import type { EnvRow, FlowRow, FolderRow } from "./hub-model"
 
@@ -48,7 +49,12 @@ export default function ServiceFlowsPage() {
       return
     }
     load()
-    return onFlowsChanged(load)
+    const offAssistant = onAssistantChange("flows", load)
+    const offLocal = onFlowsChanged(load)
+    return () => {
+      offAssistant()
+      offLocal()
+    }
   }, [load])
 
   if (error) {

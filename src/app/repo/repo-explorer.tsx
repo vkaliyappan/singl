@@ -79,6 +79,7 @@ import {
   type RepoJobMeta,
 } from "@/lib/repo-jobs";
 import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
+import { onAssistantChange } from "@/lib/assistant/changes";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -367,6 +368,23 @@ export function RepoExplorer({
     if (savedSlug) loadDir();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A pull, checkout or clean by the assistant changes the files on disk:
+  // re-list them and reload the open (read-only) tabs.
+  useEffect(() => {
+    return onAssistantChange("repo", () => {
+      void loadDir();
+      for (const path of openTabsRef.current.keys()) {
+        readRepoFile(slot, path.slice(path.indexOf("/") + 1))
+          .then((content) =>
+            setOpenTabs((prev) =>
+              prev.has(path) ? new Map(prev).set(path, { content, error: null, loading: false }) : prev
+            )
+          )
+          .catch(() => {});
+      }
+    });
+  }, [loadDir, slot]);
 
   // ── Initial-panel handlers ────────────────────────────────────────────────
   const handleFetchBranches = useCallback(async () => {

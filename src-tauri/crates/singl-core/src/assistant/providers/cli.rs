@@ -348,6 +348,14 @@ impl Parser {
         let e = &ev["event"];
         match e["type"].as_str() {
           Some("content_block_start") if e["content_block"]["type"] == "text" => self.start_segment(),
+          // A tool call's input streams before the call runs, and a big one
+          // (a whole service body) takes a while: say what is being written.
+          Some("content_block_start") if e["content_block"]["type"] == "tool_use" => {
+            let name = e["content_block"]["name"].as_str().unwrap_or("");
+            let short = name.strip_prefix(&format!("mcp__{SERVER}__")).unwrap_or(name);
+            let short = short.strip_prefix("mcp__").map(|n| n.replacen("__", ": ", 1)).unwrap_or(short.to_string());
+            self.set_status(if short.is_empty() { "Preparing a tool call".into() } else { format!("Preparing {short}") });
+          }
           Some("content_block_start") if e["content_block"]["type"] == "thinking" => {
             self.set_status("Thinking".into());
             self.think_sep = true;
@@ -892,6 +900,7 @@ mod tests {
     for l in [
       r#"{"type":"system","subtype":"init","session_id":"s"}"#,
       r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}}"#,
+      r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"mcp__singl__entity_write"}}}"#,
       r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"C:/x/GetFloorplanVS.js"}}]}}"#,
       r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__singl__flow_get","input":{}}]}}"#,
       r#"{"type":"assistant","parent_tool_use_id":"t1","message":{"content":[{"type":"tool_use","name":"Grep","input":{"pattern":"GetHierarchy"}}]}}"#,
@@ -899,7 +908,7 @@ mod tests {
       p.feed_line(l, &|_| {}, &|_| {});
       seen.extend(p.take_status());
     }
-    assert_eq!(seen, ["Starting", "Thinking", "Reading GetFloorplanVS.js", "Sub-agent: Searching for \"GetHierarchy\""]);
+    assert_eq!(seen, ["Starting", "Thinking", "Preparing entity_write", "Reading GetFloorplanVS.js", "Sub-agent: Searching for \"GetHierarchy\""]);
 
     let mut p = Parser::new("codex");
     let mut seen = Vec::new();

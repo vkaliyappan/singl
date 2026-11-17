@@ -20,6 +20,7 @@ import {
   type Risk,
   type ApprovalMode,
 } from "@/lib/assistant/api";
+import { emitAssistantChange } from "@/lib/assistant/changes";
 
 export type LiveCall = {
   callId: string;
@@ -109,6 +110,9 @@ export function useAssistantChat(opts: {
   // Opening a chat mid-turn restores its live state from here instead of
   // showing only what streams after the switch.
   const live = useRef(new Map<string, Live>());
+  // Every call in flight, any chat or outside client, so a success can tell
+  // the open screens what changed.
+  const inFlight = useRef(new Map<string, { name: string; input: unknown }>());
   const track = (id: string, change: (l: Live) => Live) => {
     live.current.set(id, change(live.current.get(id) ?? emptyLive()));
   };
@@ -192,6 +196,7 @@ export function useAssistantChat(opts: {
           if (e.chatId === chatIdRef.current) setStatus(e.text);
           break;
         case "toolCall": {
+          inFlight.current.set(e.callId, { name: e.name, input: e.input });
           const call: LiveCall = {
             callId: e.callId,
             name: e.name,
@@ -212,7 +217,10 @@ export function useAssistantChat(opts: {
           }
           break;
         }
-        case "toolResult":
+        case "toolResult": {
+          const started = inFlight.current.get(e.callId);
+          inFlight.current.delete(e.callId);
+          if (started && !e.isError) emitAssistantChange(started.name, started.input);
           if (e.chatId === null) {
             setExternal((x) =>
               x.map((c) =>
@@ -238,6 +246,7 @@ export function useAssistantChat(opts: {
             if (e.chatId === chatIdRef.current) setLiveCalls(finish);
           }
           break;
+        }
         case "messageSaved":
           if (e.message.role === "assistant" && live.current.has(e.chatId)) {
             track(e.chatId, (l) => ({ ...l, streaming: "", thinking: "" }));
