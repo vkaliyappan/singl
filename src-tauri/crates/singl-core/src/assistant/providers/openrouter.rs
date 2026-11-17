@@ -105,12 +105,13 @@ struct Call {
 #[derive(Default)]
 pub struct Accumulator {
   text: String,
+  reasoning: String,
   calls: BTreeMap<u64, Call>,
   finish_reason: String,
 }
 
 impl Accumulator {
-  pub fn feed(&mut self, data: &str, on_text: TextSink<'_>) -> Result<()> {
+  pub fn feed(&mut self, data: &str, on_text: TextSink<'_>, on_thinking: TextSink<'_>) -> Result<()> {
     let data = data.trim();
     if data == "[DONE]" {
       return Ok(());
@@ -121,6 +122,10 @@ impl Accumulator {
       return Err(CoreError::Invalid(msg.to_string()));
     }
     let choice = &chunk["choices"][0];
+    if let Some(t) = choice["delta"]["reasoning"].as_str().filter(|t| !t.is_empty()) {
+      self.reasoning.push_str(t);
+      on_thinking(t);
+    }
     if let Some(t) = choice["delta"]["content"].as_str().filter(|t| !t.is_empty()) {
       self.text.push_str(t);
       on_text(t);
@@ -152,7 +157,7 @@ impl Accumulator {
   }
 
   pub fn finish(self) -> ApiReply {
-    let mut blocks = Vec::new();
+    let mut blocks: Vec<Block> = super::shown_thinking(self.reasoning).into_iter().collect();
     if !self.text.is_empty() {
       blocks.push(Block::Text { text: self.text });
     }
@@ -179,7 +184,7 @@ impl Accumulator {
   }
 }
 
-pub async fn complete(req: &ApiRequest, on_text: TextSink<'_>, cancel: &CancellationToken) -> Result<ApiReply> {
+pub async fn complete(req: &ApiRequest, on_text: TextSink<'_>, on_thinking: TextSink<'_>, cancel: &CancellationToken) -> Result<ApiReply> {
   let client = sse::client()?;
   let url = format!("{}/chat/completions", base());
   let body = build_body(req);
@@ -193,7 +198,7 @@ pub async fn complete(req: &ApiRequest, on_text: TextSink<'_>, cancel: &Cancella
   })
   .await?;
   let mut acc = Accumulator::default();
-  sse::read_events(res, cancel, |data| acc.feed(data, on_text)).await?;
+  sse::read_events(res, cancel, |data| acc.feed(data, on_text, on_thinking)).await?;
   Ok(acc.finish())
 }
 
@@ -288,7 +293,7 @@ mod tests {
     let mut acc = Accumulator::default();
     for l in lines {
       if let Some(d) = sse::data_of(l) {
-        if let Err(e) = acc.feed(d, &on_text) {
+        if let Err(e) = acc.feed(d, &on_text, &|_| {}) {
           return (Err(e), seen.into_inner().unwrap());
         }
       }
@@ -326,6 +331,22 @@ mod tests {
   }
 
   #[test]
+  fn reasoning_is_streamed_and_kept_for_display() {
+    let thought = Mutex::new(String::new());
+    let on_thinking = |t: &str| thought.lock().unwrap().push_str(t);
+    let mut acc = Accumulator::default();
+    for d in [r#"{"choices":[{"delta":{"reasoning":"Hmm"}}]}"#, r#"{"choices":[{"delta":{"content":"Hi"}}]}"#] {
+      acc.feed(d, &|_| {}, &on_thinking).unwrap();
+    }
+    assert_eq!(thought.into_inner().unwrap(), "Hmm");
+    let blocks = acc.finish().blocks;
+    assert_eq!(blocks[0], Block::Opaque { provider: "ui".into(), data: json!({"type": "thinking", "thinking": "Hmm"}) });
+    assert_eq!(blocks[1], Block::Text { text: "Hi".into() });
+    // Never sent back.
+    assert_eq!(convert_messages("s", &[msg(Role::Assistant, blocks)])[1]["content"], "Hi");
+  }
+
+  #[test]
   fn maps_finish_reasons() {
     let r = |reason: &str| run(&[&format!(r#"data: {{"choices":[{{"delta":{{"content":"x"}},"finish_reason":"{reason}"}}]}}"#)]).0.unwrap().stop_reason;
     assert_eq!(r("stop"), "end_turn");
@@ -354,7 +375,7 @@ mod tests {
       max_tokens: 50,
       effort: String::new(),
     };
-    let reply = complete(&req, &|_| {}, &CancellationToken::new()).await.unwrap();
+    let reply = complete(&req, &|_| {}, &|_| {}, &CancellationToken::new()).await.unwrap();
     assert!(!reply.blocks.is_empty());
   }
 }

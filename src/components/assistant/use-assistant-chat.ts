@@ -69,6 +69,7 @@ export function useAssistantChat(opts: {
   const [title, setTitle] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
+  const [thinking, setThinking] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [liveCalls, setLiveCalls] = useState<Record<string, LiveCall>>({});
@@ -140,6 +141,9 @@ export function useAssistantChat(opts: {
         case "text":
           if (e.chatId === chatIdRef.current) setStreaming((s) => s + e.text);
           break;
+        case "thinking":
+          if (e.chatId === chatIdRef.current) setThinking((s) => s + e.text);
+          break;
         case "toolCall": {
           const call: LiveCall = {
             callId: e.callId,
@@ -192,12 +196,16 @@ export function useAssistantChat(opts: {
               ? base
               : [...base, e.message];
           });
-          if (e.message.role === "assistant") setStreaming("");
+          if (e.message.role === "assistant") {
+            setStreaming("");
+            setThinking("");
+          }
           break;
         case "turnEnded":
           if (e.chatId !== chatIdRef.current) break;
           setRunning(false);
           setStreaming("");
+          setThinking("");
           setLiveCalls({});
           setRunningProvider(null);
           if (e.error) setError(e.error);
@@ -262,6 +270,7 @@ export function useAssistantChat(opts: {
     setTitle("");
     setMessages([]);
     setStreaming("");
+    setThinking("");
     setLiveCalls({});
     setRunning(false);
     setRunningProvider(null);
@@ -298,6 +307,7 @@ export function useAssistantChat(opts: {
       if (!body && !extras?.images?.length) return false;
       setError("");
       setStreaming("");
+      setThinking("");
       setLiveCalls({});
       setRunning(true);
       setRunningProvider(choice);
@@ -381,6 +391,7 @@ export function useAssistantChat(opts: {
     setTitle,
     messages,
     streaming,
+    thinking,
     running,
     runningProvider,
     error,

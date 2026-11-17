@@ -125,7 +125,17 @@ pub struct ApiReply {
   pub stop_reason: String,
 }
 
+/// Streamed answer text, or (as the second sink providers take) streamed reasoning.
 pub type TextSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
+
+/// Reasoning kept only to show it again: no provider is sent a block with this
+/// provider name, so it never goes back to a model.
+pub fn shown_thinking(text: String) -> Option<crate::assistant::types::Block> {
+  (!text.trim().is_empty()).then(|| crate::assistant::types::Block::Opaque {
+    provider: "ui".into(),
+    data: serde_json::json!({"type": "thinking", "thinking": text}),
+  })
+}
 
 /// One turn for an agent CLI.
 pub struct CliRequest {
@@ -162,6 +172,8 @@ pub struct CliImage {
 #[derive(Debug, Clone, Default)]
 pub struct CliReply {
   pub text: String,
+  /// The reasoning the CLI streamed, if any.
+  pub thinking: String,
   /// The CLI's session id, to resume next turn.
   pub session_id: Option<String>,
 }

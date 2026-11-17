@@ -347,6 +347,8 @@ impl Assistant {
     let chat_id = chat.id.clone();
     let this = self.clone();
     let on_text = move |t: &str| this.emit(AssistantEvent::Text { chat_id: chat_id.clone(), text: t.to_string() });
+    let (chat_id, this) = (chat.id.clone(), self.clone());
+    let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
 
     let mut last_text = String::new();
     for _ in 0..MAX_STEPS {
@@ -361,8 +363,8 @@ impl Assistant {
         effort: req.effort.clone(),
       };
       let reply = match req.provider.as_str() {
-        "anthropic" => providers::anthropic::complete(&request, &on_text, cancel).await?,
-        _ => providers::openrouter::complete(&request, &on_text, cancel).await?,
+        "anthropic" => providers::anthropic::complete(&request, &on_text, &on_thinking, cancel).await?,
+        _ => providers::openrouter::complete(&request, &on_text, &on_thinking, cancel).await?,
       };
       let mut msg = Message::new(Role::Assistant, reply.blocks);
       msg.provider = Some(req.provider.clone());
@@ -428,7 +430,9 @@ impl Assistant {
     let chat_id = chat.id.clone();
     let this = self.clone();
     let on_text = move |t: &str| this.emit(AssistantEvent::Text { chat_id: chat_id.clone(), text: t.to_string() });
-    let cwd = crate::agents::agent_root(self.workspace_root().as_deref());
+    let (chat_id, this) = (chat.id.clone(), self.clone());
+    let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
+    let cwd =crate::agents::agent_root(self.workspace_root().as_deref());
     let result = providers::cli::run(
       &self.procs,
       CliRequest {
@@ -450,6 +454,7 @@ impl Assistant {
           .unwrap_or_default(),
       },
       &on_text,
+      &on_thinking,
       cancel,
     )
     .await;
@@ -467,7 +472,9 @@ impl Assistant {
       self.push(chat, Message::new(Role::User, vec![result_block])).await?;
     }
     let reply = result?;
-    self.push(chat, tag(Message::new(Role::Assistant, vec![Block::Text { text: reply.text.clone() }]))).await?;
+    let mut blocks: Vec<Block> = providers::shown_thinking(reply.thinking).into_iter().collect();
+    blocks.push(Block::Text { text: reply.text.clone() });
+    self.push(chat, tag(Message::new(Role::Assistant, blocks))).await?;
     if let Some(session_id) = reply.session_id.filter(|s| !s.is_empty()) {
       store::save_session(&pool, &chat.id, &req.provider, &req.model, &session_id, chat.messages.len() as i64).await?;
     }

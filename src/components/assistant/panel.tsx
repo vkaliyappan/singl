@@ -62,6 +62,14 @@ import {
 } from "./composer-extras";
 import { isImageFile } from "@/lib/assistant/images";
 import { MENTION_HINT, MentionPopup, useMentions } from "./mentions";
+import {
+  EditorContent,
+  editorMarkdown,
+  openFence,
+  pasteMarkdown,
+  setEditorMarkdown,
+  useComposerEditor,
+} from "./composer-editor";
 import { ApprovalModePicker, useApprovalMode } from "./approval-mode";
 import { ModelPicker, useModelChoice } from "./model-picker";
 import type {
@@ -393,14 +401,35 @@ function Composer({
 }) {
   const ctx = useScreenContext();
   const pins = usePins();
-  const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const { mode: approval, setMode: setApproval } = useApprovalMode();
+  const { editor, empty } = useComposerEditor({
+    placeholder: chat.messages.length
+      ? "Ask a follow-up…"
+      : "Ask about this screen, or tell me what to do…",
+    onKeyDown: (e) => {
+      if (mentions.onKeyDown(e)) return true;
+      if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229)
+        return false;
+      // Ctrl+Enter always sends; plain Enter is a new line in lists and code.
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl && editor && openFence(editor)) return true;
+      if (!ctrl && (editor?.isActive("codeBlock") || editor?.isActive("listItem")))
+        return false;
+      e.preventDefault();
+      void submit();
+      return true;
+    },
+    onPaste: (e) => {
+      const files = [...(e.clipboardData?.files ?? [])].filter(isImageFile);
+      if (!files.length) return !!editor && pasteMarkdown(editor, e);
+      e.preventDefault();
+      void extras.addImages(files, true);
+      return true;
+    },
+  });
   const mentions = useMentions({
-    text,
-    setText,
-    inputRef: ref,
+    editor,
     extras,
     providers,
     choice,
@@ -410,10 +439,9 @@ function Composer({
     onApproval: setApproval,
   });
   const submit = async () => {
-    if ((!text.trim() && !extras.images.length) || chat.running || !canSend)
-      return;
-    const sent = text;
-    setText("");
+    const sent = editorMarkdown(editor);
+    if ((!sent && !extras.images.length) || chat.running || !canSend) return;
+    editor?.commands.clearContent(true);
     const ok = await onSend(sent, {
       attachments: extras.attachments,
       dirs: extras.dirs,
@@ -438,16 +466,8 @@ function Composer({
       extras.reset();
       clearPins();
     }
-    else setText((t) => t || sent);
+    else if (editor?.isEmpty) setEditorMarkdown(editor, sent);
   };
-
-  // Grow with the text up to a cap, like a chat app.
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
-  }, [text]);
 
   const current = providers.find((p) => p.id === choice?.provider);
   const context = describeContext(ctx);
@@ -477,41 +497,11 @@ function Composer({
         <div
           className="@container rounded-2xl border bg-muted/40 shadow-xs transition-colors focus-within:border-ring/50 focus-within:bg-muted/50 dark:bg-muted/30"
           onClick={(e) => {
-            if (e.target === e.currentTarget) ref.current?.focus();
+            if (e.target === e.currentTarget) editor?.commands.focus("end");
           }}
         >
           <ExtrasChips extras={extras} />
-          <textarea
-            ref={ref}
-            value={text}
-            aria-label="Message the assistant"
-            placeholder={
-              chat.messages.length
-                ? "Ask a follow-up…"
-                : "Ask about this screen, or tell me what to do…"
-            }
-            rows={1}
-            className="selectable block max-h-60 min-h-12 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[13px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
-            {...mentions.inputProps}
-            onPaste={(e) => {
-              const files = [...e.clipboardData.files].filter(isImageFile);
-              if (!files.length) return;
-              e.preventDefault();
-              void extras.addImages(files, true);
-            }}
-            onKeyDown={(e) => {
-              mentions.inputProps.onKeyDown(e);
-              if (e.defaultPrevented) return;
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
-          />
+          <EditorContent editor={editor} />
           <div className="flex items-center gap-1 px-2 pb-2">
             <AddMenu extras={extras} />
             <ToolsChip extras={extras} />
@@ -550,7 +540,7 @@ function Composer({
                     ? (current.note ?? "Provider not available")
                     : "Send (Enter)"
                 }
-                disabled={(!text.trim() && !extras.images.length) || !canSend}
+                disabled={(empty && !extras.images.length) || !canSend}
                 onClick={() => void submit()}
                 className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               >
@@ -619,6 +609,7 @@ export function AssistantPanel({
   const lastLen =
     chat.messages.length +
     chat.streaming.length +
+    chat.thinking.length +
     Object.keys(chat.liveCalls).length +
     chat.approvals.length;
   useEffect(() => {
@@ -721,6 +712,7 @@ export function AssistantPanel({
             <MessageList
               messages={chat.messages}
               streaming={chat.streaming}
+              thinking={chat.thinking}
               running={chat.running}
               runningProvider={chat.runningProvider ?? choice}
               liveCalls={chat.liveCalls}

@@ -234,6 +234,10 @@ pub struct Parser {
   need_sep: bool,
   /// claude: a text delta came in, so the whole `assistant` message would repeat it.
   partial_seen: bool,
+  /// Reasoning streamed so far, blocks apart.
+  thinking: String,
+  /// A new reasoning block began: its first text goes apart from the last.
+  think_sep: bool,
   last_step: Option<i64>,
   final_text: Option<String>,
   /// Ends the turn as a failure.
@@ -251,6 +255,8 @@ impl Parser {
       segment: String::new(),
       need_sep: false,
       partial_seen: false,
+      thinking: String::new(),
+      think_sep: false,
       last_step: None,
       final_text: None,
       error: None,
@@ -277,28 +283,41 @@ impl Parser {
     on_text(text);
   }
 
+  fn think(&mut self, text: &str, on_thinking: TextSink<'_>) {
+    if text.is_empty() {
+      return;
+    }
+    if self.think_sep && !self.thinking.is_empty() {
+      self.thinking.push_str("\n\n");
+      on_thinking("\n\n");
+    }
+    self.think_sep = false;
+    self.thinking.push_str(text);
+    on_thinking(text);
+  }
+
   fn set_session(&mut self, id: Option<&str>) {
     if let Some(id) = id.filter(|s| !s.is_empty()) {
       self.session = Some(id.to_string());
     }
   }
 
-  pub fn feed_line(&mut self, line: &str, on_text: TextSink<'_>) {
+  pub fn feed_line(&mut self, line: &str, on_text: TextSink<'_>, on_thinking: TextSink<'_>) {
     let line = line.trim();
     if !line.starts_with('{') {
       return;
     }
     let Ok(ev) = serde_json::from_str::<Value>(line) else { return };
     match self.provider.as_str() {
-      "claude" => self.claude(&ev, on_text),
-      "codex" => self.codex(&ev, on_text),
+      "claude" => self.claude(&ev, on_text, on_thinking),
+      "codex" => self.codex(&ev, on_text, on_thinking),
       "copilot" => self.copilot(&ev, on_text),
       "antigravity" => self.agy(&ev, on_text),
       _ => {}
     }
   }
 
-  fn claude(&mut self, ev: &Value, on_text: TextSink<'_>) {
+  fn claude(&mut self, ev: &Value, on_text: TextSink<'_>, on_thinking: TextSink<'_>) {
     // Sub-agents' own chatter is not the answer.
     if !ev["parent_tool_use_id"].is_null() {
       return;
@@ -309,6 +328,13 @@ impl Parser {
         let e = &ev["event"];
         match e["type"].as_str() {
           Some("content_block_start") if e["content_block"]["type"] == "text" => self.start_segment(),
+          Some("content_block_start") if e["content_block"]["type"] == "thinking" => {
+            self.think_sep = true;
+            self.think(e["content_block"]["thinking"].as_str().unwrap_or(""), on_thinking);
+          }
+          Some("content_block_delta") if e["delta"]["type"] == "thinking_delta" => {
+            self.think(e["delta"]["thinking"].as_str().unwrap_or(""), on_thinking);
+          }
           Some("content_block_delta") if e["delta"]["type"] == "text_delta" => {
             self.partial_seen = true;
             self.emit(e["delta"]["text"].as_str().unwrap_or(""), on_text);
@@ -342,9 +368,13 @@ impl Parser {
     }
   }
 
-  fn codex(&mut self, ev: &Value, on_text: TextSink<'_>) {
+  fn codex(&mut self, ev: &Value, on_text: TextSink<'_>, on_thinking: TextSink<'_>) {
     match ev["type"].as_str().unwrap_or("") {
       "thread.started" => self.set_session(ev["thread_id"].as_str()),
+      "item.completed" if ev["item"]["type"] == "reasoning" => {
+        self.think_sep = true;
+        self.think(ev["item"]["text"].as_str().unwrap_or(""), on_thinking);
+      }
       "item.completed" if ev["item"]["type"] == "agent_message" => {
         self.start_segment();
         self.emit(ev["item"]["text"].as_str().unwrap_or(""), on_text);
@@ -421,7 +451,7 @@ impl Parser {
       .or_else(|| (!self.segment.trim().is_empty()).then(|| self.segment.trim().to_string()))
       .or_else(|| (!self.streamed.trim().is_empty()).then(|| self.streamed.trim().to_string()));
     match text {
-      Some(text) => Ok(CliReply { text, session_id: self.session }),
+      Some(text) => Ok(CliReply { text, thinking: self.thinking, session_id: self.session }),
       None => {
         let why = self
           .soft_error
@@ -437,7 +467,13 @@ impl Parser {
   }
 }
 
-pub async fn run(procs: &ProcRegistry, mut req: CliRequest, on_text: TextSink<'_>, cancel: &CancellationToken) -> Result<CliReply> {
+pub async fn run(
+  procs: &ProcRegistry,
+  mut req: CliRequest,
+  on_text: TextSink<'_>,
+  on_thinking: TextSink<'_>,
+  cancel: &CancellationToken,
+) -> Result<CliReply> {
   check_cancel(cancel)?;
   // Names the binary or the variable to set when it is missing.
   crate::agents::resolve_command(&req.provider)?;
@@ -493,7 +529,7 @@ pub async fn run(procs: &ProcRegistry, mut req: CliRequest, on_text: TextSink<'_
         return Err(CoreError::Cancelled);
       }
       event = rx.recv() => match event {
-        Some(ProcEvent::Stdout { line }) => parser.feed_line(&line, on_text),
+        Some(ProcEvent::Stdout { line }) => parser.feed_line(&line, on_text, on_thinking),
         Some(ProcEvent::Stderr { line }) => {
           if stderr.len() == 20 {
             stderr.pop_front();
@@ -737,7 +773,7 @@ mod tests {
     let on_text = |t: &str| seen.lock().unwrap().push_str(t);
     let mut p = Parser::new(provider);
     for l in lines {
-      p.feed_line(l, &on_text);
+      p.feed_line(l, &on_text, &|_| {});
     }
     (p, seen.into_inner().unwrap())
   }
@@ -841,6 +877,35 @@ mod tests {
     let r = p.finish(Some(0), "").unwrap();
     assert_eq!(r.text, "Done.");
     assert_eq!(r.session_id.as_deref(), Some("s1"));
+  }
+
+  #[test]
+  fn claude_and_codex_thinking_streams_apart_from_text() {
+    let thought = Mutex::new(String::new());
+    let on_thinking = |t: &str| thought.lock().unwrap().push_str(t);
+    let mut p = Parser::new("claude");
+    for l in [
+      r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}}"#,
+      r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"A"}}}"#,
+      r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}}"#,
+      r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"B"}}}"#,
+      r#"{"type":"result","subtype":"success","is_error":false,"result":"Done."}"#,
+    ] {
+      p.feed_line(l, &|_| {}, &on_thinking);
+    }
+    let r = p.finish(Some(0), "").unwrap();
+    assert_eq!(r.thinking, "A\n\nB");
+    assert_eq!(thought.into_inner().unwrap(), "A\n\nB");
+
+    let mut p = Parser::new("codex");
+    for l in [
+      r#"{"type":"item.completed","item":{"type":"reasoning","text":"plan"}}"#,
+      r#"{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}"#,
+    ] {
+      p.feed_line(l, &|_| {}, &|_| {});
+    }
+    let r = p.finish(Some(0), "").unwrap();
+    assert_eq!((r.thinking.as_str(), r.text.as_str()), ("plan", "ok"));
   }
 
   #[test]
@@ -952,7 +1017,7 @@ mod tests {
     r.model = "haiku".into();
     r.prompt = "Reply with the single word pong.".into();
     r.mcp_url = "http://127.0.0.1:1/mcp".into();
-    let reply = run(&procs, r, &|_| {}, &CancellationToken::new()).await.unwrap();
+    let reply = run(&procs, r, &|_| {}, &|_| {}, &CancellationToken::new()).await.unwrap();
     assert!(reply.text.to_lowercase().contains("pong"));
     assert!(reply.session_id.is_some());
     assert!(models(&procs, "claude").await.unwrap().len() >= 4);

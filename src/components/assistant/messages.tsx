@@ -10,6 +10,7 @@ import {
   IconCheck,
   IconChevronRight,
   IconBook2,
+  IconBulb,
   IconCopy,
   IconLoader2,
   IconFolder,
@@ -267,6 +268,46 @@ function clip(s: string) {
     : s;
 }
 
+/** The model's reasoning: open while it streams, folded once saved. */
+function ThinkingBlock({ text, live }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState<boolean | null>(null);
+  const shown = open ?? !!live;
+  return (
+    <div className="my-1.5 text-xs">
+      <button
+        type="button"
+        aria-expanded={shown}
+        onClick={() => setOpen(!shown)}
+        className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+      >
+        <IconChevronRight
+          className={cn("size-3 shrink-0 transition-transform", shown && "rotate-90")}
+        />
+        {live ? (
+          <IconLoader2 className="size-3.5 shrink-0 animate-spin" />
+        ) : (
+          <IconBulb className="size-3.5 shrink-0" />
+        )}
+        <span>{live ? "Thinking…" : "Thought"}</span>
+      </button>
+      {shown && (
+        <div className="selectable mt-1 max-h-64 overflow-auto border-l-2 pl-2.5 text-[12px]/relaxed whitespace-pre-wrap text-muted-foreground">
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Reasoning text a stored block carries, if it is one with any. */
+function thinkingText(b: Block): string {
+  if (b.type !== "opaque") return "";
+  const d = b.data as { type?: unknown; thinking?: unknown } | null;
+  return d?.type === "thinking" && typeof d.thinking === "string"
+    ? d.thinking.trim()
+    : "";
+}
+
 export function ToolCard({
   name,
   input,
@@ -439,6 +480,8 @@ function AssistantBlocks({
       {blocks.map((b, i) => {
         if (b.type === "text")
           return b.text.trim() ? <Markdown key={i} text={b.text} /> : null;
+        const thought = thinkingText(b);
+        if (thought) return <ThinkingBlock key={i} text={thought} />;
         if (b.type === "tool_use") {
           const r = results.get(b.id);
           return (
@@ -461,12 +504,15 @@ function AssistantBlocks({
 export function MessageList({
   messages,
   streaming,
+  thinking = "",
   running,
   runningProvider,
   liveCalls,
 }: {
   messages: Message[];
   streaming: string;
+  /** Reasoning streamed for the reply being written. */
+  thinking?: string;
   running: boolean;
   runningProvider: { provider: string; model: string; effort?: string } | null;
   liveCalls: Record<string, LiveCall>;
@@ -543,6 +589,9 @@ export function MessageList({
       )}
       {(streaming || pending.length > 0 || running) && (
         <div className="min-w-0">
+          {thinking.trim() && (
+            <ThinkingBlock text={thinking.trim()} live={running && !streaming} />
+          )}
           {streaming && <Markdown text={streaming} />}
           {pending.map((c) => (
             <ToolCard
@@ -555,7 +604,7 @@ export function MessageList({
               source={c.source}
             />
           ))}
-          {running && !streaming && pending.every((c) => c.done) && (
+          {running && !streaming && !thinking.trim() && pending.every((c) => c.done) && (
             <div
               className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
               role="status"

@@ -16,6 +16,9 @@ pub enum AssistantEvent {
   /// Streamed text, appended to the reply being written.
   #[serde(rename_all = "camelCase")]
   Text { chat_id: String, text: String },
+  /// Streamed reasoning (a summary, on models that only give one), shown apart from the reply.
+  #[serde(rename_all = "camelCase")]
+  Thinking { chat_id: String, text: String },
   #[serde(rename_all = "camelCase")]
   ToolCall { chat_id: Option<String>, call_id: String, name: String, input: Value, source: String },
   #[serde(rename_all = "camelCase")]

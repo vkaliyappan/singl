@@ -1,0 +1,122 @@
+"use client";
+
+// The composer's rich-text box: Tiptap with markdown in and out. Markdown
+// shortcuts (`**bold**`, `- list`, ``` fences, `# heading`) format as you
+// type; what is sent is the message as markdown.
+
+import { useEffect, useRef } from "react";
+import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
+import Placeholder from "@tiptap/extension-placeholder";
+
+export { EditorContent };
+
+type Handlers = {
+  /** True when the key was handled (the editor then ignores it). */
+  onKeyDown: (e: KeyboardEvent) => boolean;
+  /** True when the paste was handled. */
+  onPaste: (e: ClipboardEvent) => boolean;
+};
+
+export function useComposerEditor({
+  placeholder,
+  ...handlers
+}: Handlers & { placeholder: string }) {
+  // Handlers change every render; the editor is built once and reads the latest.
+  const latest = useRef(handlers);
+  useEffect(() => {
+    latest.current = handlers;
+  });
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    shouldRerenderOnTransaction: false,
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        // A click in the box must not navigate the app's webview.
+        link: { openOnClick: false, autolink: true },
+      }),
+      Markdown,
+      Placeholder.configure({ placeholder }),
+    ],
+    editorProps: {
+      attributes: {
+        "aria-label": "Message the assistant",
+        "aria-multiline": "true",
+        class:
+          "composer-editor selectable max-h-60 min-h-12 w-full overflow-y-auto px-4 pt-3.5 pb-1 text-[13px] leading-relaxed outline-none",
+      },
+      handleKeyDown: (_view, e) => latest.current.onKeyDown(e),
+      handlePaste: (_view, e) => latest.current.onPaste(e),
+    },
+    onCreate: ({ editor }) => {
+      // The markdown goes to a model, not back into a markdown parser: send
+      // text as typed. The stock encoder would turn `my_var` into `my\_var`
+      // and `a < b` into `a &lt; b`. (Private method; versions are pinned.)
+      const manager = editor.markdown as unknown as
+        | { encodeTextForMarkdown?: (text: string) => string }
+        | undefined;
+      if (manager) manager.encodeTextForMarkdown = (text) => text;
+    },
+  });
+
+  const empty = useEditorState({
+    editor,
+    selector: ({ editor }) => !editor || !editor.getText().trim(),
+  });
+
+  // Placeholder text is read on each redraw; swap it and nudge one.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const ext = editor.extensionManager.extensions.find((x) => x.name === "placeholder");
+    if (!ext || ext.options.placeholder === placeholder) return;
+    ext.options.placeholder = placeholder;
+    editor.view.dispatch(editor.state.tr);
+  }, [editor, placeholder]);
+
+  return { editor, empty: empty ?? true };
+}
+
+/**
+ * Enter on a line that is just ```` ``` ```` or ```` ```lang ````: make it a
+ * code block, as chat apps do. Tiptap's own rule only fires on a space.
+ */
+export function openFence(editor: Editor): boolean {
+  const { $from, empty } = editor.state.selection;
+  if (!empty || $from.parent.type.name !== "paragraph") return false;
+  if ($from.parentOffset !== $from.parent.content.size) return false;
+  const m = /^```([\w+#.-]*)\s*$/.exec($from.parent.textContent);
+  if (!m) return false;
+  return editor
+    .chain()
+    .command(({ tr }) => {
+      tr.delete($from.start(), $from.end());
+      return true;
+    })
+    .setCodeBlock(m[1] ? { language: m[1] } : undefined)
+    .run();
+}
+
+/** Pasted text with a ``` fence goes in as markdown, so the fence becomes a code block. */
+export function pasteMarkdown(editor: Editor, e: ClipboardEvent): boolean {
+  if (editor.isActive("codeBlock")) return false;
+  const text = e.clipboardData?.getData("text/plain") ?? "";
+  if (!/^\s*```/m.test(text)) return false;
+  e.preventDefault();
+  editor.commands.insertContent(text, { contentType: "markdown" });
+  return true;
+}
+
+/** The message as markdown, trimmed. */
+export function editorMarkdown(editor: Editor | null): string {
+  return editor ? editor.getMarkdown().trim() : "";
+}
+
+/** Puts markdown back in the box (a send that failed). */
+export function setEditorMarkdown(editor: Editor | null, md: string) {
+  if (!editor) return;
+  editor.commands.setContent(md, { contentType: "markdown" });
+  editor.commands.focus("end");
+}

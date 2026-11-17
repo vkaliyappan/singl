@@ -168,6 +168,7 @@ export type AssistantSettingsPatch = Partial<{
 export type AssistantEvent =
   | { type: "turnStarted"; chatId: string; provider: string; model: string }
   | { type: "text"; chatId: string; text: string }
+  | { type: "thinking"; chatId: string; text: string }
   | {
       type: "toolCall";
       chatId: string | null;

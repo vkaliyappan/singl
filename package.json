@@ -1,6 +1,6 @@
 {
   "name": "singl",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "private": true,
   "packageManager": "pnpm@12.16.1",
   "scripts": {
@@ -33,6 +33,11 @@
     "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tauri-apps/plugin-notification": "^2.8.0",
+    "@tiptap/extension-placeholder": "3.32.2",
+    "@tiptap/markdown": "3.32.2",
+    "@tiptap/pm": "3.32.2",
+    "@tiptap/react": "3.32.2",
+    "@tiptap/starter-kit": "3.32.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "next": "16.4.6",

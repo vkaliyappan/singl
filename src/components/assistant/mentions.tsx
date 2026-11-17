@@ -4,17 +4,9 @@
 // `@` files, `#` tools, `$` skills. useMentions holds the state and key
 // handling; MentionPopup renders the list above the composer card.
 
-import {
-  useEffect,
-  useId,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent,
-  type ReactNode,
-  type RefObject,
-  type SyntheticEvent,
-} from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import type { Editor } from "@tiptap/react";
 import {
   IconBook2,
   IconFile,
@@ -43,7 +35,25 @@ export const MENTION_HINT = "/ commands · @ files · # tools · $ skills";
 const MAX_ROWS = 50;
 const TRIGGERS = ["/", "@", "#", "$"] as const;
 type Trigger = (typeof TRIGGERS)[number];
+/** `start`/`end` are editor document positions. */
 type Token = { trigger: Trigger; start: number; end: number; query: string };
+
+/** Where the caret is: the text before it in its paragraph, and its document position. */
+type Caret = { before: string; pos: number; firstBlock: boolean };
+const NO_CARET: Caret = { before: "", pos: 0, firstBlock: true };
+
+function caretOf(editor: Editor): Caret {
+  const { $from, empty } = editor.state.selection;
+  // No popups inside code: `#include`, `$var`, `@Annotation` are just code there.
+  const code = $from.parent.type.spec.code || $from.marks().some((m) => m.type.spec.code);
+  if (!empty || !$from.parent.isTextblock || code) return { ...NO_CARET, pos: -1 };
+  return {
+    // Hard breaks count as one character, so lengths stay document positions.
+    before: $from.parent.textBetween(0, $from.parentOffset, undefined, "\n"),
+    pos: $from.pos,
+    firstBlock: $from.before(1) === 0,
+  };
+}
 
 type Item = {
   key: string;
@@ -56,16 +66,18 @@ type Item = {
   run: () => void;
 };
 
-/** The trigger token ending at the caret, or null. `/` only counts at the start. */
-function findToken(text: string, caretPos: number): Token | null {
-  const caret = Math.min(caretPos, text.length);
+/** The trigger token ending at the caret, or null. `/` only counts at the very start. */
+function findToken({ before, pos, firstBlock }: Caret): Token | null {
+  if (pos < 0) return null;
+  const caret = before.length;
   let s = caret;
-  while (s > 0 && !/\s/.test(text[s - 1])) s--;
+  while (s > 0 && !/\s/.test(before[s - 1])) s--;
   if (s >= caret) return null;
-  const trigger = text[s] as Trigger;
+  const trigger = before[s] as Trigger;
   if (!TRIGGERS.includes(trigger)) return null;
-  if (trigger === "/" && s !== 0) return null;
-  return { trigger, start: s, end: caret, query: text.slice(s + 1, caret) };
+  if (trigger === "/" && (s !== 0 || !firstBlock)) return null;
+  const start = pos - (caret - s);
+  return { trigger, start, end: pos, query: before.slice(s + 1) };
 }
 
 /** Prefix matches first, then substring on the name, then on the description. */
@@ -92,9 +104,7 @@ function filterBy<T>(
 }
 
 export function useMentions({
-  text,
-  setText,
-  inputRef,
+  editor,
   extras,
   providers,
   choice,
@@ -103,9 +113,7 @@ export function useMentions({
   onOpenModel,
   onApproval,
 }: {
-  text: string;
-  setText: (t: string) => void;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  editor: Editor | null;
   extras: ComposerExtras;
   providers: ProviderInfo[];
   choice: ChatChoice | null;
@@ -118,17 +126,16 @@ export function useMentions({
   const pinnables = usePinnableList();
   const screen = useScreenContext().screen;
   const listId = useId();
-  const [caret, setCaret] = useState(0);
+  const [caret, setCaret] = useState<Caret>(NO_CARET);
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [sub, setSub] = useState<"effort" | null>(null);
   const [index, setIndex] = useState(0);
-  const [focusAt, setFocusAt] = useState<{ pos: number } | null>(null);
   const [files, setFiles] = useState<{ query: string; hits: FileHit[] } | null>(
     null,
   );
 
-  const token = findToken(text, caret);
+  const token = findToken(caret);
   const tokenOpen = !!token && dismissed !== token.start && focused;
   const trigger = tokenOpen ? token.trigger : null;
   const fileQuery = trigger === "@" ? token!.query : null;
@@ -153,18 +160,11 @@ export function useMentions({
     };
   }, [fileQuery]);
 
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!focusAt || !el) return;
-    el.focus();
-    el.setSelectionRange(focusAt.pos, focusAt.pos);
-  }, [focusAt, inputRef]);
-
+  // Plain text: going through the content parser would turn `#tool` into a heading.
   const replace = (tok: Token, insert: string) => {
-    const pos = tok.start + insert.length;
-    setText(text.slice(0, tok.start) + insert + text.slice(tok.end));
-    setCaret(pos);
-    setFocusAt({ pos });
+    if (!editor) return;
+    editor.view.dispatch(editor.state.tr.insertText(insert, tok.start, tok.end));
+    editor.commands.focus();
   };
 
   const q = token?.query.toLowerCase() ?? "";
@@ -325,59 +325,79 @@ export function useMentions({
         ?.scrollIntoView({ block: "nearest" });
   }, [open, active, listId]);
 
-  const sync = (el: HTMLTextAreaElement) => {
-    const pos = el.selectionStart ?? el.value.length;
-    setCaret(pos);
-    if (!findToken(el.value, pos)) setDismissed(null);
-  };
+  // Follow the editor: caret moves, edits, focus.
+  useEffect(() => {
+    if (!editor) return;
+    const sync = () => {
+      const c = caretOf(editor);
+      setCaret(c);
+      if (!findToken(c)) setDismissed(null);
+    };
+    const onUpdate = () => {
+      setSub(null);
+      setIndex(0);
+      sync();
+    };
+    const onFocus = () => {
+      setFocused(true);
+      sync();
+    };
+    const onBlur = () => {
+      setFocused(false);
+      setSub(null);
+    };
+    editor.on("update", onUpdate);
+    editor.on("selectionUpdate", sync);
+    editor.on("focus", onFocus);
+    editor.on("blur", onBlur);
+    return () => {
+      editor.off("update", onUpdate);
+      editor.off("selectionUpdate", sync);
+      editor.off("focus", onFocus);
+      editor.off("blur", onBlur);
+    };
+  }, [editor]);
+
+  // The editor is the combobox for screen readers.
+  useEffect(() => {
+    const el = editor?.view.dom;
+    if (!el) return;
+    const attrs: Record<string, string | undefined> = {
+      role: "combobox",
+      "aria-autocomplete": "list",
+      "aria-expanded": String(open),
+      "aria-controls": open ? listId : undefined,
+      "aria-activedescendant": open && active >= 0 ? optionId(active) : undefined,
+    };
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === undefined) el.removeAttribute(k);
+      else el.setAttribute(k, v);
+    }
+  });
 
   const pick = (i: number) => items[i]?.run();
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!open || e.nativeEvent.isComposing || e.keyCode === 229) return;
-    const stop = () => {
-      e.preventDefault();
-      e.nativeEvent.stopImmediatePropagation();
-    };
+  /** True when the popup took the key. */
+  const onKeyDown = (e: KeyboardEvent): boolean => {
+    if (!open || e.isComposing || e.keyCode === 229) return false;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      if (!items.length) return;
-      stop();
+      if (!items.length) return false;
       const d = e.key === "ArrowDown" ? 1 : -1;
       setIndex((active + d + items.length) % items.length);
-    } else if (
-      (e.key === "Enter" && !e.shiftKey) ||
-      (e.key === "Tab" && !e.shiftKey)
-    ) {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Tab" && !items.length) return;
-      stop();
+      return true;
+    }
+    if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      if (e.key === "Tab" && !items.length) return false;
       if (active >= 0) pick(active);
-    } else if (e.key === "Escape") {
-      stop();
+      return true;
+    }
+    if (e.key === "Escape") {
       if (sub) setSub(null);
       else if (token) setDismissed(token.start);
+      return true;
     }
-  };
-
-  const inputProps = {
-    role: "combobox" as const,
-    "aria-autocomplete": "list" as const,
-    "aria-expanded": open,
-    "aria-controls": open ? listId : undefined,
-    "aria-activedescendant": open && active >= 0 ? optionId(active) : undefined,
-    onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
-      setText(e.target.value);
-      setSub(null);
-      setIndex(0);
-      sync(e.target);
-    },
-    onSelect: (e: SyntheticEvent<HTMLTextAreaElement>) => sync(e.currentTarget),
-    onFocus: () => setFocused(true),
-    onBlur: () => {
-      setFocused(false);
-      setSub(null);
-    },
-    onKeyDown,
+    return false;
   };
 
   return {
@@ -400,7 +420,7 @@ export function useMentions({
           )[trigger ?? "/"],
     setIndex,
     pick,
-    inputProps,
+    onKeyDown,
   };
 }
 

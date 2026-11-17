@@ -62,6 +62,10 @@ pub fn build_body(req: &ApiRequest) -> Value {
   if !req.effort.is_empty() {
     body["output_config"] = json!({"effort": req.effort});
   }
+  // Current models stream empty thinking unless asked for a summary.
+  if adaptive_thinking(&req.model) {
+    body["thinking"] = json!({"type": "adaptive", "display": "summarized"});
+  }
   if !req.tools.is_empty() {
     let mut tools: Vec<Value> = req
       .tools
@@ -74,6 +78,16 @@ pub fn build_body(req: &ApiRequest) -> Value {
     body["tools"] = Value::Array(tools);
   }
   body
+}
+
+/// Models that take `thinking: {type: "adaptive"}`. Older ones (Haiku 4.5,
+/// the 4.5 family and before) reject it, so they get no `thinking` field.
+fn adaptive_thinking(model: &str) -> bool {
+  let m = model.trim().to_ascii_lowercase();
+  let m = m.rsplit('/').next().unwrap_or(&m);
+  ["claude-fable-", "claude-mythos-", "claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6"]
+    .iter()
+    .any(|p| m.starts_with(p))
 }
 
 /// The block being streamed. Blocks arrive one at a time, in order.
@@ -95,7 +109,7 @@ pub struct Accumulator {
 }
 
 impl Accumulator {
-  pub fn feed(&mut self, data: &str, on_text: TextSink<'_>) -> Result<()> {
+  pub fn feed(&mut self, data: &str, on_text: TextSink<'_>, on_thinking: TextSink<'_>) -> Result<()> {
     let Ok(ev) = serde_json::from_str::<Value>(data) else { return Ok(()) };
     match ev["type"].as_str().unwrap_or("") {
       "content_block_start" => {
@@ -113,10 +127,13 @@ impl Accumulator {
             name: cb["name"].as_str().unwrap_or("").to_string(),
             json: String::new(),
           },
-          Some("thinking") => Open::Thinking {
-            thinking: cb["thinking"].as_str().unwrap_or("").to_string(),
-            signature: cb["signature"].as_str().unwrap_or("").to_string(),
-          },
+          Some("thinking") => {
+            let thinking = cb["thinking"].as_str().unwrap_or("").to_string();
+            if !thinking.is_empty() {
+              on_thinking(&thinking);
+            }
+            Open::Thinking { thinking, signature: cb["signature"].as_str().unwrap_or("").to_string() }
+          }
           Some("redacted_thinking") => {
             self.blocks.push(Block::Opaque { provider: "anthropic".into(), data: cb.clone() });
             Open::Skip
@@ -135,7 +152,13 @@ impl Accumulator {
             }
           }
           (Some(Open::Tool { json, .. }), Some("input_json_delta")) => json.push_str(d["partial_json"].as_str().unwrap_or("")),
-          (Some(Open::Thinking { thinking, .. }), Some("thinking_delta")) => thinking.push_str(d["thinking"].as_str().unwrap_or("")),
+          (Some(Open::Thinking { thinking, .. }), Some("thinking_delta")) => {
+            let t = d["thinking"].as_str().unwrap_or("");
+            if !t.is_empty() {
+              thinking.push_str(t);
+              on_thinking(t);
+            }
+          }
           (Some(Open::Thinking { signature, .. }), Some("signature_delta")) => {
             signature.push_str(d["signature"].as_str().unwrap_or(""))
           }
@@ -182,7 +205,7 @@ impl Accumulator {
   }
 }
 
-pub async fn complete(req: &ApiRequest, on_text: TextSink<'_>, cancel: &CancellationToken) -> Result<ApiReply> {
+pub async fn complete(req: &ApiRequest, on_text: TextSink<'_>, on_thinking: TextSink<'_>, cancel: &CancellationToken) -> Result<ApiReply> {
   let client = sse::client()?;
   let url = format!("{}/v1/messages", base());
   let body = build_body(req);
@@ -196,7 +219,7 @@ pub async fn complete(req: &ApiRequest, on_text: TextSink<'_>, cancel: &Cancella
   })
   .await?;
   let mut acc = Accumulator::default();
-  sse::read_events(res, cancel, |data| acc.feed(data, on_text)).await?;
+  sse::read_events(res, cancel, |data| acc.feed(data, on_text, on_thinking)).await?;
   Ok(acc.finish())
 }
 
@@ -283,6 +306,11 @@ mod tests {
     assert!(build_body(&req).get("output_config").is_none());
     req.effort = "high".into();
     assert_eq!(build_body(&req)["output_config"]["effort"], "high");
+    assert!(build_body(&req).get("thinking").is_none());
+    req.model = "claude-opus-5-5".into();
+    assert_eq!(build_body(&req)["thinking"], json!({"type": "adaptive", "display": "summarized"}));
+    req.model = "claude-haiku-4-5".into();
+    assert!(build_body(&req).get("thinking").is_none());
   }
 
   /// One SSE event as bytes.
@@ -298,7 +326,7 @@ mod tests {
     for c in chunks {
       for line in split.push(c) {
         if let Some(d) = sse::data_of(&line) {
-          if let Err(e) = acc.feed(d, &on_text) {
+          if let Err(e) = acc.feed(d, &on_text, &|_| {}) {
             return (Err(e), seen.into_inner().unwrap());
           }
         }
@@ -372,7 +400,7 @@ mod tests {
       max_tokens: 50,
       effort: String::new(),
     };
-    let reply = complete(&req, &|_| {}, &CancellationToken::new()).await.unwrap();
+    let reply = complete(&req, &|_| {}, &|_| {}, &CancellationToken::new()).await.unwrap();
     assert!(!reply.blocks.is_empty());
   }
 
@@ -380,6 +408,8 @@ mod tests {
   fn thinking_blocks_are_kept_and_sent_back() {
     let mut acc = Accumulator::default();
     let noop = |_: &str| {};
+    let thought = Mutex::new(String::new());
+    let on_thinking = |t: &str| thought.lock().unwrap().push_str(t);
     for e in [
       json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
       json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "hm"}}),
@@ -388,8 +418,9 @@ mod tests {
       json!({"type": "content_block_start", "index": 1, "content_block": {"type": "redacted_thinking", "data": "X"}}),
       json!({"type": "content_block_stop", "index": 1}),
     ] {
-      acc.feed(&e.to_string(), &noop).unwrap();
+      acc.feed(&e.to_string(), &noop, &on_thinking).unwrap();
     }
+    assert_eq!(thought.into_inner().unwrap(), "hm");
     let reply = acc.finish();
     assert_eq!(reply.blocks.len(), 2);
     let back = convert_messages(&[msg(Role::Assistant, reply.blocks)]);
