@@ -33,8 +33,42 @@ pub async fn open(path: &Path) -> Result<SqlitePool> {
     .max_connections(5)
     .connect_with(connect_options(path).create_if_missing(true))
     .await?;
+  heal_line_endings(&pool).await?;
   MIGRATOR.run(&pool).await?;
   Ok(pool)
+}
+
+/// Git on Windows may check a migration out with CRLF where the build that
+/// applied it had LF (or the other way round). sqlx checksums the exact bytes and
+/// refuses to start on a mismatch, so a stored checksum that differs from the
+/// embedded file only in line endings is updated to match.
+async fn heal_line_endings(pool: &SqlitePool) -> Result<()> {
+  use sha2::{Digest, Sha384};
+  let table: Option<String> =
+    sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'")
+      .fetch_optional(pool)
+      .await?;
+  if table.is_none() {
+    return Ok(());
+  }
+  let stored: Vec<(i64, Vec<u8>)> = sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations").fetch_all(pool).await?;
+  for (version, checksum) in stored {
+    let Some(m) = MIGRATOR.iter().find(|m| m.version == version) else { continue };
+    if checksum.as_slice() == &*m.checksum {
+      continue;
+    }
+    let lf = m.sql.replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    let same_text = [lf, crlf].iter().any(|v| Sha384::digest(v.as_bytes()).as_slice() == checksum.as_slice());
+    if same_text {
+      sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+        .bind(&*m.checksum)
+        .bind(version)
+        .execute(pool)
+        .await?;
+    }
+  }
+  Ok(())
 }
 
 fn connect_options(path: &Path) -> SqliteConnectOptions {
@@ -70,5 +104,24 @@ mod tests {
     let applied = applied_migrations(&pool).await.unwrap();
     assert_eq!(applied.len(), MIGRATOR.iter().count());
     assert_eq!(settings::workspace_root(&pool).await.unwrap(), None);
+  }
+
+  #[tokio::test]
+  async fn line_ending_only_checksum_changes_are_healed() {
+    use sha2::{Digest, Sha384};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("singl.db");
+    let pool = open(&path).await.unwrap();
+    let m = MIGRATOR.iter().last().unwrap();
+    let flipped = if m.sql.contains("\r\n") { m.sql.replace("\r\n", "\n") } else { m.sql.replace('\n', "\r\n") };
+    let other = Sha384::digest(flipped.as_bytes()).to_vec();
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?").bind(&other).bind(m.version).execute(&pool).await.unwrap();
+    // A real edit is still refused.
+    pool.close().await;
+    open(&path).await.unwrap();
+    let pool = open(&path).await.unwrap();
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = X'00' WHERE version = ?").bind(m.version).execute(&pool).await.unwrap();
+    pool.close().await;
+    assert!(open(&path).await.is_err());
   }
 }
