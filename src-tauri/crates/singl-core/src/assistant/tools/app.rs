@@ -180,6 +180,7 @@ pub fn tools() -> Vec<Tool> {
             tools: None,
             skills: Vec::new(),
             approval: Default::default(),
+            server_approval: None,
             inline_attachments: Vec::new(),
             references: Vec::new(),
             images: Vec::new(),

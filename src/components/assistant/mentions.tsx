@@ -18,11 +18,11 @@ import { isTauri } from "@/lib/clock-widget";
 import { cn } from "@/lib/utils";
 import {
   assistantFilesSearch,
-  type ApprovalMode,
   type FileHit,
   type ProviderInfo,
 } from "@/lib/assistant/api";
 import { pinPinnable, usePinnableList } from "@/lib/assistant/pins";
+import type { ApprovalModes } from "./approval-mode";
 import { useScreenContext } from "@/lib/assistant/context";
 import { PinIcon } from "./pin-icon";
 import { groupOf, type ComposerExtras } from "./composer-extras";
@@ -120,7 +120,7 @@ export function useMentions({
   onChoice: (c: ChatChoice) => void;
   onNewChat: () => void;
   onOpenModel: () => void;
-  onApproval: (m: ApprovalMode) => void;
+  onApproval: (m: ApprovalModes) => void;
 }) {
   const router = useRouter();
   const pinnables = usePinnableList();
@@ -208,16 +208,26 @@ export function useMentions({
             else toast.error("This provider has no effort levels.");
           },
         ],
-        ["ask", "Ask before changes (default)", () => onApproval("ask")],
+        ["ask", "Ask before changes (default)", () => onApproval({ local: "ask", server: "ask" })],
         [
           "auto",
           "Auto-approve everything, deletes included",
-          () => onApproval("auto"),
+          () => onApproval({ local: "auto", server: "auto" }),
+        ],
+        [
+          "auto-local",
+          "Auto in singl, ask before ThingWorx server changes",
+          () => onApproval({ local: "auto", server: "ask" }),
         ],
         [
           "readonly",
           "Read-only: no changes allowed",
-          () => onApproval("readOnly"),
+          () => onApproval({ local: "readOnly", server: "readOnly" }),
+        ],
+        [
+          "readonly-twx",
+          "Auto in singl, ThingWorx server read-only",
+          () => onApproval({ local: "auto", server: "readOnly" }),
         ],
         ["tools", "Choose which tools are enabled", () => extras.show("tools")],
         ["skills", "Pick skills for this message", () => extras.show("skills")],

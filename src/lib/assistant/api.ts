@@ -145,6 +145,8 @@ export type AssistantSettingsView = {
   autoApproveWrites: boolean;
   /** How calls from outside MCP clients are approved. */
   externalMcpMode: ApprovalMode;
+  /** The same for their ThingWorx server calls. */
+  externalMcpServerMode: ApprovalMode;
   mcpServers: McpServerConfig[];
   useProjectMcp: boolean;
   disabledProjectServers: string[];
@@ -159,6 +161,7 @@ export type AssistantSettingsPatch = Partial<{
   mcpPort: number;
   autoApproveWrites: boolean;
   externalMcpMode: ApprovalMode;
+  externalMcpServerMode: ApprovalMode;
   mcpServers: McpServerConfig[];
   useProjectMcp: boolean;
   disabledProjectServers: string[];
@@ -199,6 +202,7 @@ export type AssistantEvent =
       tool: string;
       input: unknown;
       risk: Risk;
+      scope: ToolScope;
       source: string;
     }
   | { type: "approvalResolved"; requestId: string; approved: boolean }
@@ -206,6 +210,8 @@ export type AssistantEvent =
   | { type: "chatsChanged" };
 
 export type ApprovalMode = "ask" | "auto" | "readOnly";
+/** Which approval mode governs a tool: local changes or the ThingWorx server. */
+export type ToolScope = "local" | "server";
 
 export type SendRequest = {
   chatId?: string;
@@ -220,6 +226,8 @@ export type SendRequest = {
   /** Skill ids. */
   skills?: string[];
   approval?: ApprovalMode;
+  /** The same for ThingWorx server calls; unset follows `approval`. */
+  serverApproval?: ApprovalMode;
   /** Files dropped from outside the app (no path), read by the page. */
   inlineAttachments?: InlineAttachment[];
   /** Items pinned from screens (max 20). */
@@ -257,8 +265,8 @@ export const assistantSkills = () => invoke<SkillInfo[]>("assistant_skills");
 export const assistantSend = (request: SendRequest) =>
   invoke<string>("assistant_send", { request });
 /** Changes a running turn's approval mode; false when nothing is running. */
-export const assistantTurnMode = (chatId: string, mode: ApprovalMode) =>
-  invoke<boolean>("assistant_turn_mode", { chatId, mode });
+export const assistantTurnMode = (chatId: string, mode: ApprovalMode, serverMode: ApprovalMode) =>
+  invoke<boolean>("assistant_turn_mode", { chatId, mode, serverMode });
 export const assistantCancel = (chatId: string) =>
   invoke<boolean>("assistant_cancel", { chatId });
 export const assistantChats = (limit = 200) =>

@@ -59,6 +59,56 @@ pub enum ApprovalMode {
   ReadOnly,
 }
 
+/// Which approval setting a tool falls under.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolScope {
+  /// Changes only this machine: entity files, flows, presets, the repo clone, screens.
+  Local,
+  /// Runs or changes something on a ThingWorx server.
+  Server,
+}
+
+/// Tools that run services or write on a ThingWorx server. Exports only read
+/// the server (and write local files), so they are `Local`.
+const SERVER_TOOLS: &[&str] = &[
+  "service_execute",
+  "twx_invoke_service",
+  "flow_run",
+  "deploy_backup_deployment_files",
+  "deploy_upload_deployment_files",
+];
+
+pub fn scope_of(tool: &str) -> ToolScope {
+  if SERVER_TOOLS.contains(&tool) { ToolScope::Server } else { ToolScope::Local }
+}
+
+/// A turn's approval modes: one for local changes, one for the ThingWorx server.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnModes {
+  pub local: ApprovalMode,
+  pub server: ApprovalMode,
+}
+
+impl TurnModes {
+  pub fn same(mode: ApprovalMode) -> Self {
+    Self { local: mode, server: mode }
+  }
+
+  pub fn for_tool(&self, tool: &str) -> ApprovalMode {
+    match scope_of(tool) {
+      ToolScope::Local => self.local,
+      ToolScope::Server => self.server,
+    }
+  }
+
+  /// Whether a tool is offered at all: read tools always, others unless their scope is read-only.
+  fn offers(&self, tool: &str, risk: Risk) -> bool {
+    risk == Risk::Read || self.for_tool(tool) != ApprovalMode::ReadOnly
+  }
+}
+
 /// Tool output past this is cut before it reaches a model.
 const TOOL_OUTPUT_LIMIT: usize = 100_000;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(600);
@@ -98,7 +148,7 @@ pub struct Assistant {
   /// Tool calls made over MCP during a CLI turn, by chat, so the turn can store them.
   collected: Mutex<HashMap<String, Vec<(Block, Block)>>>,
   /// Approval mode of a chat's running turn.
-  turn_modes: Mutex<HashMap<String, ApprovalMode>>,
+  turn_modes: Mutex<HashMap<String, TurnModes>>,
   /// Tools a chat's running turn may use, when the user narrowed them.
   turn_tools: Mutex<HashMap<String, Vec<String>>>,
   /// Chats (or `"mcp"`) where the user said "don't ask again".
@@ -202,14 +252,19 @@ impl Assistant {
     if risk == Risk::Read {
       return Ok(true);
     }
-    let mode = match meta.chat_id.as_deref() {
+    let modes = match meta.chat_id.as_deref() {
       Some(chat) => self.turn_mode(Some(chat)),
-      None => self.settings().await?.external_mcp_mode,
+      None => self.settings().await?.external_modes(),
     };
-    match mode {
+    match modes.for_tool(name) {
       ApprovalMode::Auto => return Ok(true),
       ApprovalMode::ReadOnly => {
-        return Err(CoreError::Invalid(format!("{name} changes things, and this message is in read-only mode.")));
+        return Err(CoreError::Invalid(match scope_of(name) {
+          ToolScope::Server => {
+            format!("{name} runs or changes things on the ThingWorx server, which is read-only for this message.")
+          }
+          ToolScope::Local => format!("{name} changes things, and this message is in read-only mode."),
+        }));
       }
       ApprovalMode::Ask => {}
     }
@@ -230,6 +285,7 @@ impl Assistant {
       tool: name.into(),
       input: input.clone(),
       risk,
+      scope: scope_of(name),
       source: meta.source.clone(),
     });
     let cancel = meta.chat_id.as_deref().and_then(|c| self.running.lock().unwrap_or_else(|e| e.into_inner()).get(c).cloned());
@@ -294,9 +350,10 @@ impl Assistant {
       Ok(servers) => specs.extend(self.mcp_clients.tools(&servers).await),
       Err(e) => log_warn(&format!("assistant: MCP servers unavailable: {e}")),
     }
-    // Outside clients in read-only mode only see read tools.
-    if external && self.settings().await.map(|s| s.external_mcp_mode == ApprovalMode::ReadOnly).unwrap_or(false) {
-      specs.retain(|t| t.risk == Risk::Read);
+    // Outside clients only see the changes their modes allow.
+    if external {
+      let modes = self.settings().await.map(|s| s.external_modes()).unwrap_or_default();
+      specs.retain(|t| modes.offers(&t.name, t.risk));
     }
     specs
   }
@@ -311,13 +368,13 @@ impl Assistant {
     }
   }
 
-  pub fn turn_mode(&self, chat_id: Option<&str>) -> ApprovalMode {
+  pub fn turn_mode(&self, chat_id: Option<&str>) -> TurnModes {
     chat_id
       .and_then(|c| self.turn_modes.lock().unwrap_or_else(|e| e.into_inner()).get(c).copied())
       .unwrap_or_default()
   }
 
-  pub(crate) fn set_turn_mode(&self, chat_id: &str, mode: Option<ApprovalMode>) {
+  pub(crate) fn set_turn_mode(&self, chat_id: &str, mode: Option<TurnModes>) {
     let mut map = self.turn_modes.lock().unwrap_or_else(|e| e.into_inner());
     match mode {
       Some(m) => map.insert(chat_id.to_string(), m),
@@ -336,11 +393,11 @@ impl Assistant {
   /// The tools a chat's turn sees: [`Self::tool_specs`] narrowed to its selection.
   pub async fn tool_specs_for(&self, chat_id: &str) -> Vec<ToolSpec> {
     let specs = self.tool_specs(false).await;
-    let read_only = self.turn_mode(Some(chat_id)) == ApprovalMode::ReadOnly;
+    let modes = self.turn_mode(Some(chat_id));
     specs
       .into_iter()
       .filter(|t| self.tool_allowed(Some(chat_id), &t.name))
-      .filter(|t| !read_only || t.risk == Risk::Read)
+      .filter(|t| modes.offers(&t.name, t.risk))
       .collect()
   }
 
@@ -427,7 +484,7 @@ impl Assistant {
 
   /// Switches a running turn's approval mode, for calls it has not made yet.
   /// False when the chat has no turn running.
-  pub fn change_turn_mode(&self, chat_id: &str, mode: ApprovalMode) -> bool {
+  pub fn change_turn_mode(&self, chat_id: &str, mode: TurnModes) -> bool {
     if !self.is_running(chat_id) {
       return false;
     }
@@ -496,9 +553,19 @@ mod tests {
     let input = json!({});
     // No UI attached: Ask denies writes, Auto runs them, ReadOnly refuses with an error.
     assert!(!a.permit("x", &input, Risk::Write, &meta("c1")).await.unwrap());
-    a.set_turn_mode("c1", Some(ApprovalMode::Auto));
+    a.set_turn_mode("c1", Some(TurnModes::same(ApprovalMode::Auto)));
     assert!(a.permit("x", &input, Risk::Destructive, &meta("c1")).await.unwrap());
-    a.set_turn_mode("c1", Some(ApprovalMode::ReadOnly));
+    // Local changes run, the server is read-only: a service call is refused and not offered.
+    a.set_turn_mode("c1", Some(TurnModes { local: ApprovalMode::Auto, server: ApprovalMode::ReadOnly }));
+    assert!(a.permit("entity_write", &input, Risk::Write, &meta("c1")).await.unwrap());
+    assert!(a.permit("service_execute", &input, Risk::Destructive, &meta("c1")).await.is_err());
+    let specs = a.tool_specs_for("c1").await;
+    assert!(specs.iter().any(|t| t.name == "entity_write"));
+    assert!(!specs.iter().any(|t| t.name == "service_execute"));
+    // Local Auto, server Ask: no UI attached, so the server call is declined.
+    a.set_turn_mode("c1", Some(TurnModes { local: ApprovalMode::Auto, server: ApprovalMode::Ask }));
+    assert!(!a.permit("flow_run", &input, Risk::Write, &meta("c1")).await.unwrap());
+    a.set_turn_mode("c1", Some(TurnModes::same(ApprovalMode::ReadOnly)));
     assert!(a.permit("x", &input, Risk::Write, &meta("c1")).await.is_err());
     assert!(a.permit("x", &input, Risk::Read, &meta("c1")).await.unwrap());
     let specs = a.tool_specs_for("c1").await;

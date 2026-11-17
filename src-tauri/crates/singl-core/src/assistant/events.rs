@@ -33,7 +33,16 @@ pub enum AssistantEvent {
   #[serde(rename_all = "camelCase")]
   TurnEnded { chat_id: String, error: Option<String>, cancelled: bool },
   #[serde(rename_all = "camelCase")]
-  ApprovalRequest { request_id: String, chat_id: Option<String>, tool: String, input: Value, risk: Risk, source: String },
+  ApprovalRequest {
+    request_id: String,
+    chat_id: Option<String>,
+    tool: String,
+    input: Value,
+    risk: Risk,
+    /// Local change or ThingWorx server, so a mode switch settles the right cards.
+    scope: super::ToolScope,
+    source: String,
+  },
   #[serde(rename_all = "camelCase")]
   ApprovalResolved { request_id: String, approved: bool },
   /// Asks the UI to do something only it can (navigate, select…). Answered with `assistant_ui_reply`.

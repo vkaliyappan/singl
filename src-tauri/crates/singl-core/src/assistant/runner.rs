@@ -47,6 +47,9 @@ pub struct SendRequest {
   /// How this turn's tool calls are approved.
   #[serde(default)]
   pub approval: super::ApprovalMode,
+  /// The same for ThingWorx server calls; `None` follows `approval`.
+  #[serde(default)]
+  pub server_approval: Option<super::ApprovalMode>,
   /// Files dropped from outside the app, read by the page (a browser drop
   /// carries no path). Same limits as `attachments`.
   #[serde(default)]
@@ -259,7 +262,10 @@ impl Assistant {
       running.insert(chat.id.clone(), cancel.clone());
     }
     self.set_turn_tools(&chat.id, req.tools.clone());
-    self.set_turn_mode(&chat.id, Some(req.approval));
+    self.set_turn_mode(
+      &chat.id,
+      Some(super::TurnModes { local: req.approval, server: req.server_approval.unwrap_or(req.approval) }),
+    );
     let mut blocks = read_attachments(&req.attachments, self.workspace_root().as_deref())?;
     let dropped = inline_attachments(&req.inline_attachments, &blocks)?;
     blocks.extend(dropped);

@@ -573,7 +573,7 @@ export function AiSettings() {
 
       <SectionCard
         title="Approvals"
-        description="Each message picks Ask, Auto or Read-only in the composer. In Ask mode, read tools run and destructive tools (delete, deploy, push, run a service) always ask."
+        description="Each message picks Ask, Auto or Read-only in the composer, separately for changes in singl (files, flows, presets) and for the ThingWorx server (running services and flows, uploads). In Ask mode, read tools run and destructive tools always ask."
       >
         <label className="flex items-center gap-3 text-xs">
           <Switch
@@ -584,31 +584,41 @@ export function AiSettings() {
           In Ask mode, run write actions (changes that can be undone) without
           asking
         </label>
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-          <Label htmlFor="ai-external-mode" className="text-xs">
+        <div className="mt-3 space-y-2 text-xs">
+          <p className="font-medium">
             Outside MCP clients (Claude Desktop, other agents)
-          </Label>
-          <NativeSelect
-            id="ai-external-mode"
-            size="sm"
-            value={s.externalMcpMode}
-            onChange={(e) =>
-              void save({ externalMcpMode: e.target.value as ApprovalMode })
-            }
-          >
-            <NativeSelectOption value="ask">
-              Ask before changes
-            </NativeSelectOption>
-            <NativeSelectOption value="readOnly">Read-only</NativeSelectOption>
-            <NativeSelectOption value="auto">
-              Auto-approve everything
-            </NativeSelectOption>
-          </NativeSelect>
-          {s.externalMcpMode === "auto" && (
-            <span className="text-red-600 dark:text-red-400">
-              Outside clients can deploy, delete and run services without
-              asking.
-            </span>
+          </p>
+          {(
+            [
+              ["ai-external-mode", "In singl", "externalMcpMode"],
+              ["ai-external-server-mode", "ThingWorx server", "externalMcpServerMode"],
+            ] as const
+          ).map(([id, label, key]) => (
+            <div key={key} className="flex flex-wrap items-center gap-3">
+              <Label htmlFor={id} className="w-32 text-xs font-normal">
+                {label}
+              </Label>
+              <NativeSelect
+                id={id}
+                size="sm"
+                value={s[key]}
+                onChange={(e) =>
+                  void save({ [key]: e.target.value as ApprovalMode })
+                }
+              >
+                <NativeSelectOption value="ask">
+                  Ask before changes
+                </NativeSelectOption>
+                <NativeSelectOption value="readOnly">Read-only</NativeSelectOption>
+                <NativeSelectOption value="auto">Auto-approve</NativeSelectOption>
+              </NativeSelect>
+            </div>
+          ))}
+          {s.externalMcpServerMode === "auto" && (
+            <p className="text-red-600 dark:text-red-400">
+              Outside clients can run services, flows and uploads on ThingWorx
+              without asking.
+            </p>
           )}
         </div>
       </SectionCard>

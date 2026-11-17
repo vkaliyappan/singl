@@ -29,6 +29,8 @@ pub struct AssistantSettings {
   pub auto_approve_writes: bool,
   /// How calls from outside MCP clients (not the app's own chats) are approved.
   pub external_mcp_mode: super::ApprovalMode,
+  /// The same for their ThingWorx server calls; unset follows `external_mcp_mode`.
+  pub external_mcp_server_mode: Option<super::ApprovalMode>,
   /// Servers added on the Settings page.
   pub mcp_servers: Vec<McpServerConfig>,
   /// Also load the workspace root's `.mcp.json`.
@@ -49,6 +51,7 @@ impl Default for AssistantSettings {
       mcp_token: String::new(),
       auto_approve_writes: false,
       external_mcp_mode: super::ApprovalMode::Ask,
+      external_mcp_server_mode: None,
       mcp_servers: Vec::new(),
       use_project_mcp: true,
       disabled_project_servers: Vec::new(),
@@ -89,6 +92,7 @@ pub struct AssistantSettingsView {
   pub mcp_port: u16,
   pub auto_approve_writes: bool,
   pub external_mcp_mode: super::ApprovalMode,
+  pub external_mcp_server_mode: super::ApprovalMode,
   pub mcp_servers: Vec<McpServerConfig>,
   pub use_project_mcp: bool,
   pub disabled_project_servers: Vec<String>,
@@ -106,6 +110,7 @@ pub struct AssistantSettingsPatch {
   pub mcp_port: Option<u16>,
   pub auto_approve_writes: Option<bool>,
   pub external_mcp_mode: Option<super::ApprovalMode>,
+  pub external_mcp_server_mode: Option<super::ApprovalMode>,
   pub mcp_servers: Option<Vec<McpServerConfig>>,
   pub use_project_mcp: Option<bool>,
   pub disabled_project_servers: Option<Vec<String>>,
@@ -124,12 +129,21 @@ impl AssistantSettings {
       mcp_port: self.mcp_port,
       auto_approve_writes: self.auto_approve_writes,
       external_mcp_mode: self.external_mcp_mode,
+      external_mcp_server_mode: self.external_modes().server,
       mcp_servers: self.mcp_servers.iter().cloned().map(|mut s| {
         s.source = "app".into();
         s
       }).collect(),
       use_project_mcp: self.use_project_mcp,
       disabled_project_servers: self.disabled_project_servers.clone(),
+    }
+  }
+
+  /// Approval modes for outside MCP clients.
+  pub fn external_modes(&self) -> super::TurnModes {
+    super::TurnModes {
+      local: self.external_mcp_mode,
+      server: self.external_mcp_server_mode.unwrap_or(self.external_mcp_mode),
     }
   }
 
@@ -168,6 +182,9 @@ impl AssistantSettings {
     }
     if let Some(v) = patch.external_mcp_mode {
       self.external_mcp_mode = v;
+    }
+    if let Some(v) = patch.external_mcp_server_mode {
+      self.external_mcp_server_mode = Some(v);
     }
     if let Some(v) = patch.mcp_servers {
       self.mcp_servers = v

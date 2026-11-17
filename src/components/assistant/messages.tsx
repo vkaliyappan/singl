@@ -589,6 +589,14 @@ export function ApprovalCard({
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium">
           {approval.tool}
         </span>
+        {approval.scope === "server" && (
+          <span
+            className="rounded-full border px-1.5 py-px text-[10px] text-muted-foreground"
+            title="Follows the ThingWorx server approval mode"
+          >
+            ThingWorx server
+          </span>
+        )}
         <RiskBadge risk={approval.risk} />
       </div>
       {approval.chatId === null && (

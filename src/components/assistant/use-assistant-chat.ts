@@ -19,6 +19,7 @@ import {
   type Message,
   type Risk,
   type ApprovalMode,
+  type ToolScope,
 } from "@/lib/assistant/api";
 import { emitAssistantChange } from "@/lib/assistant/changes";
 
@@ -38,6 +39,7 @@ export type Approval = {
   tool: string;
   input: unknown;
   risk: Risk;
+  scope: ToolScope;
   source: string;
 };
 
@@ -52,6 +54,7 @@ export type SendExtras = {
   skills: string[];
   skillNames: string[];
   approval?: ApprovalMode;
+  serverApproval?: ApprovalMode;
   /** Files dropped from outside the app, already read. */
   dropped?: { name: string; content: string }[];
   /** Pinned screen items. */
@@ -286,6 +289,7 @@ export function useAssistantChat(opts: {
             tool: e.tool,
             input: e.input,
             risk: e.risk,
+            scope: e.scope ?? "local",
             source: e.source,
           };
           setApprovals((x) =>
@@ -448,6 +452,7 @@ export function useAssistantChat(opts: {
           tools: extras?.tools ?? null,
           skills: extras?.skills ?? [],
           approval: extras?.approval,
+          serverApproval: extras?.serverApproval,
           inlineAttachments: extras?.dropped ?? [],
           references: extras?.references?.length ? extras.references : undefined,
           images: extras?.images?.length ? extras.images : undefined,

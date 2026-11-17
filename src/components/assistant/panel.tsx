@@ -48,7 +48,6 @@ import {
   assistantChats,
   assistantSuggestions,
   assistantTurnMode,
-  type ApprovalMode,
   type ChatSummary,
   type ProviderInfo,
   type Suggestion,
@@ -72,7 +71,7 @@ import {
   setEditorMarkdown,
   useComposerEditor,
 } from "./composer-editor";
-import { ApprovalModePicker, useApprovalMode } from "./approval-mode";
+import { ApprovalModePicker, useApprovalMode, type ApprovalModes } from "./approval-mode";
 import { ModelPicker, useModelChoice } from "./model-picker";
 import type {
   AssistantChat,
@@ -404,17 +403,17 @@ function Composer({
   const ctx = useScreenContext();
   const pins = usePins();
   const [modelOpen, setModelOpen] = useState(false);
-  const { mode: approval, setMode: saveApproval } = useApprovalMode();
-  // A new mode also applies to the turn already running, and settles what it
-  // is waiting on: Auto approves the open cards, Read-only denies them.
-  const setApproval = (m: ApprovalMode) => {
+  const { modes: approval, setModes: saveApproval } = useApprovalMode();
+  // New modes also apply to the turn already running, and settle what it is
+  // waiting on, per scope: Auto approves the open cards, Read-only denies them.
+  const setApproval = (m: ApprovalModes) => {
     saveApproval(m);
     const id = chat.chatId;
     if (!chat.running || !id) return;
-    void assistantTurnMode(id, m).catch(() => {});
-    if (m === "ask") return;
+    void assistantTurnMode(id, m.local, m.server).catch(() => {});
     for (const a of chat.approvals) {
-      if (a.chatId === id) void chat.resolveApproval(a.requestId, m === "auto");
+      const mode = m[a.scope];
+      if (a.chatId === id && mode !== "ask") void chat.resolveApproval(a.requestId, mode === "auto");
     }
   };
   const { editor, empty } = useComposerEditor({
@@ -468,7 +467,8 @@ function Composer({
       tools: extras.toolAllowlist,
       skills: extras.skillIds,
       skillNames: extras.skillNames,
-      approval,
+      approval: approval.local,
+      serverApproval: approval.server,
       references: pins.map((p) => ({
         kind: p.kind,
         label: p.label,
@@ -527,7 +527,7 @@ function Composer({
               <span className="truncate">{context}</span>
             </span>
             <span className="flex-1" />
-            <ApprovalModePicker mode={approval} onChange={setApproval} />
+            <ApprovalModePicker modes={approval} onChange={setApproval} />
             <ModelPicker
               providers={providers}
               choice={choice}
