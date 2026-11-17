@@ -3,6 +3,10 @@
 import { CopyButton } from "./copy-button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context";
+import { addPins, usePinnables, type NewPin, type Pinnable } from "@/lib/assistant/pins";
+import { setDragPins } from "@/lib/assistant/drag";
+import { clipJson } from "@/lib/assistant/pin-utils";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import {
   IconAlertTriangle,
@@ -12,6 +16,7 @@ import {
   IconBrush,
   IconFocusCentered,
   IconLayoutAlignLeft,
+  IconMessagePlus,
   IconLayoutAlignTop,
   IconPlayerPlay,
   IconPlayerStop,
@@ -179,6 +184,156 @@ export function FlowEditor({
     [selected]
   );
   const selectedNodes = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+
+  // ── Assistant: the open flow and what is selected ─────────────────────────
+  useAssistantContext({
+    screen: "twx-flow",
+    title: "Service Flow",
+    summary: `Flow "${name}" open (${graph.nodes.length} nodes, ${graph.edges.length} edges)${
+      selectedNodeIds.length ? `, ${selectedNodeIds.length} selected` : ""
+    }`,
+    data: {
+      flowId,
+      flowName: name,
+      env,
+      nodeCount: graph.nodes.length,
+      nodes: graph.nodes.slice(0, 60).map((n) => ({ id: n.id, kind: n.kind, label: n.label })),
+      openNodeId,
+    },
+    selection: {
+      nodes: selectedNodeIds.map((id) => {
+        const n = nodesById.get(id);
+        return n ? { id, kind: n.kind, label: n.label, inputs: n.inputs } : { id };
+      }),
+      edges: selected?.kind === "edge" ? [graph.edges.find((e) => e.id === selected.id) ?? { id: selected.id }] : [],
+    },
+  });
+  useAssistantAction(
+    "select_nodes",
+    {
+      description: "Select nodes in the open flow by id or label.",
+      inputSchema: { type: "object", properties: { nodes: { type: "array", items: { type: "string" } } }, required: ["nodes"] },
+    },
+    (args) => {
+      const wanted = ((args as { nodes?: string[] }).nodes ?? []).map(String);
+      const ids = graph.nodes.filter((n) => wanted.includes(n.id) || wanted.includes(n.label)).map((n) => n.id);
+      setSelected(ids.length ? { kind: "node", ids } : null);
+      return { selected: ids };
+    }
+  );
+
+  // ── Add to chat: nodes, the whole flow, and the last run ──────────────────
+  const nodePin = useCallback(
+    (id: string): NewPin | null => {
+      const n = nodesById.get(id);
+      if (!n) return null;
+      const { x: _x, y: _y, ...config } = n;
+      void _x;
+      void _y;
+      const label = (nid: string) => nodesById.get(nid)?.label ?? nid;
+      return {
+        kind: "node",
+        label: `${name} · ${n.label}`,
+        screen: "twx-flow",
+        detail: n.kind,
+        content: clipJson({
+          flow: name,
+          environment: env,
+          type: n.kind,
+          config,
+          inputs: n.inputs,
+          outputs: graph.edges
+            .filter((e) => e.source === id)
+            .map((e) => ({ to: label(e.target), port: e.sourcePort })),
+          receivesFrom: graph.edges.filter((e) => e.target === id).map((e) => label(e.source)),
+        }),
+      };
+    },
+    [nodesById, graph.edges, name, env]
+  );
+
+  const flowPin = useCallback(
+    (): NewPin => ({
+      kind: "flow",
+      label: name,
+      screen: "twx-flow",
+      detail: `${graph.nodes.length} nodes · ${graph.edges.length} wires`,
+      content: clipJson({ name, environment: env, ...graph }),
+    }),
+    [name, env, graph]
+  );
+
+  /** Last run of one node (id given) or of the whole flow. */
+  const resultPin = useCallback(
+    (id?: string): NewPin | null => {
+      const labelOf = (nid: string) => nodesById.get(nid)?.label ?? nid;
+      const stateOf = (nid: string) => {
+        const s = runStates[nid];
+        if (!s) return null;
+        return {
+          node: labelOf(nid),
+          status: s.status,
+          ms: s.ms,
+          error: s.error,
+          inputErrors: s.inputErrors,
+          rows: s.rows,
+          iterations: s.iterations,
+          inputs: s.inputs,
+          result: s.result,
+          logs: s.logs?.slice(-100),
+        };
+      };
+      if (id) {
+        const st = stateOf(id);
+        if (!st) return null;
+        return {
+          kind: "result",
+          label: `Result · ${name} · ${labelOf(id)}`,
+          screen: "twx-flow",
+          detail: st.error ? "failed" : st.status,
+          content: clipJson(st),
+        };
+      }
+      const ids = (runOrder.length ? runOrder : Object.keys(runStates)).filter((nid) => runStates[nid]);
+      if (!ids.length && !runError) return null;
+      // Share the size budget: results are the bulky part, so each node gets an even slice.
+      const per = Math.max(2000, Math.floor(30000 / Math.max(1, ids.length)));
+      const nodes = ids.map((nid) => {
+        const st = stateOf(nid)!;
+        const resultText = clipJson(st.result, per);
+        return { ...st, result: undefined, resultPreview: resultText };
+      });
+      return {
+        kind: "result",
+        label: `Last run · ${name}`,
+        screen: "twx-flow",
+        detail: `${ids.length} nodes${runMs != null ? ` · ${runMs} ms` : ""}${runError ? " · failed" : ""}`,
+        content: clipJson({ flow: name, environment: env, totalMs: runMs, error: runError || undefined, nodes }),
+      };
+    },
+    [nodesById, runStates, runOrder, runError, runMs, name, env]
+  );
+
+  const pinSelection = useCallback(() => {
+    const pins = selectedNodeIds.flatMap((id) => nodePin(id) ?? []);
+    if (pins.length) addPins(pins);
+  }, [selectedNodeIds, nodePin]);
+
+  const pinnables: Pinnable[] = [
+    { kind: "flow", label: name, detail: "whole flow definition", content: () => flowPin().content },
+  ];
+  for (const id of selectedNodeIds.slice(0, 10)) {
+    const n = nodesById.get(id);
+    if (!n) continue;
+    pinnables.push({ kind: "node", label: `${name} · ${n.label}`, detail: n.kind, content: () => nodePin(id)?.content ?? "" });
+    if (runStates[id]) {
+      pinnables.push({ kind: "result", label: `Result · ${name} · ${n.label}`, detail: runStates[id].status, content: () => resultPin(id)?.content ?? "" });
+    }
+  }
+  if (Object.keys(runStates).length > 0 || runError) {
+    pinnables.push({ kind: "result", label: `Last run · ${name}`, detail: "all node results and logs", content: () => resultPin()?.content ?? "" });
+  }
+  usePinnables(pinnables);
 
   const routes = useMemo(() => {
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -1199,6 +1354,46 @@ export function FlowEditor({
             </Button>
           </div>
         )}
+
+        <div className="flex items-center gap-1 border-l pl-2">
+          {selectedNodeIds.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={pinSelection}
+              title="Add the selected nodes (config, inputs, wires) to the assistant chat"
+            >
+              <IconMessagePlus />
+              Add selection to chat ({selectedNodeIds.length})
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            draggable
+            onDragStart={(e) => setDragPins(e, [flowPin()])}
+            onClick={() => addPins([flowPin()])}
+            title="Add the whole flow definition to the assistant chat (or drag it onto the assistant)"
+          >
+            <IconMessagePlus />
+            Add flow to chat
+          </Button>
+          {!running && (Object.keys(runStates).length > 0 || runError) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const sel = selectedNodeIds.length === 1 ? resultPin(selectedNodeIds[0]) : null;
+                const p = sel ?? resultPin();
+                if (p) addPins([p]);
+              }}
+              title="Add the last run to the assistant chat: the selected node's result, or every node's result and logs"
+            >
+              <IconMessagePlus />
+              Add run to chat
+            </Button>
+          )}
+        </div>
 
         {progress && (
           <div className="flex min-w-40 items-center gap-2">

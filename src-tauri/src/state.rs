@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use singl_core::db;
 use singl_core::jobs::JobRegistry;
@@ -7,26 +8,27 @@ use singl_core::SqlitePool;
 use tauri::async_runtime::RwLock;
 
 pub struct AppState {
-  /// Behind a lock only so `db_import` can swap the database file out.
-  db: RwLock<SqlitePool>,
+  /// Behind a lock only so `db_import` can swap the database file out. Shared
+  /// with the assistant, which sees the swap too.
+  db: Arc<RwLock<SqlitePool>>,
   pub db_path: PathBuf,
   pub jobs: JobRegistry,
   /// Agent CLIs started by Agent nodes, killed when the app exits.
   pub agents: singl_core::agents::process::ProcRegistry,
-  pub workspace: std::sync::RwLock<Workspace>,
+  pub workspace: Arc<std::sync::RwLock<Workspace>>,
+  /// The app-wide AI assistant.
+  pub assistant: Arc<singl_core::assistant::Assistant>,
 }
 
 impl AppState {
   pub async fn load(db_path: PathBuf) -> singl_core::Result<Self> {
     let pool = db::open(&db_path).await?;
     let workspace = Workspace::new(db::settings::workspace_root(&pool).await?);
-    Ok(Self {
-      db: RwLock::new(pool),
-      db_path,
-      jobs: JobRegistry::default(),
-      agents: Default::default(),
-      workspace: std::sync::RwLock::new(workspace),
-    })
+    let db = Arc::new(RwLock::new(pool));
+    let workspace = Arc::new(std::sync::RwLock::new(workspace));
+    let agents = singl_core::agents::process::ProcRegistry::default();
+    let assistant = singl_core::assistant::Assistant::new(db.clone(), workspace.clone(), agents.clone());
+    Ok(Self { db, db_path, jobs: JobRegistry::default(), agents, workspace, assistant })
   }
 
   pub async fn db(&self) -> SqlitePool {

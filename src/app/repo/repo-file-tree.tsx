@@ -60,6 +60,9 @@ export function RepoFileTree({
     gitStatus,
     activePath: activePath?.startsWith(prefix) ? activePath.slice(prefix.length) : null,
     onFileOpen: (path) => onFileOpen(prefix + path),
+    // Relative to the workspace folder: clones live under `repo/`.
+    dragItems: (treePaths) =>
+      treePaths.map((p) => ({ path: `repo/${prefix}${p.replace(/\/$/, "")}`, isDir: p.endsWith("/") })),
   });
 
   // Deleted files are not on disk, so they are not in the tree either.

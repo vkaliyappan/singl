@@ -6,6 +6,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { useAssistantContext } from "@/lib/assistant/context";
 import { useTheme } from "@/components/providers";
 import {
   IconGitBranch,
@@ -30,8 +31,10 @@ import {
   IconBrandGitlab,
   IconFolderCode,
   IconCode,
+  IconMessagePlus,
 } from "@tabler/icons-react";
 import { ChangesPanel } from "./changes-panel";
+import { addPins, usePinnables, type NewPin } from "@/lib/assistant/pins";
 import { RepoSetupCard } from "./repo-setup-card";
 import { RepoOutputDrawer } from "./repo-output-drawer";
 import {
@@ -75,6 +78,7 @@ import {
   startPull,
   type RepoJobMeta,
 } from "@/lib/repo-jobs";
+import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -84,6 +88,10 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
     </div>
   ),
 });
+
+// ── "Add to chat" helpers ────────────────────────────────────────────────────
+
+
 
 interface TabState {
   content: string | null;
@@ -234,6 +242,19 @@ export function RepoExplorer({
   const [copiedContent, setCopiedContent] = useState(false);
   const [copiedBreadcrumb, setCopiedBreadcrumb] = useState(false);
   const [copiedCloneUrl, setCopiedCloneUrl] = useState(false);
+
+  // ── Assistant: repo state and the code selected in the viewer ─────────────
+  const [codeSel, setCodeSel] = useState<{ file: string; range: string; text: string } | null>(null);
+  useAssistantContext({
+    screen: slot === 1 ? "repo" : "repo2",
+    title: slot === 1 ? "TWX Repository" : "Windchill Repository",
+    summary:
+      cloneState === "done"
+        ? `${clonedSlug ?? "repository"} on ${currentBranch || "?"}${activeTab ? `, ${activeTab.split("/").at(-1)} open` : ""} (${view})`
+        : "No repository cloned yet",
+    data: { repoUrl, branch: currentBranch, cloned: cloneState === "done", view, openFile: activeTab, lastPulled },
+    selection: { file: activeTab && view === "explorer" ? activeTab : null, code: codeSel && codeSel.file === activeTab ? codeSel : null },
+  });
 
   // ── Persistence ───────────────────────────────────────────────────────────
   const hasMountedRef = useRef(false);
@@ -580,6 +601,29 @@ export function RepoExplorer({
   const activeFileName = activeTab ? (activeTab.split("/").pop() ?? "") : "";
   const activeLang = activeTab ? getLanguage(activeTab) : "";
   const activeLineCount = activeTabState?.content ? activeTabState.content.split("\n").length : 0;
+
+  // ── Add to chat: the open file. This screen shows file contents, not diffs;
+  // the diff and changed-file list are pinned from the Changes view (changes-panel).
+  const pinScreen = slot === 1 ? "repo" : "repo2";
+  const filePin = (): NewPin | null => {
+    if (!activeTab || !activeTabState?.content) return null;
+    return {
+      kind: "file",
+      label: activeTab,
+      screen: pinScreen,
+      detail: `${activeLineCount} lines`,
+      content: clipText(activeTabState.content, PIN_LIMIT),
+    };
+  };
+  const pinFile = () => {
+    const p = filePin();
+    if (p) addPins([p]);
+  };
+  usePinnables(
+    view === "explorer" && activeTab && activeTabState?.content
+      ? [{ kind: "file", label: activeTab, detail: `${activeLineCount} lines`, content: () => filePin()?.content ?? "" }]
+      : []
+  );
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
@@ -949,6 +993,9 @@ export function RepoExplorer({
                               onSelect={setActiveTab}
                               onClose={handleCloseTab}
                               onCloseAll={handleCloseAllTabs}
+                              dragItems={(paths) =>
+                                paths.map((p) => ({ path: `repo/${p.replace(/\/$/, "")}`, isDir: p.endsWith("/") }))
+                              }
                             />
                           }
                         >
@@ -1061,6 +1108,17 @@ export function RepoExplorer({
 
                                 {/* Editor Action Buttons */}
                                 <div className="flex items-center gap-1 shrink-0 text-xs">
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    onClick={pinFile}
+                                    disabled={!activeTabState?.content}
+                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                    title="Add to chat"
+                                    aria-label="Add file to chat"
+                                  >
+                                    <IconMessagePlus className="size-3.5" />
+                                  </Button>
                                   {activeLang && (
                                     <Badge
                                       variant="secondary"
@@ -1181,6 +1239,17 @@ export function RepoExplorer({
                                     }}
                                     onMount={(ed) => {
                                       editorRef.current = ed;
+                                      const file = activeTab;
+                                      ed.onDidChangeCursorSelection(() => {
+                                        const sel = ed.getSelection();
+                                        const model = ed.getModel();
+                                        if (!sel || !model || sel.isEmpty()) return setCodeSel(null);
+                                        setCodeSel({
+                                          file: file ?? "",
+                                          range: `${sel.startLineNumber}:${sel.startColumn}-${sel.endLineNumber}:${sel.endColumn}`,
+                                          text: model.getValueInRange(sel).slice(0, 4000),
+                                        });
+                                      });
                                       const jump = pendingJumpRef.current;
                                       if (jump) {
                                         pendingJumpRef.current = null;

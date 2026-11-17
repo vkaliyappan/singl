@@ -36,6 +36,7 @@ import {
   IconBrandDocker,
   IconBrandPowershell,
 } from "@tabler/icons-react";
+import type { DragPath } from "@/lib/assistant/drag";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AppFileTree,
@@ -164,6 +165,7 @@ export function OpenEditorsPanel({
   onClose,
   onCloseAll,
   getDecoration,
+  dragItems,
 }: {
   openPaths: string[];
   activePath: string | null;
@@ -172,6 +174,8 @@ export function OpenEditorsPanel({
   onCloseAll: () => void;
   /** Short badge shown at the end of a row, e.g. an entity type. */
   getDecoration?: (path: string) => { text: string; title?: string } | null;
+  /** Makes rows draggable onto the assistant; see `useAppFileTree`. */
+  dragItems?: (treePaths: string[]) => DragPath[];
 }) {
   const decorate = useRef(getDecoration);
   useLayoutEffect(() => {
@@ -182,6 +186,7 @@ export function OpenEditorsPanel({
     paths: openPaths,
     activePath,
     onFileOpen: onSelect,
+    dragItems,
     initialExpansion: "open",
     stickyFolders: false,
     search: false,

@@ -9,6 +9,7 @@ import {
   IconTable,
   IconArrowsExchange,
   IconSitemap,
+  IconSparkles,
 } from "@tabler/icons-react"
 
 export interface NavItem {
@@ -29,6 +30,7 @@ export const navSections: NavSection[] = [
     title: "Workspace",
     items: [
       { title: "Home", href: "/", icon: IconHome },
+      { title: "AI Assistant", href: "/assistant", icon: IconSparkles },
       { title: "TWX Repository", href: "/repo", icon: IconGitBranch },
       { title: "Windchill Repository", href: "/repo2", icon: IconGitBranch },
     ],

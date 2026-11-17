@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { useAssistantContext } from "@/lib/assistant/context";
 import dynamic from "next/dynamic";
 import {
   IconArrowRight,
@@ -259,6 +260,14 @@ export function TwxMigrateExplorer() {
 
   // ─ Mode
   const [mode, setMode] = useState<MigrateMode>("copy");
+
+  useAssistantContext({
+    screen: "twx-migrate",
+    title: "Migrate",
+    summary: `${mode} from ${sourceRel || "?"} to ${targetRel || "?"} in ${selectedEnv || "?"}, ${selected.size} members selected`,
+    data: { env: selectedEnv, source: sourceRel, target: targetRel, mode, renames: [...renames.entries()].slice(0, 30) },
+    selection: { members: [...selected].slice(0, 100) },
+  });
 
   // ─ Preview / commit
   const [busy, setBusy] = useState(false);

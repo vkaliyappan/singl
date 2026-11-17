@@ -3,7 +3,7 @@ mod error;
 mod state;
 mod tray;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 const AUTOSTART_ARG: &str = "--autostart";
 
@@ -47,6 +47,18 @@ pub fn run() {
         app.path().app_data_dir()?.join("singl.db")
       };
       let state = tauri::async_runtime::block_on(state::AppState::load(db_path))?;
+      // The assistant reports to the window; its MCP server starts in the background.
+      let handle = app.handle().clone();
+      state.assistant.set_sink(std::sync::Arc::new(move |event| {
+        let _ = handle.emit("assistant://event", event);
+      }));
+      let (assistant, discovery) =
+        (state.assistant.clone(), singl_core::assistant::mcp::discovery_path(&state.db_path));
+      tauri::async_runtime::spawn(async move {
+        if let Err(e) = assistant.start_mcp(&discovery).await {
+          log::warn!("assistant MCP server did not start: {e}");
+        }
+      });
       app.manage(state);
       Ok(())
     })
@@ -121,6 +133,29 @@ pub fn run() {
       commands::agents::agent_list_models_run,
       commands::agents::agent_model_cache,
       commands::agents::agent_anthropic_models,
+      commands::assistant::assistant_send,
+      commands::assistant::assistant_cancel,
+      commands::assistant::assistant_chat_running,
+      commands::assistant::assistant_chats,
+      commands::assistant::assistant_chats_search,
+      commands::assistant::assistant_chat_get,
+      commands::assistant::assistant_chat_rename,
+      commands::assistant::assistant_chat_delete,
+      commands::assistant::assistant_context_set,
+      commands::assistant::assistant_context_get,
+      commands::assistant::assistant_suggestions,
+      commands::assistant::assistant_ui_reply,
+      commands::assistant::assistant_approve,
+      commands::assistant::assistant_settings_get,
+      commands::assistant::assistant_settings_set,
+      commands::assistant::assistant_providers,
+      commands::assistant::assistant_models,
+      commands::assistant::assistant_tools,
+      commands::assistant::assistant_skills,
+      commands::assistant::assistant_files_search,
+      commands::assistant::assistant_mcp_info,
+      commands::assistant::assistant_mcp_servers,
+      commands::assistant::assistant_mcp_restart,
       commands::settings::settings_get,
       commands::settings::settings_azure_pat_set,
       commands::settings::settings_compare_paths_set,
@@ -146,7 +181,10 @@ pub fn run() {
     .run(|app, event| {
       if let tauri::RunEvent::Exit = event {
         app.state::<state::AppState>().jobs.cancel_all();
-        app.state::<state::AppState>().agents.kill_all();
+        let state = app.state::<state::AppState>();
+        state.agents.kill_all();
+        state.assistant.stop_mcp(&singl_core::assistant::mcp::discovery_path(&state.db_path));
+        tauri::async_runtime::block_on(state.assistant.shutdown());
       }
     });
 }

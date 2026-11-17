@@ -4,6 +4,7 @@
 // (src/lib/compare.ts) instead of /api/compare.
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useAssistantContext } from "@/lib/assistant/context";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useTheme } from "@/components/providers";
@@ -27,6 +28,7 @@ import {
   IconEdit,
   IconEqual,
   IconInfoCircle,
+  IconMessagePlus,
   IconFileDiff,
   IconSpace,
   IconTextWrap,
@@ -46,8 +48,10 @@ import { FileIcon, FileTreePanel, OpenEditorsPanel } from "@/components/file-tre
 import { CompareFileTree } from "./compare-file-tree";
 import { SearchPanel, type SearchOptions, type SearchFileResult } from "@/components/search-panel";
 import { getCompareContent, getCompareTree, searchCompare, type DiffNode, type NodeStatus } from "@/lib/compare";
+import { addPins, usePinnables, type NewPin } from "@/lib/assistant/pins";
 import { errorMessage } from "@/lib/settings";
 import type { OnMount, DiffOnMount } from "@monaco-editor/react";
+import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
 
 const editorLoading = () => (
   <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs">
@@ -72,6 +76,10 @@ interface TreeData {
   leftRoot: string;
   rightRoot: string;
 }
+
+// ── "Add to chat" helpers ────────────────────────────────────────────────────
+
+
 
 interface DiffTabState {
   node: DiffNode;
@@ -241,6 +249,16 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
   activeTabRef.current = activeTab;
 
   const [nodeMap, setNodeMap] = useState<Map<string, DiffNode>>(new Map());
+
+  useAssistantContext({
+    screen: "compare",
+    title: "Compare",
+    summary: `Comparing ${baseIsRepo ? "repository" : "local exports"} with ${selectedEnv || "no environment"}${
+      activeTab ? `, ${activeTab.split("/").at(-1)} diff open` : ""
+    }`,
+    data: { env: selectedEnv, baseIsRepo, statusFilter, hideIdentical, quickFilter, openDiffs: [...openDiffTabs.keys()].slice(0, 20), activeDiff: activeTab },
+    selection: { files: activeTab ? [activeTab] : [] },
+  });
 
   // ── Monaco Editor & Diff Navigator Refs ───────────────────────────────────
   const pendingJumpRef = useRef<{ line: number; col: number } | null>(null);
@@ -528,6 +546,34 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
   const activeTabData = activeTab ? openDiffTabs.get(activeTab) : null;
 
+  // ── Add to chat: the active file's comparison (both sides, each clipped) ──
+  const leftName = baseIsRepo ? "Repo" : "TWX";
+  const rightName = baseIsRepo ? "TWX" : "Repo";
+  const compareReady = !!activeTab && !!activeTabData && activeTabData.leftContent !== null && activeTabData.rightContent !== null;
+  const comparePin = (): NewPin | null => {
+    if (!activeTab || !activeTabData || activeTabData.leftContent === null || activeTabData.rightContent === null) return null;
+    const half = PIN_LIMIT / 2;
+    return {
+      kind: "diff",
+      label: activeTab,
+      screen: "compare",
+      detail: `${leftName} ↔ ${rightName}${selectedEnv ? ` · ${selectedEnv}` : ""}`,
+      content: [
+        `=== Left: ${leftName} ===`,
+        clipText(activeTabData.leftContent, half),
+        `=== Right: ${rightName}${selectedEnv ? ` (${selectedEnv})` : ""} ===`,
+        clipText(activeTabData.rightContent, half),
+      ].join("\n"),
+    };
+  };
+  const pinCompare = () => {
+    const p = comparePin();
+    if (p) addPins([p]);
+  };
+  usePinnables(
+    compareReady ? [{ kind: "diff", label: activeTab ?? "", detail: `${leftName} ↔ ${rightName}`, content: () => comparePin()?.content ?? "" }] : []
+  );
+
   const language = useMemo(() => {
     if (!activeTab) return "plaintext";
     const ext = activeTab.split(".").pop()?.toLowerCase() ?? "";
@@ -779,6 +825,15 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                   onSelect={setActiveTab}
                   onClose={handleCloseTab}
                   onCloseAll={handleCloseAllTabs}
+                  dragItems={(paths) =>
+                    paths.map((p) => {
+                      const isDir = p.endsWith("/");
+                      const rel = p.replace(/\/$/, "");
+                      const node = openDiffTabs.get(rel)?.node;
+                      const root = node && !node.leftExists && node.rightExists ? treeData?.rightRoot : treeData?.leftRoot;
+                      return { path: `${root ?? ""}/${rel}`, isDir };
+                    })
+                  }
                   getDecoration={(path) => {
                     const status = openDiffTabs.get(path)?.node.status;
                     return status && status !== "identical" ? STATUS_DECORATION[status] : null;
@@ -859,6 +914,8 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                   onExpandedChange={setExpandedDirs}
                   onFileOpen={handleTreeFileOpen}
                   onCopyPath={handleCopyPath}
+                  leftRoot={treeData.leftRoot}
+                  rightRoot={treeData.rightRoot}
                   header={
                 <div className="flex flex-col px-3 py-2 border-y gap-1 bg-muted/20 text-[11px]">
                   <div className="flex items-center justify-between">
@@ -1002,6 +1059,18 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
                     {/* Right: Diff Navigation & View Options */}
                     <div className="flex items-center gap-2 shrink-0 ml-auto">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={pinCompare}
+                        disabled={!compareReady}
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                        title="Add to chat"
+                        aria-label="Add comparison to chat"
+                      >
+                        <IconMessagePlus className="size-3.5" />
+                      </Button>
+
                       {/* Left vs Right Side Origin Indicator */}
                       <div className="hidden md:flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border">
                         <span className={cn(baseIsRepo ? "font-semibold text-foreground" : "")}>

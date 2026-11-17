@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useAssistantContext } from "@/lib/assistant/context";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import {
@@ -12,9 +13,11 @@ import {
   IconDownload,
   IconAlertTriangle,
   IconCheck,
+  IconMessagePlus,
 } from "@tabler/icons-react";
 
 import { useTheme } from "@/components/providers";
+import { addPins, usePinnables, type NewPin } from "@/lib/assistant/pins";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -47,6 +50,7 @@ import {
   toCsv,
   type TableSource,
 } from "@/lib/json-table";
+import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -114,6 +118,11 @@ const SAMPLE = JSON.stringify(
   2
 );
 
+// ── "Add to chat" helpers ────────────────────────────────────────────────────
+
+const PIN_ROWS = 200;
+
+
 type ParseState =
   | { ok: true; value: unknown }
   | { ok: false; error: string }
@@ -125,6 +134,14 @@ export function JsonTableExplorer() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [flatten, setFlatten] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  useAssistantContext({
+    screen: "json-table",
+    title: "JSON Table",
+    summary: text.trim() ? `${text.length} characters of JSON loaded${selectedPath ? `, ${selectedPath} selected` : ""}` : "No JSON loaded",
+    data: { chars: text.length, flatten, jsonStart: text.slice(0, 2000) },
+    selection: { path: selectedPath ? [selectedPath] : [] },
+  });
 
   const parsed = useMemo<ParseState>(() => {
     const trimmed = text.trim();
@@ -252,6 +269,68 @@ export function JsonTableExplorer() {
     URL.revokeObjectURL(url);
   }, [source, rows, tableColumns]);
 
+  // ── Add to chat: the table (first rows, trimmed) and the JSON source ───────
+  // The grid has no row selection, so the table pin is always the first rows.
+  const tableLabel = source ? `Table · ${source.path}` : "";
+
+  const tablePin = useCallback((): NewPin | null => {
+    if (!source || !rows.length) return null;
+    const columns = tableColumns.map((c) => ({ name: c.name, baseType: c.baseType }));
+    const kept: Record<string, unknown>[] = [];
+    // Budget starts past the columns and a little wrapper overhead.
+    let size = JSON.stringify(columns).length + 256;
+    for (const r of rows.slice(0, PIN_ROWS)) {
+      const n = JSON.stringify(r).length + 2;
+      if (size + n > PIN_LIMIT) break;
+      size += n;
+      kept.push(r);
+    }
+    const out: Record<string, unknown> = {
+      source: source.path,
+      columns,
+      rowCount: rows.length,
+      rowsIncluded: kept.length,
+      rows: kept,
+    };
+    if (rows.length > kept.length) out.note = `${rows.length - kept.length} more rows not included`;
+    return {
+      kind: "table",
+      label: tableLabel,
+      screen: "json-table",
+      detail: `${tableColumns.length} cols · ${rows.length} rows`,
+      content: JSON.stringify(out),
+    };
+  }, [source, rows, tableColumns, tableLabel]);
+
+  const jsonPin = useCallback((): NewPin | null => {
+    if (!text.trim()) return null;
+    return {
+      kind: "json",
+      label: "JSON source",
+      screen: "json-table",
+      detail: `${text.length.toLocaleString()} chars`,
+      content: clipText(text, PIN_LIMIT),
+    };
+  }, [text]);
+
+  const pinTable = () => {
+    const p = tablePin();
+    if (p) addPins([p]);
+  };
+  const pinJson = () => {
+    const p = jsonPin();
+    if (p) addPins([p]);
+  };
+
+  usePinnables([
+    ...(source && rows.length
+      ? [{ kind: "table", label: tableLabel, detail: `${tableColumns.length} cols · ${rows.length} rows`, content: () => tablePin()?.content ?? "" }]
+      : []),
+    ...(text.trim()
+      ? [{ kind: "json", label: "JSON source", detail: `${text.length.toLocaleString()} chars`, content: () => jsonPin()?.content ?? "" }]
+      : []),
+  ]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* ── Command bar ─────────────────────────────────────────────────────── */}
@@ -313,6 +392,17 @@ export function JsonTableExplorer() {
             <IconDownload className="size-3.5" />
             CSV
           </Button>
+          <Button
+            variant="outline"
+            size="xs"
+            className="h-7 w-7 p-0"
+            onClick={pinTable}
+            disabled={!rows.length}
+            title="Add to chat"
+            aria-label="Add table to chat"
+          >
+            <IconMessagePlus className="size-3.5" />
+          </Button>
         </div>
       </header>
 
@@ -371,6 +461,17 @@ export function JsonTableExplorer() {
             >
               <IconTrash className="size-3.5" />
               Clear
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              className="h-6 w-6 p-0"
+              onClick={pinJson}
+              disabled={!text.trim()}
+              title="Add to chat"
+              aria-label="Add JSON source to chat"
+            >
+              <IconMessagePlus className="size-3.5" />
             </Button>
           </div>
 

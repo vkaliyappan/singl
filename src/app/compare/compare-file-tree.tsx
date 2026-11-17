@@ -34,6 +34,8 @@ export function CompareFileTree({
   onExpandedChange,
   onFileOpen,
   onCopyPath,
+  leftRoot,
+  rightRoot,
 }: {
   files: readonly DiffNode[];
   activePath: string | null;
@@ -42,6 +44,9 @@ export function CompareFileTree({
   onExpandedChange: (expanded: string[]) => void;
   onFileOpen: (path: string) => void;
   onCopyPath: (path: string) => void;
+  /** Both relative to the workspace folder; rows drag from the side that exists. */
+  leftRoot: string;
+  rightRoot: string;
 }) {
   const paths = useMemo(() => files.map((f) => f.path), [files]);
   const gitStatus = useMemo(
@@ -60,6 +65,14 @@ export function CompareFileTree({
     onFileOpen,
     onExpandedChange,
     initialExpandedPaths: initialExpanded,
+    dragItems: (treePaths) =>
+      treePaths.map((p) => {
+        const isDir = p.endsWith("/");
+        const rel = p.replace(/\/$/, "");
+        const under = files.filter((f) => (isDir ? f.path.startsWith(p) : f.path === rel));
+        const root = under.some((f) => f.leftExists) || !under.some((f) => f.rightExists) ? leftRoot : rightRoot;
+        return { path: `${root}/${rel}`, isDir };
+      }),
   });
 
   return (

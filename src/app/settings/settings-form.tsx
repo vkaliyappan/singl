@@ -6,7 +6,7 @@
 // lands on the saved values. Web push and the AI agent toggles are not
 // ported: the desktop app has neither.
 
-import { AgentSettings } from "./agent-settings"
+import { AiSettings } from "./ai-settings"
 import { createContext, useActionState, useContext, useEffect, useState, useTransition } from "react"
 import { getVersion } from "@tauri-apps/api/app"
 import {
@@ -1210,10 +1210,10 @@ const SECTIONS = [
     icon: IconFolders,
   },
   {
-    id: "agents",
-    label: "AI Agents",
-    title: "AI Agents",
-    description: "Coding-agent CLIs that Service Flow Agent nodes may run.",
+    id: "ai",
+    label: "AI",
+    title: "AI",
+    description: "Assistant providers, agent CLIs, approvals and MCP.",
     icon: IconRobot,
   },
   {
@@ -1331,7 +1331,7 @@ export function SettingsExplorer({
             </div>
           )}
 
-          {section === "agents" && <AgentSettings />}
+          {section === "ai" && <AiSettings />}
 
           {section === "preferences" && <AppPreferencesCard />}
 

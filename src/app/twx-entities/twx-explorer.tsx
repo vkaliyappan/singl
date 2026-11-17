@@ -6,6 +6,10 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo, useDeferredValue } from "react";
 import { useRouter } from "next/navigation";
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context";
+import { addPins, usePinnables, type NewPin, type Pinnable } from "@/lib/assistant/pins";
+import { setDragPins } from "@/lib/assistant/drag";
+import { clipText } from "@/lib/assistant/pin-utils";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/components/providers";
 import {
@@ -30,6 +34,7 @@ import {
   IconClipboard,
   IconListCheck,
   IconChevronDown,
+  IconMessagePlus,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
@@ -347,6 +352,8 @@ export function TwxExplorer({
     onFileOpen: (rel) => treeActions.current.open(rel),
     // Moving files inside the tree is not supported.
     dragAndDrop: { canDrop: () => false },
+    // Relative to the workspace folder.
+    dragItems: (rels) => rels.map((rel) => ({ path: `twx-entities/${toFull(rel)}`, isDir: rel.endsWith("/") })),
     renderRowDecoration: ({ item }) => treeActions.current.decorate(item.path),
   });
 
@@ -1010,6 +1017,114 @@ export function TwxExplorer({
     return parseTwxEntityXml(deferredContent);
   }, [deferredContent, activeTab]);
 
+
+  // ── Assistant: what is open and selected ──────────────────────────────────
+  const [overviewService, setOverviewService] = useState<string | null>(null);
+  const [codeSel, setCodeSel] = useState<{ file: string; range: string; text: string } | null>(null);
+  const codePinRef = useRef<((wholeFile: boolean) => NewPin) | null>(null);
+  const watchSelection = useCallback((ed: { getSelection: () => unknown; getModel: () => unknown; onDidChangeCursorSelection: (cb: () => void) => unknown; addAction?: (a: { id: string; label: string; contextMenuGroupId: string; run: () => void }) => unknown }, file: string) => {
+    ed.addAction?.({
+      id: "singl.addToChat",
+      label: "Add to chat",
+      contextMenuGroupId: "9_cutcopypaste",
+      run: () => {
+        const sel = ed.getSelection() as { isEmpty: () => boolean; startLineNumber: number; endLineNumber: number } | null;
+        const model = ed.getModel() as { getValueInRange: (r: unknown) => string } | null;
+        const pin = codePinRef.current?.(!sel || sel.isEmpty());
+        if (!pin) return;
+        if (sel && !sel.isEmpty() && model) {
+          // Full selection from the editor (the tracked one is capped for the screen context).
+          const head = pin.content.split("\n", 1)[0];
+          pin.content = clipText(`${head}\n${model.getValueInRange(sel)}`);
+        }
+        addPins([pin]);
+      },
+    });
+    ed.onDidChangeCursorSelection(() => {
+      const sel = ed.getSelection() as { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; isEmpty: () => boolean };
+      const model = ed.getModel() as { getValueInRange: (r: unknown) => string } | null;
+      if (!sel || !model || sel.isEmpty()) return setCodeSel(null);
+      setCodeSel({
+        file,
+        range: `${sel.startLineNumber}:${sel.startColumn}-${sel.endLineNumber}:${sel.endColumn}`,
+        text: model.getValueInRange(sel).slice(0, 4000),
+      });
+    });
+  }, []);
+  const activeFileName = activeTab?.split("/").at(-1);
+
+  // ── Add to chat: the open code (or the selection inside it) ──
+  const codePin = useCallback(
+    (wholeFile: boolean): NewPin => {
+      const content = activeTabState?.content ?? "";
+      const sel = !wholeFile && codeSel && codeSel.file === activeTab ? codeSel : null;
+      const name = activeFileName ?? "code";
+      return {
+        kind: "code",
+        label: sel ? `${name} (selection)` : name,
+        screen: "twx-entities",
+        detail: sel ? `lines ${sel.range}` : `${content.length.toLocaleString()} chars`,
+        content: clipText(
+          sel ? `${activeTab} [${sel.range}]\n${sel.text}` : `${activeTab}\n${content}`
+        ),
+      };
+    },
+    [activeTabState?.content, activeTab, activeFileName, codeSel]
+  );
+  useEffect(() => {
+    codePinRef.current = codePin;
+  }, [codePin]);
+  const pinnables: Pinnable[] = [];
+  if (activeTabState?.content != null) {
+    pinnables.push({ kind: "code", label: activeFileName ?? "code", detail: "open file", content: () => codePin(true).content });
+    if (codeSel && codeSel.file === activeTab) {
+      pinnables.push({ kind: "code", label: `${activeFileName} (selection)`, detail: codeSel.range, content: () => codePin(false).content });
+    }
+  }
+  usePinnables(pinnables);
+
+  useAssistantContext({
+    screen: "twx-entities",
+    title: "Entities",
+    summary: parsedEntity
+      ? `${parsedEntity.entityType}:${parsedEntity.name} open in ${selectedEnv}`
+      : activeFileName
+        ? `${activeFileName} open in ${selectedEnv}`
+        : `Explorer on ${selectedEnv || "no environment"}, nothing open`,
+    data: {
+      env: selectedEnv,
+      project: selectedProject,
+      viewMode,
+      openFile: activeTab,
+      openTabs: [...openTabs.keys()].slice(0, 20),
+      entity: parsedEntity
+        ? { type: parsedEntity.entityType, name: parsedEntity.name, project: parsedEntity.projectName, path: activeTab, services: parsedEntity.services.length }
+        : null,
+    },
+    selection: {
+      services: parsedEntity && overviewService ? [overviewService] : [],
+      code: codeSel && codeSel.file === activeTab ? codeSel : null,
+    },
+  });
+  useAssistantAction(
+    "open_entity",
+    {
+      description: "Open an entity (and optionally one of its services' extracted code) in the explorer for the current environment.",
+      inputSchema: {
+        type: "object",
+        properties: { entity: { type: "string" }, type: { type: "string", description: "Collection, e.g. Things" }, service: { type: "string" } },
+        required: ["entity"],
+      },
+    },
+    async (args) => {
+      const a = args as { entity: string; type?: string; service?: string };
+      const found = await locateEntity({ env: selectedEnv, entity: a.entity, type: a.type, service: a.service });
+      if (!found.path && !found.code) throw new Error(found.error ?? `${a.entity} was not found`);
+      revealEntity(found, !!a.service);
+      return { opened: found.path ?? found.code };
+    }
+  );
+
   const treeLabel = lastExportDir
     ? lastExportDir.split("/").join(" / ")
     : "EXPLORER";
@@ -1340,6 +1455,9 @@ export function TwxExplorer({
                         onSelect={setActiveTab}
                         onClose={handleCloseTab}
                         onCloseAll={handleCloseAllTabs}
+                        dragItems={(paths) =>
+                          paths.map((p) => ({ path: `twx-entities/${p.replace(/\/$/, "")}`, isDir: p.endsWith("/") }))
+                        }
                         getDecoration={(path) => {
                           const badge = getEntryBadge(path.split("/").pop() ?? "", path);
                           return badge ? { text: badge.label, title: badge.title } : null;
@@ -1575,6 +1693,20 @@ export function TwxExplorer({
                               <Button
                                 size="xs"
                                 variant="outline"
+                                draggable
+                                onDragStart={(e) => setDragPins(e, [codePin(true)])}
+                                onClick={() => addPins([codePin(false)])}
+                                title="Add the open code (or your selection in it) to the assistant chat"
+                                className="h-5 gap-1 px-1.5 text-[10.5px] font-sans shrink-0"
+                              >
+                                <IconMessagePlus className="size-3" />
+                                Add to chat
+                              </Button>
+                            )}
+                            {activeTabState?.content != null && (
+                              <Button
+                                size="xs"
+                                variant="outline"
                                 onClick={() => {
                                   navigator.clipboard.writeText(activeTabState.content ?? "");
                                   toast.success(
@@ -1679,6 +1811,7 @@ export function TwxExplorer({
                                   initialService={activeTab === linkedPath ? link?.service : undefined}
                                   onOpenServiceCode={(service) => openServiceCode(activeTab, service)}
                                   onViewCodeClick={() => setViewMode("code")}
+                                  onServiceChange={setOverviewService}
                                   onReexport={selectedEnvRecord?.hasAppKey ? () => reexportTab(activeTab) : undefined}
                                 />
                               </div>
@@ -1691,6 +1824,7 @@ export function TwxExplorer({
                                     filePath={activeTab}
                                       initialService={activeTab === linkedPath ? link?.service : undefined}
                                     onOpenServiceCode={(service) => openServiceCode(activeTab, service)}
+                                    onServiceChange={setOverviewService}
                                     onReexport={selectedEnvRecord?.hasAppKey ? () => reexportTab(activeTab) : undefined}
                                   />
                                 </div>
@@ -1704,6 +1838,7 @@ export function TwxExplorer({
                                     onChange={(value) => handleEditorChange(activeTab, value)}
                                     onMount={(ed, monaco) => {
                                       ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActiveRef.current());
+                                      watchSelection(ed, activeTab);
                                     }}
                                     options={{
                                       minimap: { enabled: false },
@@ -1739,6 +1874,7 @@ export function TwxExplorer({
                                   }}
                                   onMount={(ed, monaco) => {
                                     editorRef.current = ed;
+                                    watchSelection(ed, activeTab);
                                     ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActiveRef.current());
                                     const jump = pendingJumpRef.current;
                                     if (jump) {

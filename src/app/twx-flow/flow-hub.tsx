@@ -3,6 +3,10 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAssistantContext } from "@/lib/assistant/context";
+import { addPins, type NewPin } from "@/lib/assistant/pins";
+import { setDragPins } from "@/lib/assistant/drag";
+import { clipText } from "@/lib/assistant/pin-utils";
 import {
   IconArrowRight,
   IconChevronRight,
@@ -15,6 +19,7 @@ import {
   IconFolderSymlink,
   IconLayoutGrid,
   IconLayoutList,
+  IconMessagePlus,
   IconPlus,
   IconSearch,
   IconSitemap,
@@ -96,6 +101,13 @@ export function FlowHub({
   const [sortBy, setSortBy] = useState<"updated" | "name" | "nodes">("updated");
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
+
+  useAssistantContext({
+    screen: "twx-flow",
+    title: "Service Flows",
+    summary: `${flows.length} flows in ${folders.length} folders`,
+    data: { flows: flows.slice(0, 80).map((f) => ({ id: f.id, name: f.name })), search, envFilter, selectedFolderId },
+  });
 
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -304,9 +316,21 @@ export function FlowHub({
     }
   };
 
+  const flowPin = (flow: FlowRow): NewPin => {
+    const { nodes, edges } = graphStats(flow.graph);
+    return {
+      kind: "flow",
+      label: flow.name,
+      screen: "twx-flow",
+      detail: `${nodes.length} nodes · ${edges.length} wires`,
+      content: clipText(flow.graph),
+    };
+  };
+
   const startCardDrag = (e: React.DragEvent, flow: FlowRow) => {
     setDragItem({ kind: "flow", id: flow.id });
-    e.dataTransfer.effectAllowed = "move";
+    setDragPins(e, [flowPin(flow)]); // lets the card also be dropped on the assistant
+    e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("text/plain", flow.id);
   };
 
@@ -534,6 +558,7 @@ export function FlowHub({
                     onDragStart={(e) => startCardDrag(e, flow)}
                     onDragEnd={() => setDragItem(null)}
                     onExport={() => handleExport(flow)}
+                    onAddToChat={() => addPins([flowPin(flow)])}
                     onDuplicate={async () => {
                       await runAction(duplicateFlow(flow.id), "Flow duplicated");
                     }}
@@ -549,6 +574,7 @@ export function FlowHub({
                 byId={byId}
                 folderOptions={folderOptions}
                 onExport={handleExport}
+                onAddToChat={(flow) => addPins([flowPin(flow)])}
                 onDuplicate={async (id) => {
                   await runAction(duplicateFlow(id), "Flow duplicated");
                 }}
@@ -876,11 +902,13 @@ function FlowActionsMenu({
   folderOptions,
   onMove,
   onExport,
+  onAddToChat,
   onDuplicate,
   flowId,
   flowName,
 }: MoveMenuProps & {
   onExport: () => void;
+  onAddToChat: () => void;
   onDuplicate: () => void;
   flowId: string;
   flowName: string;
@@ -894,6 +922,10 @@ function FlowActionsMenu({
         <IconDotsVertical className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52 text-xs">
+        <DropdownMenuItem onClick={onAddToChat}>
+          <IconMessagePlus className="size-3.5" />
+          Add to chat
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={onExport}>
           <IconDownload className="size-3.5" />
           Export JSON
@@ -960,6 +992,7 @@ function FlowCard({
   onDragStart,
   onDragEnd,
   onExport,
+  onAddToChat,
   onDuplicate,
   onMove,
 }: MoveMenuProps & {
@@ -968,6 +1001,7 @@ function FlowCard({
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
   onExport: () => void;
+  onAddToChat: () => void;
   onDuplicate: () => void;
 }) {
   const { nodes, edges } = graphStats(flow.graph);
@@ -1009,6 +1043,7 @@ function FlowCard({
             folderOptions={folderOptions}
             onMove={onMove}
             onExport={onExport}
+            onAddToChat={onAddToChat}
             onDuplicate={onDuplicate}
           />
         </div>
@@ -1062,6 +1097,7 @@ function FlowTable({
   byId,
   folderOptions,
   onExport,
+  onAddToChat,
   onDuplicate,
   onMove,
   onDragStart,
@@ -1071,6 +1107,7 @@ function FlowTable({
   byId: Map<string, FolderNode>;
   folderOptions: { id: string; label: string }[];
   onExport: (flow: FlowRow) => void;
+  onAddToChat: (flow: FlowRow) => void;
   onDuplicate: (id: string) => void;
   onMove: (id: string, folderId: string | null) => void;
   onDragStart: (e: React.DragEvent, flow: FlowRow) => void;
@@ -1127,6 +1164,7 @@ function FlowTable({
                     folderOptions={folderOptions}
                     onMove={(folderId) => onMove(flow.id, folderId)}
                     onExport={() => onExport(flow)}
+                    onAddToChat={() => onAddToChat(flow)}
                     onDuplicate={() => onDuplicate(flow.id)}
                   />
                 </td>

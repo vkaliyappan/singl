@@ -7,12 +7,14 @@ import {
   IconMoon,
   IconChevronRight,
   IconHome,
+  IconSparkles,
 } from "@tabler/icons-react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useTheme } from "@/components/providers"
 import { BrandMark, BrandWordmark } from "@/components/brand"
 import { findNavItem } from "@/components/nav-config"
 import { cn } from "@/lib/utils"
+import { toggleAssistant, useAssistantOpen } from "@/components/assistant/dock"
 
 function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
@@ -88,6 +90,7 @@ function WindowControls() {
 export function TitleBar() {
   const pathname = usePathname()
   const { resolvedTheme, setTheme } = useTheme()
+  const assistantOpen = useAssistantOpen()
   const match = findNavItem(pathname)
   const sectionTitle = match?.section.title ?? "Workspace"
   const pageTitle = match?.item.title ?? "singl"
@@ -124,6 +127,15 @@ export function TitleBar() {
       <div data-tauri-drag-region className="h-full flex-1" />
 
       <div className="flex items-center gap-0.5 pr-2">
+        <ChromeButton
+          aria-label="Toggle assistant"
+          aria-pressed={assistantOpen}
+          title="Assistant (Ctrl+J)"
+          className={cn(assistantOpen && "bg-sidebar-accent text-primary")}
+          onClick={toggleAssistant}
+        >
+          <IconSparkles />
+        </ChromeButton>
         <ChromeButton
           aria-label={resolvedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
           title={resolvedTheme === "dark" ? "Light theme" : "Dark theme"}

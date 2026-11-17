@@ -6,6 +6,7 @@
 // resolve against the workspace folder.
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useAssistantContext } from "@/lib/assistant/context";
 import {
   IconCloudDownload,
   IconArchive,
@@ -19,6 +20,7 @@ import {
   IconArrowRight,
   IconClock,
   IconTerminal2,
+  IconMessagePlus,
   IconLayersLinked,
   IconCircleCheck,
   IconSparkles,
@@ -63,6 +65,7 @@ import {
 } from "@/components/ui/dialog";
 import { errorMessage } from "@/lib/settings";
 import { appendJobLog, clearJob, isJobRunning, runJob, useJob, type JobLine } from "@/lib/background-jobs";
+import { addPins, usePinnables, type NewPin } from "@/lib/assistant/pins";
 import {
   backupDeploymentFiles,
   bundleProjects as runBundle,
@@ -80,6 +83,7 @@ import {
   type DeploymentExtractResult,
   type DeploymentUploadResult,
 } from "@/lib/twx";
+import { PIN_LIMIT } from "@/lib/assistant/pin-utils";
 
 /** A project as the deployment pipeline sees it, configured in Settings. */
 export interface DeployProject {
@@ -116,6 +120,9 @@ const ORIGIN_RE = /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?$/;
 function urlKey(relPath: string, origin: string): string {
   return `${relPath}|${origin}`;
 }
+
+// ── "Add to chat" helpers ────────────────────────────────────────────────────
+
 
 interface LogEntry {
   id: string;
@@ -289,6 +296,20 @@ export function DeployExplorer({
 
   // Console tools state
   const [searchQuery, setSearchQuery] = useState("");
+
+  useAssistantContext({
+    screen: "deploy",
+    title: "Deploy",
+    summary: `${activeTab} stage open`,
+    data: {
+      stage: activeTab,
+      export: { env: exportEnv, project: exportProject, dryRun: exportDryRun },
+      extract: { project: extractProject, dryRun: extractDryRun },
+      backup: { env: backupEnv, project: backupProject, dryRun: backupDryRun },
+      upload: { env: uploadEnv, source: uploadSource, dryRun: uploadDryRun },
+      bundle: { project: bundleProject, dryRun: bundleDryRun },
+    },
+  });
   const [autoScroll] = useState(true);
   const [copiedLog, setCopiedLog] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -553,6 +574,64 @@ export function DeployExplorer({
   // Clear current active logs
   const handleClearLogs = useCallback(() => clearJob(stageJob(activeTab)), [activeTab]);
 
+  // ── Add to chat: the pipeline settings (plus configs plan) and the console log
+  const planPin = (): NewPin => ({
+    kind: "deploy",
+    label: "Deploy plan",
+    screen: "deploy",
+    detail: `${activeTab} stage open`,
+    content: JSON.stringify(
+      {
+        stage: activeTab,
+        export: { env: exportEnv, parent: exportParent, suffix: exportSuffix, project: exportProject, dryRun: exportDryRun },
+        extract: { input: extractInput, output: extractOutput, project: extractProject, dryRun: extractDryRun },
+        configs: {
+          source: configSource,
+          dest: configDest,
+          inPlace: configInPlace,
+          cleanDest: configCleanDest,
+          dryRun: configDryRun,
+          connectorChanges: configPlan.map((p) => ({
+            connector: p.connector.relPath,
+            urlChanges: p.urlChanges.map((u) => ({ from: u.from, to: u.to })),
+            usernameChange: p.usernameChange,
+          })),
+        },
+        bundle: { src: bundleSrc, dest: bundleDest, project: bundleProject, dryRun: bundleDryRun },
+        backup: { env: backupEnv, parent: backupParent, suffix: backupSuffix, project: backupProject, zip: backupZip, dryRun: backupDryRun },
+        upload: { env: uploadEnv, source: uploadSource, dir: uploadDir, extract: uploadExtract, subfolder: uploadSubfolder, deleteZip: uploadDeleteZip, dryRun: uploadDryRun },
+      },
+      null,
+      2
+    ),
+  });
+
+  const logPin = (): NewPin | null => {
+    if (!currentLogs.length) return null;
+    // The tail is the part that matters: the end of a run, errors included.
+    const text = currentLogs.map((l) => `[${l.timestamp}] ${l.text}`).join("\n");
+    return {
+      kind: "log",
+      label: `Log · ${activeTab}`,
+      screen: "deploy",
+      detail: `${currentLogs.length} lines`,
+      content: text.length > PIN_LIMIT ? `… (${text.length - PIN_LIMIT} earlier characters)\n${text.slice(-PIN_LIMIT)}` : text,
+    };
+  };
+
+  const pinPlan = () => addPins([planPin()]);
+  const pinLog = () => {
+    const p = logPin();
+    if (p) addPins([p]);
+  };
+
+  usePinnables([
+    { kind: "deploy", label: "Deploy plan", detail: `${activeTab} stage open`, content: () => planPin().content },
+    ...(currentLogs.length
+      ? [{ kind: "log", label: `Log · ${activeTab}`, detail: `${currentLogs.length} lines`, content: () => logPin()?.content ?? "" }]
+      : []),
+  ]);
+
   // Pipeline Handoff Handlers
   const handleHandoffToExtract = useCallback((folderPath?: string) => {
     if (folderPath) {
@@ -655,6 +734,16 @@ export function DeployExplorer({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                variant="outline"
+                size="xs"
+                className="h-6 w-6 p-0"
+                onClick={pinPlan}
+                title="Add to chat"
+                aria-label="Add deploy plan to chat"
+              >
+                <IconMessagePlus className="size-3.5" />
+              </Button>
               <Badge variant="secondary" className="text-[10px] font-normal py-0 h-5">
                 {projects.length} projects
               </Badge>
@@ -2440,6 +2529,20 @@ export function DeployExplorer({
                           className="h-5 w-24 sm:w-28 pl-5 pr-1.5 rounded text-[10px] bg-background border border-border/60 focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       </div>
+                    )}
+
+                    {/* Add log to chat */}
+                    {currentLogs.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={pinLog}
+                        title="Add to chat"
+                        aria-label="Add log to chat"
+                      >
+                        <IconMessagePlus className="size-3" />
+                      </Button>
                     )}
 
                     {/* Copy logs */}

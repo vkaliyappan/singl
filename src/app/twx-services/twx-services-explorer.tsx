@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context";
+import { addPins, usePinnables, type NewPin, type Pinnable } from "@/lib/assistant/pins";
+import { setDragPins } from "@/lib/assistant/drag";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/components/providers";
 import {
@@ -26,6 +29,7 @@ import {
   IconClock,
   IconSparkles,
   IconServer,
+  IconMessagePlus,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +97,7 @@ import type { ServiceDef, ServiceParam, EntitySearchResult } from "@/lib/twx/typ
 import type { TwxServiceLink } from "@/lib/twx/links";
 import { OutputValuePicker, infotableColumns } from "./output-value-picker";
 import { CodeSnippetDialog } from "./code-snippet-dialog";
+import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -193,6 +198,80 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+// ── "Add to chat" helpers ────────────────────────────────────────────────────
+
+
+
+function servicePinContent(def: ServiceDef, entity: { entityType: string; entityName: string } | null, env: string): string {
+  return JSON.stringify(
+    {
+      environment: env,
+      entityType: entity?.entityType,
+      entityName: entity?.entityName,
+      name: def.name,
+      description: def.description,
+      category: def.category,
+      parameters: [...(def.parameterDefinitions ?? [])]
+        .sort((a, b) => a.ordinal - b.ordinal)
+        .map((p) => ({
+          name: p.name,
+          baseType: p.baseType,
+          description: p.description || undefined,
+          required: p.aspects?.isRequired || undefined,
+          defaultValue: p.aspects?.defaultValue || undefined,
+          dataShape: p.aspects?.dataShape || undefined,
+        })),
+      result: def.resultType
+        ? { baseType: def.resultType.baseType, dataShape: def.resultType.aspects?.dataShape || undefined, description: def.resultType.description || undefined }
+        : undefined,
+    },
+    null,
+    2
+  );
+}
+
+/** Result as pin text: infotables become columns + rows (selected, else first 200), trimmed to ~40 KB. */
+function resultPin(
+  result: unknown,
+  outputType: string,
+  selectedRows: Record<string, unknown>[]
+): { content: string; detail: string } {
+  if (outputType === "INFOTABLE" && result && typeof result === "object") {
+    const { rows, columnKeys, dataShape } = infotableColumns(result);
+    const defs = (dataShape as { fieldDefinitions?: Record<string, { name: string; baseType?: string }> } | undefined)?.fieldDefinitions;
+    const columns = columnKeys.map((name) => ({ name, baseType: defs?.[name]?.baseType }));
+    const chosen = selectedRows.length > 0 ? selectedRows : rows.slice(0, 200);
+    const kept: Record<string, unknown>[] = [];
+    let size = JSON.stringify(columns).length;
+    for (const r of chosen) {
+      const n = JSON.stringify(r).length + 2;
+      if (size + n > PIN_LIMIT) break;
+      size += n;
+      kept.push(r);
+    }
+    const scope = selectedRows.length > 0 ? `${selectedRows.length} selected rows` : `first ${chosen.length} rows`;
+    const out: Record<string, unknown> = { columns, rowCount: rows.length, rowsIncluded: scope, rows: kept };
+    const notIncluded = (selectedRows.length > 0 ? selectedRows.length : rows.length) - kept.length;
+    if (notIncluded > 0) out.note = `${notIncluded} more rows not included`;
+    return {
+      content: JSON.stringify(out),
+      detail: `${columnKeys.length} cols · ${selectedRows.length > 0 ? `${selectedRows.length} of ${rows.length}` : rows.length} rows`,
+    };
+  }
+  const text = typeof result === "string" ? result : (JSON.stringify(result, null, 2) ?? "");
+  return { content: clipText(text, PIN_LIMIT), detail: formatBytes(text.length) };
+}
+
+/** Compact result for the assistant's screen context: columns + first 5 rows, ~3000 chars. */
+function resultSummary(result: unknown, outputType: string): string {
+  if (result == null) return "";
+  if (outputType === "INFOTABLE" && typeof result === "object") {
+    const { rows, columnKeys } = infotableColumns(result);
+    return clipText(JSON.stringify({ columns: columnKeys, rowCount: rows.length, firstRows: rows.slice(0, 5) }), 3000);
+  }
+  return clipText(typeof result === "string" ? result : JSON.stringify(result), 3000);
 }
 
 function coerceInput(value: string, baseType: string): unknown {
@@ -522,7 +601,7 @@ function ServiceInputField({
 
 // ── Output InfoTable Inspector View ──────────────────────────────────────────
 
-function InfoTableView({ data }: { data: unknown }) {
+function InfoTableView({ data, onSelectedRows }: { data: unknown; onSelectedRows?: (rows: Record<string, unknown>[]) => void }) {
   const parsed =
     typeof data === "string"
       ? (() => { try { return JSON.parse(data); } catch { return null; } })()
@@ -550,7 +629,7 @@ function InfoTableView({ data }: { data: unknown }) {
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-hidden">
-      <DataTable columns={columns} data={rows} filterPlaceholder="Search returned records…" />
+      <DataTable columns={columns} data={rows} filterPlaceholder="Search returned records…" enableRowSelection={!!onSelectedRows} onSelectedRowsChange={onSelectedRows} />
     </div>
   );
 }
@@ -775,6 +854,24 @@ export function TwxServicesExplorer({
     [serviceDefs]
   );
 
+  // Multi-select in the service list (Ctrl/Shift click); empty = just selectedService.
+  const [multiSel, setMultiSel] = useState<string[]>([]);
+  const anchorRef = useRef<string | null>(null);
+  const [svcMenu, setSvcMenu] = useState<{ x: number; y: number; names: string[] } | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMultiSel([]);
+  }, [serviceDefs]);
+
+  const visibleServices = useMemo(
+    () =>
+      serviceDefs
+        .filter((d) => !serviceFilter || d.name.toLowerCase().includes(serviceFilter.toLowerCase()))
+        .filter((d) => !serviceCategoryFilter || (d.category || "Uncategorized") === serviceCategoryFilter)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [serviceDefs, serviceFilter, serviceCategoryFilter]
+  );
+
   // ── Input State & Form vs Raw JSON Mode
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [inputMode, setInputMode] = useState<"form" | "raw">("form");
@@ -783,7 +880,32 @@ export function TwxServicesExplorer({
   const [execLoading, setExecLoading] = useState(false);
   const [execError, setExecError] = useState<string | null>(null);
   const [execResult, setExecResult] = useState<unknown>(null);
+  const [resultRows, setResultRows] = useState<Record<string, unknown>[]>([]);
   const [execOutputType, setExecOutputType] = useState("");
+
+  const resultSummaryText = useMemo(() => resultSummary(execResult, execOutputType), [execResult, execOutputType]);
+  useAssistantContext({
+    screen: "twx-services",
+    title: "Services",
+    summary: activeItem
+      ? `${activeItem.entityType}:${activeItem.entityName}${selectedService ? ` › ${selectedService}` : ""} on ${selectedEnv}`
+      : `Service runner on ${selectedEnv || "no environment"}`,
+    data: {
+      env: selectedEnv,
+      searchType,
+      workingSet: workingSet.slice(0, 20),
+      inputMode,
+      inputs: JSON.stringify(inputValues).slice(0, 2000),
+      running: execLoading,
+      error: execError,
+      hasResult: execResult != null,
+      result: resultSummaryText,
+    },
+    selection: {
+      entity: activeItem ? [`${activeItem.entityType}:${activeItem.entityName}`] : [],
+      service: selectedService ? [selectedService] : [],
+    },
+  });
   const [execElapsedMs, setExecElapsedMs] = useState<number | null>(null);
   const [execLiveElapsedMs, setExecLiveElapsedMs] = useState(0);
   // The running call: its id (to cancel it in the backend) and whether Stop was pressed.
@@ -844,11 +966,12 @@ export function TwxServicesExplorer({
     toast.info("All parameters reset");
   }, [sortedParams]);
 
-  const handleRun = async () => {
+  const handleRun = async (): Promise<{ ok: boolean; summary: string }> => {
     if (!activeItem || !selectedService || !selectedEnv) {
       toast.error("Please select an entity and service first");
-      return;
+      return { ok: false, summary: "Select an entity and a service first." };
     }
+    setResultRows([]);
     const controller = { id: crypto.randomUUID(), aborted: false };
     execAbortRef.current = controller;
     setExecLoading(true);
@@ -873,7 +996,7 @@ export function TwxServicesExplorer({
         inputs,
         requestId: controller.id,
       });
-      if (controller.aborted) return;
+      if (controller.aborted) return { ok: false, summary: "Cancelled." };
 
       setExecResult(result);
       const outputBaseType = currentServiceDef?.resultType?.baseType ?? "";
@@ -900,6 +1023,7 @@ export function TwxServicesExplorer({
         ...prev.slice(0, 19),
       ]);
       toast.success(`Executed in ${formatDuration(duration)}`);
+      return { ok: true, summary: resultSummary(result, outputBaseType) || "Completed with no result." };
     } catch (e) {
       if (!controller.aborted) {
         const errorMsg = errorMessage(e);
@@ -925,7 +1049,9 @@ export function TwxServicesExplorer({
           ...prev.slice(0, 19),
         ]);
         toast.error("Execution failed");
+        return { ok: false, summary: errorMsg };
       }
+      return { ok: false, summary: "Cancelled." };
     } finally {
       if (execAbortRef.current === controller) {
         execAbortRef.current = null;
@@ -1179,6 +1305,181 @@ export function TwxServicesExplorer({
     });
     return res;
   }, [sortedParams, inputValues]);
+
+  // ── Add to chat: pins, pinnables (@ menu) and assistant actions
+  const pinTargetNames = multiSel.length > 0 ? multiSel : selectedService ? [selectedService] : [];
+
+  const servicePins = useCallback(
+    (names: string[]): NewPin[] =>
+      names.map((name) => {
+        const def = serviceDefs.find((d) => d.name === name);
+        const entityLabel = activeItem?.entityName ?? "";
+        return {
+          kind: "service",
+          label: entityLabel ? `${entityLabel}.${name}` : name,
+          screen: "twx-services",
+          detail: def ? `${def.parameterDefinitions?.length ?? 0} params → ${def.resultType?.baseType ?? "VOID"}` : undefined,
+          content: def
+            ? servicePinContent(def, activeItem, selectedEnv)
+            : JSON.stringify({ environment: selectedEnv, entityType: activeItem?.entityType, entityName: activeItem?.entityName, name }),
+        };
+      }),
+    [serviceDefs, activeItem, selectedEnv]
+  );
+
+  const inputsPin = useCallback(
+    (): NewPin => ({
+      kind: "inputs",
+      label: `Inputs · ${selectedService}`,
+      screen: "twx-services",
+      detail: `${Object.keys(currentPayloadObj).length} values`,
+      content: JSON.stringify(
+        { environment: selectedEnv, entity: activeItem ? `${activeItem.entityType}:${activeItem.entityName}` : undefined, service: selectedService, inputs: currentPayloadObj },
+        null,
+        2
+      ),
+    }),
+    [selectedService, currentPayloadObj, selectedEnv, activeItem]
+  );
+
+  const resultPins = useCallback((): NewPin | null => {
+    if (execError) {
+      return { kind: "error", label: `Error · ${selectedService}`, screen: "twx-services", content: clipText(execError, PIN_LIMIT) };
+    }
+    if (execResult === null) return null;
+    const { content, detail } = resultPin(execResult, execOutputType, resultRows);
+    return { kind: "result", label: `Result · ${selectedService}`, screen: "twx-services", detail, content };
+  }, [execError, execResult, execOutputType, resultRows, selectedService]);
+
+  const pinInputs = () => addPins([inputsPin()]);
+  const pinResult = () => {
+    const p = resultPins();
+    if (p) addPins([p]);
+  };
+
+  const pinnables: Pinnable[] = [];
+  for (const name of pinTargetNames.slice(0, 10)) {
+    pinnables.push({
+      kind: "service",
+      label: activeItem ? `${activeItem.entityName}.${name}` : name,
+      detail: "service definition",
+      content: () => servicePins([name])[0].content,
+    });
+  }
+  if (selectedService) {
+    pinnables.push({ kind: "inputs", label: `Inputs · ${selectedService}`, detail: "current input values", content: () => inputsPin().content });
+    if (execError || execResult !== null) {
+      pinnables.push({
+        kind: execError ? "error" : "result",
+        label: `${execError ? "Error" : "Result"} · ${selectedService}`,
+        detail: execError ? "last run failed" : "last result",
+        content: () => resultPins()?.content ?? "",
+      });
+    }
+  }
+  usePinnables(pinnables);
+
+  useAssistantAction(
+    "select_service",
+    {
+      description: "Select a service in the Services screen's list for the active entity (open the entity first with add_to_working_set).",
+      inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    },
+    async (args) => {
+      const name = String((args as { name?: string }).name ?? "");
+      if (!serviceDefs.some((d) => d.name === name)) throw new Error(`The active entity has no service "${name}".`);
+      anchorRef.current = name;
+      setMultiSel([]);
+      setSelectedService(name);
+      await new Promise((r) => setTimeout(r, 150)); // let the default inputs settle
+      return { selected: name };
+    }
+  );
+  useAssistantAction(
+    "set_inputs",
+    {
+      description: "Merge values into the current service's inputs. Values are strings, or objects/arrays for JSON and INFOTABLE parameters.",
+      inputSchema: { type: "object", properties: { values: { type: "object" } }, required: ["values"] },
+    },
+    async (args) => {
+      const values = (args as { values?: Record<string, unknown> }).values;
+      if (!values || typeof values !== "object") throw new Error("values must be an object");
+      const strMap: Record<string, string> = {};
+      for (const [k, v] of Object.entries(values)) strMap[k] = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+      setInputValues((prev) => ({ ...prev, ...strMap }));
+      return { set: Object.keys(strMap) };
+    }
+  );
+  useAssistantAction(
+    "run_service",
+    {
+      description: "Run the currently selected service with the current inputs on the selected environment. Returns a short result summary.",
+      risk: "destructive",
+    },
+    async () => {
+      const r = await handleRun();
+      if (!r.ok) throw new Error(r.summary);
+      return { result: r.summary };
+    }
+  );
+  useAssistantAction(
+    "add_to_working_set",
+    {
+      description: "Add an entity to the working set and open it so its services load.",
+      inputSchema: {
+        type: "object",
+        properties: { entity: { type: "string" }, type: { type: "string", description: "Collection, e.g. Things (default Things)" } },
+        required: ["entity"],
+      },
+    },
+    async (args) => {
+      const a = args as { entity?: string; type?: string };
+      if (!a.entity) throw new Error("entity is required");
+      const item = { entityType: a.type || "Things", entityName: a.entity };
+      addToWorkingSet(item);
+      activateItem(item);
+      await new Promise((r) => setTimeout(r, 300));
+      return { opened: `${item.entityType}:${item.entityName}` };
+    }
+  );
+
+  const onServiceClick = (e: React.MouseEvent, name: string) => {
+    if (e.ctrlKey || e.metaKey) {
+      setMultiSel((cur) => {
+        const base = cur.length ? cur : selectedService ? [selectedService] : [];
+        return base.includes(name) ? base.filter((x) => x !== name) : [...base, name];
+      });
+      anchorRef.current = name;
+      return;
+    }
+    if (e.shiftKey) {
+      const names = visibleServices.map((d) => d.name);
+      const a = names.indexOf(anchorRef.current ?? selectedService);
+      const b = names.indexOf(name);
+      if (a >= 0 && b >= 0) {
+        setMultiSel(names.slice(Math.min(a, b), Math.max(a, b) + 1));
+        return;
+      }
+    }
+    anchorRef.current = name;
+    setMultiSel([]);
+    setSelectedService(name);
+  };
+
+  useEffect(() => {
+    if (!svcMenu) return;
+    const close = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest("[data-svc-menu]")) return;
+      setSvcMenu(null);
+    };
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setSvcMenu(null);
+    window.addEventListener("pointerdown", close, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [svcMenu]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background text-foreground">
@@ -1619,19 +1920,25 @@ export function TwxServicesExplorer({
 
                       {/* Services List */}
                       <div ref={servicesListRef} className="flex-1 overflow-y-auto flex flex-col gap-1 pr-1">
-                        {serviceDefs
-                          .filter((d) => !serviceFilter || d.name.toLowerCase().includes(serviceFilter.toLowerCase()))
-                          .filter((d) => !serviceCategoryFilter || (d.category || "Uncategorized") === serviceCategoryFilter)
-                          .sort((a, b) => a.name.localeCompare(b.name))
+                        {visibleServices
                           .map((d) => {
-                            const isSelected = selectedService === d.name;
+                            const isSelected = multiSel.length > 0 ? multiSel.includes(d.name) : selectedService === d.name;
                             const returnType = d.resultType?.baseType ?? "VOID";
                             const paramCount = d.parameterDefinitions?.length ?? 0;
                             return (
                               <button
                                 key={d.name}
                                 data-service={d.name}
-                                onClick={() => setSelectedService(d.name)}
+                                onClick={(e) => onServiceClick(e, d.name)}
+                                draggable
+                                onDragStart={(e) => {
+                                  const names = multiSel.includes(d.name) ? multiSel : [d.name];
+                                  setDragPins(e, servicePins(names));
+                                }}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  setSvcMenu({ x: e.clientX, y: e.clientY, names: multiSel.includes(d.name) ? multiSel : [d.name] });
+                                }}
                                 className={cn(
                                   "flex flex-col items-start px-2.5 py-2 rounded-lg text-left cursor-pointer border transition-all group",
                                   isSelected
@@ -1662,6 +1969,24 @@ export function TwxServicesExplorer({
                           })}
                         {serviceDefs.length === 0 && (
                           <p className="text-xs text-muted-foreground text-center py-6">No services available.</p>
+                        )}
+                        {svcMenu && (
+                          <div
+                            data-svc-menu
+                            className="fixed z-50 min-w-40 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+                            style={{ left: svcMenu.x, top: svcMenu.y }}
+                          >
+                            <button
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                              onClick={() => {
+                                addPins(servicePins(svcMenu.names));
+                                setSvcMenu(null);
+                              }}
+                            >
+                              <IconMessagePlus className="size-3.5" />
+                              Add {svcMenu.names.length > 1 ? `${svcMenu.names.length} services` : "service"} to chat
+                            </button>
+                          </div>
                         )}
                       </div>
                     </>
@@ -1920,6 +2245,16 @@ export function TwxServicesExplorer({
                     </div>
 
                     <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-7 text-muted-foreground hover:text-foreground"
+                      title="Add inputs to chat"
+                      aria-label="Add inputs to chat"
+                      onClick={pinInputs}
+                    >
+                      <IconMessagePlus className="size-3.5" />
+                    </Button>
+                    <Button
                       size="sm"
                       variant="ghost"
                       className="h-7 text-xs px-2 text-muted-foreground hover:text-foreground"
@@ -2046,8 +2381,19 @@ export function TwxServicesExplorer({
                   </div>
 
                   {/* Response Actions */}
-                  {execResult !== null && (
+                  {(execResult !== null || execError) && (
                     <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1.5 px-2.5"
+                        title={execError ? "Add error to chat" : "Add result to chat (selected rows if any)"}
+                        onClick={pinResult}
+                      >
+                        <IconMessagePlus className="size-3.5" />
+                        <span className="hidden sm:inline">Add to chat</span>
+                      </Button>
+                      {execResult !== null && (<>
                       {isInfoTable && (
                         <Button
                           size="sm"
@@ -2100,6 +2446,7 @@ export function TwxServicesExplorer({
                         <IconDownload className="size-3.5" />
                         <span className="hidden sm:inline">Download</span>
                       </Button>
+                      </>)}
                     </div>
                   )}
                 </div>
@@ -2151,7 +2498,7 @@ export function TwxServicesExplorer({
 
                       {isInfoTable && (
                         <TabsContent value="table" className="flex-1 min-h-0 m-0 p-0 overflow-hidden bg-background">
-                          <InfoTableView data={execResult} />
+                          <InfoTableView data={execResult} onSelectedRows={setResultRows} />
                         </TabsContent>
                       )}
 

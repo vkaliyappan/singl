@@ -1,6 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { addPins, usePinnables, type NewPin, type Pinnable } from "@/lib/assistant/pins";
+import { setDragPins } from "@/lib/assistant/drag";
+import { PIN_LIMIT, clipJson, clipText } from "@/lib/assistant/pin-utils";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/components/providers";
 import {
@@ -18,6 +21,7 @@ import {
   IconDatabase,
   IconTag,
   IconHierarchy,
+  IconMessagePlus,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +63,8 @@ interface EntityOverviewProps {
   /** Opens the service's extracted script from the Code folder. */
   onOpenServiceCode?: (service: string) => void;
   onViewCodeClick?: () => void;
+  /** Reports the service shown on the Services tab (for the assistant). */
+  onServiceChange?: (service: string | null) => void;
   /** Exports this entity again from ThingWorx over its file. */
   onReexport?: () => Promise<void>;
 }
@@ -69,6 +75,7 @@ export function EntityOverview({
   initialService,
   onOpenServiceCode,
   onViewCodeClick,
+  onServiceChange,
   onReexport,
 }: EntityOverviewProps) {
   const [reexporting, setReexporting] = useState(false);
@@ -114,6 +121,18 @@ export function EntityOverview({
   const [propertySearch, setPropertySearch] = useState("");
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string>("__all__");
 
+  // Multi-selection for "Add to chat" (Ctrl/Shift click), plus the right-click menu.
+  const [svcSel, setSvcSel] = useState<string[]>([]);
+  const [propSel, setPropSel] = useState<string[]>([]);
+  const svcAnchor = useRef<string | null>(null);
+  const propAnchor = useRef<string | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    kind: "service" | "property" | "entity";
+    names: string[];
+  } | null>(null);
+
   const selectedService: ParsedService | null = useMemo(() => {
     if (selectedServiceName) {
       const match = entity.services.find((s) => s.name === selectedServiceName);
@@ -121,6 +140,11 @@ export function EntityOverview({
     }
     return entity.services.length > 0 ? entity.services[0] : null;
   }, [entity.services, selectedServiceName]);
+
+  const reportedService = selectedService?.name ?? null;
+  useEffect(() => {
+    onServiceChange?.(reportedService);
+  }, [reportedService, onServiceChange]);
 
   // Unique categories for services
   const serviceCategories = useMemo(() => {
@@ -169,10 +193,182 @@ export function EntityOverview({
 
   const badgeInfo = getEntityTypeBadge(entity.entityType);
 
+  // ── Add to chat ───────────────────────────────────────────────────────────
+  const entityLabel = `${entity.entityType}:${entity.name}`;
+
+  const entityPin = useCallback(
+    (): NewPin => ({
+      kind: "entity",
+      label: entityLabel,
+      screen: "twx-entities",
+      detail: `${entity.services.length} services · ${entity.properties.length} properties`,
+      content: clipJson({
+        type: entity.entityType,
+        name: entity.name,
+        project: entity.projectName,
+        description: entity.description,
+        baseTemplate: entity.baseThingTemplate,
+        implementedShapes: entity.implementedShapes,
+        tags: entity.tags,
+        file: filePath,
+        services: entity.services.map((s) => s.name),
+        properties: entity.properties.map((p) => `${p.name}: ${p.baseType}`),
+        subscriptions: entity.subscriptions.map((s) => `${s.name} (${s.eventName})`),
+      }),
+    }),
+    [entity, entityLabel, filePath]
+  );
+
+  const servicePins = useCallback(
+    (names: string[]): NewPin[] =>
+      names.flatMap((name) => {
+        const s = entity.services.find((x) => x.name === name);
+        if (!s) return [];
+        return [
+          {
+            kind: "service",
+            label: `${entity.name}.${s.name}`,
+            screen: "twx-entities",
+            detail: `${s.parameters.length} params → ${s.resultType.baseType}${s.script ? "" : " · no script"}`,
+            content: clipJson(
+              {
+                entity: entityLabel,
+                project: entity.projectName,
+                name: s.name,
+                description: s.description,
+                category: s.category,
+                parameters: s.parameters,
+                resultType: s.resultType,
+                handler: s.handlerName,
+                isAsync: s.isAsync,
+                code: s.script ? clipText(s.script, 30 * 1024) : undefined,
+              },
+              PIN_LIMIT
+            ),
+          },
+        ];
+      }),
+    [entity, entityLabel]
+  );
+
+  const propertyPins = useCallback(
+    (names: string[]): NewPin[] =>
+      names.flatMap((name) => {
+        const p = entity.properties.find((x) => x.name === name);
+        if (!p) return [];
+        return [
+          {
+            kind: "property",
+            label: `${entity.name}.${p.name}`,
+            screen: "twx-entities",
+            detail: p.baseType,
+            content: clipJson({
+              entity: entityLabel,
+              name: p.name,
+              baseType: p.baseType,
+              dataShape: p.dataShape,
+              description: p.description,
+              value: p.defaultValue,
+              persistent: p.isPersistent,
+              logged: p.isLogged,
+              readOnly: p.isReadOnly,
+              aspects: p.aspects,
+            }),
+          },
+        ];
+      }),
+    [entity, entityLabel]
+  );
+
+  const pinServiceNames = svcSel.length > 0 ? svcSel : selectedService ? [selectedService.name] : [];
+  const pinPropNames = propSel.length > 0 ? propSel : [];
+
+  const pinnables: Pinnable[] = [
+    { kind: "entity", label: entityLabel, detail: "entity summary", content: () => entityPin().content },
+  ];
+  for (const name of pinServiceNames.slice(0, 10)) {
+    pinnables.push({
+      kind: "service",
+      label: `${entity.name}.${name}`,
+      detail: "service definition and code",
+      content: () => servicePins([name])[0]?.content ?? "",
+    });
+  }
+  for (const name of pinPropNames.slice(0, 10)) {
+    pinnables.push({
+      kind: "property",
+      label: `${entity.name}.${name}`,
+      detail: "property",
+      content: () => propertyPins([name])[0]?.content ?? "",
+    });
+  }
+  usePinnables(pinnables);
+
+  /** Ctrl toggles, Shift selects a range from the anchor, plain click selects one. */
+  const pickRow = (
+    e: React.MouseEvent,
+    name: string,
+    list: string[],
+    sel: string[],
+    setSel: (v: string[]) => void,
+    anchor: React.MutableRefObject<string | null>,
+    single: (n: string) => void
+  ) => {
+    if (e.shiftKey && anchor.current) {
+      const a = list.indexOf(anchor.current);
+      const b = list.indexOf(name);
+      if (a >= 0 && b >= 0) {
+        setSel(list.slice(Math.min(a, b), Math.max(a, b) + 1));
+        return;
+      }
+    }
+    if (e.ctrlKey || e.metaKey) {
+      const base = sel.length > 0 ? sel : anchor.current ? [anchor.current] : [];
+      const next = base.includes(name) ? base.filter((n) => n !== name) : [...base, name];
+      anchor.current = name;
+      setSel(next);
+      return;
+    }
+    anchor.current = name;
+    setSel([]);
+    single(name);
+  };
+
+  // Right-click menu; closes on any click elsewhere, Escape or scroll.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  const menuPins = (m: NonNullable<typeof menu>) =>
+    m.kind === "service" ? servicePins(m.names) : m.kind === "property" ? propertyPins(m.names) : [entityPin()];
+
+  const addToChatBtn = (onClick: () => void, label = "Add to chat", title = "Add to the assistant chat") => (
+    <Button size="xs" variant="outline" onClick={onClick} className="h-7 text-xs gap-1" title={title}>
+      <IconMessagePlus className="size-3" />
+      {label}
+    </Button>
+  );
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* ── Entity Header Banner ────────────────────────────────────────────── */}
-      <div className="shrink-0 border-b bg-card/60 px-6 py-4">
+      <div
+        className="shrink-0 border-b bg-card/60 px-6 py-4"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY, kind: "entity", names: [entity.name] });
+        }}
+      >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5 min-w-0">
             {/* Entity Badge Icon */}
@@ -243,6 +439,18 @@ export function EntityOverview({
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              draggable
+              onDragStart={(e) => setDragPins(e, [entityPin()])}
+              onClick={() => addPins([entityPin()])}
+              title="Add this entity to the assistant chat (or drag it onto the assistant)"
+              className="h-8 gap-1.5 text-xs"
+            >
+              <IconMessagePlus className="size-3.5" />
+              Add to chat
+            </Button>
             {onViewCodeClick && (
               <Button
                 size="sm"
@@ -525,11 +733,35 @@ export function EntityOverview({
               <ScrollArea className="flex-1 min-h-0">
                 <div className="p-2 space-y-1">
                   {filteredServices.map((s) => {
-                    const isSelected = selectedService?.name === s.name;
+                    const isSelected =
+                      svcSel.length > 0 ? svcSel.includes(s.name) : selectedService?.name === s.name;
                     return (
                       <div
                         key={s.name}
-                        onClick={() => setSelectedServiceName(s.name)}
+                        onClick={(e) =>
+                          pickRow(
+                            e,
+                            s.name,
+                            filteredServices.map((x) => x.name),
+                            svcSel.length > 0 ? svcSel : selectedService ? [selectedService.name] : [],
+                            setSvcSel,
+                            svcAnchor,
+                            setSelectedServiceName
+                          )
+                        }
+                        draggable
+                        onDragStart={(e) =>
+                          setDragPins(e, servicePins(svcSel.includes(s.name) ? svcSel : [s.name]))
+                        }
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            kind: "service",
+                            names: svcSel.includes(s.name) ? svcSel : [s.name],
+                          });
+                        }}
                         role="button"
                         tabIndex={0}
                         className={cn(
@@ -603,6 +835,11 @@ export function EntityOverview({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
+                      {addToChatBtn(
+                        () => addPins(servicePins(pinServiceNames)),
+                        pinServiceNames.length > 1 ? `Add ${pinServiceNames.length} to chat` : "Add to chat",
+                        "Add the service (definition and code) to the assistant chat. Ctrl/Shift-click services in the list to pick several."
+                      )}
                       {selectedService.script && (
                         <Button
                           size="xs"
@@ -750,6 +987,18 @@ export function EntityOverview({
             <span className="text-xs text-muted-foreground ml-auto">
               Showing {filteredProperties.length} of {entity.properties.length}
             </span>
+            {addToChatBtn(
+              () =>
+                addPins(
+                  propertyPins(
+                    pinPropNames.length > 0
+                      ? pinPropNames
+                      : filteredProperties.slice(0, 50).map((p) => p.name)
+                  )
+                ),
+              pinPropNames.length > 0 ? `Add ${pinPropNames.length} to chat` : "Add shown to chat",
+              "Add the selected rows (Ctrl/Shift-click), or the first 50 shown, to the assistant chat"
+            )}
           </div>
 
           {/* Properties Table */}
@@ -768,7 +1017,37 @@ export function EntityOverview({
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {filteredProperties.map((p, idx) => (
-                      <tr key={`${p.name}-${idx}`} className="hover:bg-accent/30 transition-colors">
+                      <tr
+                        key={`${p.name}-${idx}`}
+                        draggable
+                        onClick={(e) =>
+                          pickRow(
+                            e,
+                            p.name,
+                            filteredProperties.map((x) => x.name),
+                            propSel,
+                            setPropSel,
+                            propAnchor,
+                            (n) => setPropSel([n])
+                          )
+                        }
+                        onDragStart={(e) =>
+                          setDragPins(e, propertyPins(propSel.includes(p.name) ? propSel : [p.name]))
+                        }
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            kind: "property",
+                            names: propSel.includes(p.name) ? propSel : [p.name],
+                          });
+                        }}
+                        className={cn(
+                          "transition-colors cursor-pointer",
+                          propSel.includes(p.name) ? "bg-primary/10" : "hover:bg-accent/30"
+                        )}
+                      >
                         <td className="py-2.5 px-4 font-mono font-semibold text-foreground">
                           {p.name}
                         </td>
@@ -915,6 +1194,26 @@ export function EntityOverview({
           </TabsContent>
         )}
       </Tabs>
+
+      {menu && (
+        <div
+          className="fixed z-50 min-w-40 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          <button
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+            onClick={() => {
+              addPins(menuPins(menu));
+              setMenu(null);
+            }}
+          >
+            <IconMessagePlus className="size-3.5" />
+            {menu.kind === "entity"
+              ? "Add entity to chat"
+              : `Add ${menu.names.length > 1 ? `${menu.names.length} ` : ""}${menu.kind}${menu.names.length > 1 ? "s" : ""} to chat`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useReducer } from "react";
 import dynamic from "next/dynamic";
+import { useAssistantContext } from "@/lib/assistant/context";
 import { useTheme } from "@/components/providers";
 import {
   IconRefresh,
@@ -13,6 +14,7 @@ import {
   IconCheck,
   IconFileDiff,
   IconInfoCircle,
+  IconMessagePlus,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +26,12 @@ import { FileIcon, getLanguage } from "@/components/file-tree";
 import { toast } from "sonner";
 import { getRepoDiff, getRepoStatus, type ChangedFile, type RepoSlot } from "@/lib/repo";
 import { errorMessage } from "@/lib/settings";
+import { addPins, usePinnables, type NewPin } from "@/lib/assistant/pins";
+import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
+
+// ── "Add to chat" helpers ────────────────────────────────────────────────────
+
+
 
 const MonacoDiffEditor = dynamic(
   () => import("@monaco-editor/react").then((m) => ({ default: m.DiffEditor })),
@@ -83,6 +91,12 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
   const [sideBySide, setSideBySide] = useState(true);
   const [copiedPath, setCopiedPath] = useState(false);
 
+  useAssistantContext({
+    summary: `${status.files.length} changed files${selectedFile ? `, ${selectedFile} selected` : ""}`,
+    data: { changedFiles: status.files.slice(0, 60).map((f) => `${f.status} ${f.path}`) },
+    selection: { files: selectedFile ? [selectedFile] : [] },
+  });
+
   const [panelWidth, setPanelWidth] = useState(280);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -131,6 +145,52 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
     }
   }, [slot]);
 
+  // ── Add to chat: the changed-file list and the open file's diff ───────────
+  const screen = slot === 1 ? "repo" : "repo2";
+  const changesLabel = "Changed files";
+
+  const changesPin = useCallback((): NewPin => {
+    const lines = status.files.map((f) => `${f.status} ${f.path}`).join("\n");
+    return {
+      kind: "changes",
+      label: changesLabel,
+      screen,
+      detail: `${status.files.length} files`,
+      content: clipText(lines, PIN_LIMIT),
+    };
+  }, [status.files, screen]);
+
+  const diffPin = useCallback((): NewPin | null => {
+    if (!selectedFile || !diffContent) return null;
+    // Both sides in full, each clipped to half the budget (no diff library here).
+    const half = PIN_LIMIT / 2;
+    return {
+      kind: "diff",
+      label: selectedFile,
+      screen,
+      detail: diffContent.hasTextualChanges ? "HEAD ↔ working tree" : "no textual diff",
+      content: [
+        "=== HEAD ===",
+        clipText(diffContent.original, half),
+        "=== Working tree ===",
+        clipText(diffContent.modified, half),
+      ].join("\n"),
+    };
+  }, [selectedFile, diffContent, screen]);
+
+  const pinChanges = () => addPins([changesPin()]);
+  const pinDiff = () => {
+    const p = diffPin();
+    if (p) addPins([p]);
+  };
+
+  usePinnables([
+    { kind: "changes", label: changesLabel, detail: `${status.files.length} files`, content: () => changesPin().content },
+    ...(selectedFile && diffContent
+      ? [{ kind: "diff", label: selectedFile, detail: diffContent.hasTextualChanges ? "HEAD ↔ working tree" : "no textual diff", content: () => diffPin()?.content ?? "" }]
+      : []),
+  ]);
+
   const handleCopyPath = () => {
     if (!selectedFile) return;
     navigator.clipboard.writeText(selectedFile);
@@ -171,16 +231,29 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
             )}
           </div>
 
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={fetchStatus}
-            disabled={status.loading}
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-            title="Refresh changes"
-          >
-            {status.loading ? <Spinner className="size-3" /> : <IconRefresh className="size-3.5" />}
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={pinChanges}
+              disabled={status.files.length === 0}
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+              title="Add to chat"
+              aria-label="Add changed files to chat"
+            >
+              <IconMessagePlus className="size-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={fetchStatus}
+              disabled={status.loading}
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+              title="Refresh changes"
+            >
+              {status.loading ? <Spinner className="size-3" /> : <IconRefresh className="size-3.5" />}
+            </Button>
+          </div>
         </div>
 
         {/* Status Summary Pills */}
@@ -331,6 +404,16 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
 
               {/* View controls */}
               <div className="flex items-center gap-1.5 shrink-0">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={pinDiff}
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  title="Add to chat"
+                  aria-label="Add diff to chat"
+                >
+                  <IconMessagePlus className="size-3.5" />
+                </Button>
                 <div className="flex items-center rounded-md border bg-background p-0.5 shadow-2xs">
                   <Button
                     size="xs"

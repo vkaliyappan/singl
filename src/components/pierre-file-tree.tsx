@@ -13,6 +13,7 @@ import type {
 } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { cn } from "@/lib/utils";
+import { setDragPaths, type DragPath } from "@/lib/assistant/drag";
 
 export type { FileTreeModel, FileTreeContextMenuItem, FileTreeContextMenuOpenContext, GitStatusEntry };
 
@@ -82,7 +83,15 @@ export type AppFileTreeOptions = Omit<FileTreeOptions, "paths" | "preparedInput"
   gitStatus?: readonly GitStatusEntry[];
   /** Open folders changed (by the user, expand/collapse all, or a reset). */
   onExpandedChange?: (expandedFolders: string[]) => void;
+  /**
+   * Makes rows draggable onto the assistant: maps the dragged tree paths
+   * (folders end in "/") to attachable paths. The tree itself stays read-only.
+   */
+  dragItems?: (treePaths: string[]) => DragPath[];
 };
+
+type DragSource = { current: { dragItems?: (treePaths: string[]) => DragPath[] } };
+const dragSources = new WeakMap<FileTreeModel, DragSource>();
 
 /** Folders of `paths` that are open in `model`. */
 function expandedFolders(model: FileTreeModel, paths: readonly string[]): string[] {
@@ -104,11 +113,12 @@ export function useAppFileTree({
   onSelectionChange,
   gitStatus,
   onExpandedChange,
+  dragItems,
   ...options
 }: AppFileTreeOptions) {
-  const latest = useRef({ activePath, onFileOpen, onSelectionChange, onExpandedChange });
+  const latest = useRef({ activePath, onFileOpen, onSelectionChange, onExpandedChange, dragItems });
   useLayoutEffect(() => {
-    latest.current = { activePath, onFileOpen, onSelectionChange, onExpandedChange };
+    latest.current = { activePath, onFileOpen, onSelectionChange, onExpandedChange, dragItems };
   });
 
   const { model } = useFileTree({
@@ -120,6 +130,7 @@ export function useAppFileTree({
     icons: APP_ICONS,
     search: true,
     fileTreeSearchMode: "hide-non-matches",
+    ...(dragItems ? { dragAndDrop: { canDrop: () => false } } : {}),
     ...options,
     unsafeCSS: options.unsafeCSS ? `${TREE_CSS}\n${options.unsafeCSS}` : TREE_CSS,
     composition: {
@@ -134,6 +145,10 @@ export function useAppFileTree({
       if (selected[0] !== activePath) onFileOpen?.(selected[0]);
     },
   });
+
+  useLayoutEffect(() => {
+    dragSources.set(model, latest);
+  }, [model]);
 
   const pathsRef = useRef(paths);
   useEffect(() => {
@@ -309,9 +324,24 @@ export function AppFileTree({
   className?: string;
   style?: CSSProperties;
 }) {
+  // Rows live in a shadow root; the drag event reaches the host retargeted, so
+  // the row comes from the composed path.
+  const onDragStart = (e: React.DragEvent) => {
+    const source = dragSources.get(model)?.current.dragItems;
+    if (!source || e.nativeEvent.defaultPrevented) return;
+    const row = e.nativeEvent
+      .composedPath()
+      .find((n): n is HTMLElement => n instanceof HTMLElement && !!(n.dataset.itemPath ?? n.dataset.fileTreeStickyPath));
+    const path = row?.dataset.itemPath ?? row?.dataset.fileTreeStickyPath;
+    if (!path) return;
+    const selected = model.getSelectedPaths();
+    setDragPaths(e.nativeEvent, source(selected.includes(path) ? [...selected] : [path]));
+  };
+
   return (
     <FileTree
       model={model}
+      onDragStart={onDragStart}
       header={header}
       renderContextMenu={renderContextMenu}
       className={className}

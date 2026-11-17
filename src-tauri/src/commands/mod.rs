@@ -1,6 +1,7 @@
 //! Thin `#[tauri::command]` wrappers over singl-core, one file per feature.
 
 pub mod agents;
+pub mod assistant;
 pub mod compare;
 pub mod db;
 pub mod entities;
