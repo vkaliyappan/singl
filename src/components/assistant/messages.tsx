@@ -227,7 +227,9 @@ const markdownComponents: Components = {
     );
   },
   a: ({ children, href }) =>
-    href?.startsWith("twx:") ? (
+    href?.startsWith("mention:") ? (
+      <span className={MENTION_BADGE}>{children}</span>
+    ) : href?.startsWith("twx:") ? (
       <EntityChip href={href}>{children}</EntityChip>
     ) : (
     <a
@@ -386,6 +388,39 @@ function UserImages({ message }: { message: Message }) {
       <ImagePreview image={big} onClose={() => setBig(null)} />
     </div>
   );
+}
+
+/** Same look as the composer's @name badge (composer-editor.tsx). */
+const MENTION_BADGE =
+  "mx-px inline-block rounded-md bg-primary/10 px-1.5 font-medium whitespace-nowrap text-primary";
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A user message's text with each `@name` of something it carried (attached
+ * file or folder, dropped file, pinned item) turned into a `mention:` link,
+ * which the markdown renders as a badge. Code spans and fences are left alone.
+ */
+function withMentions(text: string, message: Message): string {
+  if (!text.includes("@")) return text;
+  const names = message.blocks
+    .flatMap((b) =>
+      b.type === "attachment" ? [b.name] : b.type === "reference" ? [b.label] : [],
+    )
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  if (!names.length) return text;
+  const re = new RegExp(
+    `(^|[\\s(\\[])@(${names.map(escapeRe).join("|")})(?=$|[\\s,;:!?)\\]]|\\.(?:\\s|$))`,
+    "g",
+  );
+  const link = (_: string, pre: string, name: string) =>
+    `${pre}[@${name.replace(/[[\]\\]/g, "\\$&")}](mention:${encodeURIComponent(name)})`;
+  // Odd parts are code (fenced or inline); only the text between gets badges.
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) => (i % 2 ? part : part.replace(re, link)))
+    .join("");
 }
 
 function UserChips({ message }: { message: Message }) {
@@ -1017,9 +1052,10 @@ export function MessageList({
             {m.blocks.some((b) => b.type === "text" && b.text) && (
               <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md border bg-muted/60 px-3.5 py-2">
                 <Markdown
-                  text={m.blocks
-                    .map((b) => (b.type === "text" ? b.text : ""))
-                    .join("\n\n")}
+                  text={withMentions(
+                    m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("\n\n"),
+                    m,
+                  )}
                 />
               </div>
             )}

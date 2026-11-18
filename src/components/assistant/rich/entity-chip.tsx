@@ -81,7 +81,7 @@ export function parseTwxHref(href: string): TwxRef | null {
 
 /** react-markdown strips unknown protocols; keep twx: links. */
 export function urlTransform(url: string): string {
-  return /^twx:/i.test(url) ? url : defaultUrlTransform(url);
+  return /^(twx|mention):/i.test(url) ? url : defaultUrlTransform(url);
 }
 
 const ICONS: Record<string, Icon> = {

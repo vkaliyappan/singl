@@ -44,6 +44,31 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     .ok_or_else(|| CoreError::Invalid(format!("Missing required argument \"{key}\".")))
 }
 
+/// `text` with `old` replaced by `new`: the one occurrence, or every one with
+/// `all`. A file with CRLF line endings also matches an `old` typed with LF
+/// (models drop the `\r`). Returns the new text and the replacement count.
+fn replace_passage(text: &str, old: &str, new: &str, all: bool) -> Result<(String, usize)> {
+  if old.is_empty() {
+    return Err(CoreError::Invalid("old_string is empty. Use entity_write to rewrite a whole file.".into()));
+  }
+  let (old, new) = if !text.contains(old) && text.contains("\r\n") && !old.contains('\r') {
+    (old.replace('\n', "\r\n"), new.replace("\r\n", "\n").replace('\n', "\r\n"))
+  } else {
+    (old.to_string(), new.to_string())
+  };
+  match text.matches(old.as_str()).count() {
+    0 => Err(CoreError::Invalid(
+      "old_string was not found in the file. Read the file again and copy the passage exactly, whitespace included."
+        .into(),
+    )),
+    n if n > 1 && !all => Err(CoreError::Invalid(format!(
+      "old_string occurs {n} times. Include more surrounding lines to make it unique, or set replace_all."
+    ))),
+    n if all => Ok((text.replace(&old, &new), n)),
+    _ => Ok((text.replacen(&old, &new, 1), 1)),
+  }
+}
+
 /// A log sink that keeps its lines, for [`tail`].
 fn log_sink() -> (Arc<Mutex<Vec<String>>>, impl FnMut(String) + Send) {
   let lines = Arc::new(Mutex::new(Vec::new()));
@@ -129,7 +154,7 @@ pub fn tools() -> Vec<Tool> {
     ),
     tool(
       "entity_write",
-      "Overwrite an existing exported entity file with new text, locally only (the server is not changed). The file must already exist; use entity_create for new ones.",
+      "Overwrite an existing exported entity file with entirely new text, locally only (the server is not changed). The file must already exist; use entity_create for new ones. To change part of a file use entity_edit instead: this sends the whole file and is slow for long ones.",
       schema(
         json!({
           "path": path("Existing file path relative to the entities folder."),
@@ -142,6 +167,34 @@ pub fn tools() -> Vec<Tool> {
         let rel = Args(&args).need("path")?;
         ents::write(&base(&a)?, rel, text(&args, "content")?)?;
         Ok(format!("Saved {rel}."))
+      },
+    ),
+    tool(
+      "entity_edit",
+      "Replace an exact passage in an existing exported entity file, locally only (the server is not changed). The way to change part of a file: send only the lines that change plus enough surrounding text to be unique, not the whole file. Read the file first; several edits to one file are several calls.",
+      schema(
+        json!({
+          "path": path("Existing file path relative to the entities folder."),
+          "old_string": path("The exact text to replace, copied from the file, whitespace and indentation included. Must occur exactly once unless replace_all is true."),
+          "new_string": path("The text to put in its place. Empty deletes the passage."),
+          "replace_all": flag("Replace every occurrence of old_string. Default false."),
+        }),
+        &["path", "old_string", "new_string"],
+      ),
+      Risk::Write,
+      |a, args, _| async move {
+        let x = Args(&args);
+        let rel = x.need("path")?;
+        let base = base(&a)?;
+        let current = ents::read(&base, rel)?;
+        let (next, n) = replace_passage(
+          &current,
+          text(&args, "old_string")?,
+          text(&args, "new_string")?,
+          x.bool("replace_all").unwrap_or(false),
+        )?;
+        ents::write(&base, rel, &next)?;
+        Ok(format!("Edited {rel} ({n} replacement{}).", if n == 1 { "" } else { "s" }))
       },
     ),
     tool(
@@ -373,4 +426,24 @@ pub fn tools() -> Vec<Tool> {
       },
     ),
   ]
+}
+
+#[cfg(test)]
+mod tests {
+  use super::replace_passage;
+
+  #[test]
+  fn replaces_one_passage() {
+    assert_eq!(replace_passage("a b a", "b", "c", false).unwrap(), ("a c a".into(), 1));
+    assert!(replace_passage("a b a", "a", "c", false).is_err(), "ambiguous without replace_all");
+    assert_eq!(replace_passage("a b a", "a", "c", true).unwrap(), ("c b c".into(), 2));
+    assert!(replace_passage("a b", "x", "c", false).is_err());
+    assert!(replace_passage("a b", "", "c", false).is_err());
+  }
+
+  #[test]
+  fn matches_lf_passage_in_crlf_file() {
+    let (out, n) = replace_passage("one\r\ntwo\r\nthree\r\n", "one\ntwo\n", "uno\ndos\n", false).unwrap();
+    assert_eq!((out.as_str(), n), ("uno\r\ndos\r\nthree\r\n", 1));
+  }
 }

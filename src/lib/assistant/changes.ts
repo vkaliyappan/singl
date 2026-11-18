@@ -16,6 +16,7 @@ const EVENT = "singl:assistant-changed";
 const SCOPES: Record<ChangeScope, string[]> = {
   entities: [
     "entity_write",
+    "entity_edit",
     "entity_create",
     "entity_rename",
     "entity_delete",

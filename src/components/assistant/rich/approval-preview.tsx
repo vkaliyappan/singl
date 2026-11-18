@@ -124,6 +124,35 @@ function EntityWrite({ path, content }: { path: string; content: string }) {
   return <DiffView original={s.value ?? ""} modified={content} path={path} />;
 }
 
+/**
+ * entity_edit's result, as the backend computes it (tools/entities.rs
+ * replace_passage): an LF passage also matches a CRLF file.
+ */
+function replacePassage(text: string, old: string, next: string, all: boolean): string {
+  if (!old) throw new Error("old_string is empty.");
+  if (!text.includes(old) && text.includes("\r\n") && !old.includes("\r")) {
+    old = old.replace(/\n/g, "\r\n");
+    next = next.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+  }
+  const n = text.split(old).length - 1;
+  if (n === 0) throw new Error("old_string was not found in the file.");
+  if (n > 1 && !all) throw new Error(`old_string occurs ${n} times.`);
+  return all ? text.split(old).join(next) : text.replace(old, () => next);
+}
+
+function EntityEdit({ path, old, next, all }: { path: string; old: string; next: string; all: boolean }) {
+  const s = useLoaded(path, () => readEntityFile(path));
+  if (!s) return <Skeleton />;
+  if (s.error !== undefined) return <ErrorBlock error={s.error} content={next} path={path} />;
+  let modified: string;
+  try {
+    modified = replacePassage(s.value ?? "", old, next, all);
+  } catch (e) {
+    return <ErrorBlock error={errorMessage(e)} content={next} path={path} />;
+  }
+  return <DiffView original={s.value ?? ""} modified={modified} path={path} />;
+}
+
 function pretty(v: unknown): string {
   try {
     const o = typeof v === "string" ? JSON.parse(v) : v;
@@ -146,6 +175,20 @@ export function ApprovalPreview({ tool, input }: { tool: string; input: unknown 
   if (isRecord(input)) {
     if (tool === "entity_write" && typeof input.path === "string" && typeof input.content === "string")
       return <EntityWrite path={input.path} content={input.content} />;
+    if (
+      tool === "entity_edit" &&
+      typeof input.path === "string" &&
+      typeof input.old_string === "string" &&
+      typeof input.new_string === "string"
+    )
+      return (
+        <EntityEdit
+          path={input.path}
+          old={input.old_string}
+          next={input.new_string}
+          all={input.replace_all === true}
+        />
+      );
     if (tool === "flow_save" && typeof input.id === "string" && input.graph !== undefined)
       return <FlowSave id={input.id} graph={input.graph} />;
   }
