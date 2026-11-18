@@ -12,6 +12,7 @@ pub mod deploy;
 pub mod entities;
 pub mod flows;
 pub mod fs;
+pub mod outputs;
 pub mod repo;
 pub mod services;
 pub mod twx;
@@ -118,6 +119,7 @@ pub fn builtin() -> Vec<Tool> {
   tools.extend(repo::tools());
   tools.extend(compare::tools());
   tools.extend(deploy::tools());
+  tools.extend(outputs::tools());
   tools
 }
 

@@ -510,7 +510,8 @@ impl Assistant {
       source: meta.source.clone(),
     });
     let (content, is_error) = match self.run_tool(name, &args, &meta).await {
-      Ok(out) => (context::clip(&out, TOOL_OUTPUT_LIMIT), false),
+      // Big results are saved for `tool_output_query`; the model gets a preview.
+      Ok(out) => (context::clip(&tools::outputs::spill(&meta.call_id, name, out), TOOL_OUTPUT_LIMIT), false),
       Err(e) => (e.to_string(), true),
     };
     self.emit(AssistantEvent::ToolResult {

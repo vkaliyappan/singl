@@ -29,11 +29,16 @@ fn failure(error: &str, stack: &str) -> String {
 /// string, or an envelope describing why it did not finish. Blocking: call it
 /// from `spawn_blocking`.
 pub fn run(source: &str, input_json: &str, budget_ms: u64) -> String {
+  run_with(source, input_json, budget_ms, MEMORY_LIMIT_MB)
+}
+
+/// [`run`] with its own memory limit.
+pub fn run_with(source: &str, input_json: &str, budget_ms: u64, memory_mb: usize) -> String {
   let runtime = match Runtime::new() {
     Ok(rt) => rt,
     Err(e) => return failure(&format!("Could not start the sandbox: {e}"), ""),
   };
-  runtime.set_memory_limit(MEMORY_LIMIT_MB * 1024 * 1024);
+  runtime.set_memory_limit(memory_mb * 1024 * 1024);
   runtime.set_max_stack_size(1024 * 1024);
 
   let deadline = Instant::now() + Duration::from_millis(budget_ms);
