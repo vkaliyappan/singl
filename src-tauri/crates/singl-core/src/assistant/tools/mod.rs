@@ -16,12 +16,14 @@ pub mod outputs;
 pub mod repo;
 pub mod services;
 pub mod twx;
+pub mod twx_access;
 pub mod twx_admin;
 pub mod twx_import;
 pub mod twx_logs;
 pub mod deps;
 pub mod automation;
 pub mod undo;
+pub mod twx_events;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -127,11 +129,13 @@ pub fn builtin() -> Vec<Tool> {
   tools.extend(deploy::tools());
   tools.extend(outputs::tools());
   tools.extend(twx_logs::tools());
+  tools.extend(twx_access::tools());
   tools.extend(twx_admin::tools());
   tools.extend(twx_import::tools());
   tools.extend(deps::tools());
   tools.extend(automation::tools());
   tools.extend(undo::tools());
+  tools.extend(twx_events::tools());
   tools
 }
 

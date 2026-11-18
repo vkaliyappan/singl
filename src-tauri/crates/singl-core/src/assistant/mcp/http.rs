@@ -6,14 +6,15 @@
 //! (outside clients) or a per-turn token (agent CLIs running a chat's turn).
 //! Browsers are kept out by refusing any non-local `Origin`.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
-use super::server::{Caller, error_response, handle_payload};
+use super::server::{Caller, client_name, error_response, handle_payload};
 use crate::Result;
 use crate::assistant::Assistant;
 
@@ -50,6 +51,14 @@ pub async fn serve(assistant: Arc<Assistant>, port: u16, token: String, cancel: 
   });
   Ok(bound)
 }
+
+/// Client name by `Mcp-Session-Id`, set when a session initializes.
+fn sessions() -> &'static Mutex<HashMap<String, String>> {
+  static SESSIONS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+  SESSIONS.get_or_init(Default::default)
+}
+
+const MAX_SESSIONS: usize = 1000;
 
 struct Request {
   method: String,
@@ -155,10 +164,10 @@ async fn respond(assistant: &Arc<Assistant>, req: &Request, token: &str) -> (&'s
     return ("404 Not Found", json_err("Use /mcp."), vec![]);
   }
   let bearer = req.header("authorization").and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")));
-  let caller = match bearer.map(str::trim) {
+  let mut caller = match bearer.map(str::trim) {
     Some(t) if !token.is_empty() && t == token => Caller::external(),
     Some(t) => match assistant.chat_for_token(t) {
-      Some(chat_id) => Caller { chat_id: Some(chat_id) },
+      Some(chat_id) => Caller { chat_id: Some(chat_id), client: None },
       None => return ("401 Unauthorized", json_err("Bad or missing bearer token."), vec![("WWW-Authenticate", "Bearer".into())]),
     },
     None => return ("401 Unauthorized", json_err("Bad or missing bearer token."), vec![("WWW-Authenticate", "Bearer".into())]),
@@ -174,9 +183,31 @@ async fn respond(assistant: &Arc<Assistant>, req: &Request, token: &str) -> (&'s
     Err(e) => return ("400 Bad Request", error_response(Value::Null, -32700, &format!("Parse error: {e}")).to_string(), vec![]),
   };
   let is_initialize = payload.get("method").and_then(Value::as_str) == Some("initialize");
+  // The client's name picks its tool profile: from `initialize`, else the session it opened,
+  // else the stdio shim's header.
+  let mut session = None;
+  if caller.chat_id.is_none() {
+    caller.client = client_name(&payload)
+      .or_else(|| req.header("mcp-session-id").and_then(|id| sessions().lock().ok()?.get(id).cloned()))
+      .or_else(|| req.header("x-singl-client").map(str::to_string));
+    if is_initialize {
+      let id = uuid::Uuid::new_v4().to_string();
+      if let (Some(name), Ok(mut map)) = (&caller.client, sessions().lock()) {
+        if map.len() >= MAX_SESSIONS {
+          map.clear();
+        }
+        map.insert(id.clone(), name.clone());
+      }
+      session = Some(id);
+    }
+  }
   match handle_payload(assistant, payload, &caller).await {
     Some(reply) => {
-      let extra = if is_initialize { vec![("Mcp-Session-Id", uuid::Uuid::new_v4().to_string())] } else { vec![] };
+      let extra = match session {
+        Some(id) => vec![("Mcp-Session-Id", id)],
+        None if is_initialize => vec![("Mcp-Session-Id", uuid::Uuid::new_v4().to_string())],
+        None => vec![],
+      };
       ("200 OK", reply.to_string(), extra)
     }
     None => ("202 Accepted", String::new(), vec![]),

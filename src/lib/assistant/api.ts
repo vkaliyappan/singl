@@ -114,6 +114,8 @@ export type McpServerConfig = {
   url: string;
   headers: Record<string, string>;
   readOnly: boolean;
+  /** The server's own names of tools switched off. */
+  disabledTools?: string[];
   source?: string;
 };
 
@@ -218,6 +220,17 @@ export type AssistantEvent =
     }
   | { type: "approvalResolved"; requestId: string; approved: boolean }
   | { type: "uiRequest"; requestId: string; action: string; args: unknown }
+  /** An MCP server asks for input; answered with `mcpElicitReply`. */
+  | {
+      type: "elicitationRequest";
+      requestId: string;
+      chatId: string | null;
+      server: string;
+      message: string;
+      schema: unknown;
+    }
+  | { type: "elicitationResolved"; requestId: string }
+  | { type: "usageUpdated"; chatId: string }
   | { type: "chatsChanged" };
 
 export type ApprovalMode = "ask" | "auto" | "readOnly";
@@ -362,6 +375,30 @@ export const assistantMcpSignIn = (
   });
 export const assistantMcpSignOut = (name: string) =>
   invoke<McpServerStatus[]>("assistant_mcp_sign_out", { name });
+
+/** Token use and cost of a set of model calls. */
+export type UsageTotals = {
+  calls: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Sum over the calls that have a cost. */
+  costUsd: number;
+  /** Calls with no cost (unknown model, or a provider that reports none). */
+  unpricedCalls: number;
+};
+export type ModelUsage = UsageTotals & { provider: string; model: string };
+export type DayUsage = UsageTotals & { day: string };
+export type UsageSummary = {
+  total: UsageTotals;
+  byModel: ModelUsage[];
+  byDay: DayUsage[];
+};
+export const assistantUsageChat = (chatId: string) =>
+  invoke<UsageTotals>("assistant_usage_chat", { chatId });
+export const assistantUsageSummary = (days = 30) =>
+  invoke<UsageSummary>("assistant_usage_summary", { days });
 
 /** Subscribes to `assistant://event`; resolves to the unlisten function. */
 export async function onAssistantEvent(

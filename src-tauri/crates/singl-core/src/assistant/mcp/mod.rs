@@ -5,8 +5,13 @@
 //! file next to the database, so the `singl-mcp` stdio shim can forward to it.
 
 pub mod client;
+pub mod features;
+pub mod host;
 pub mod http;
 pub mod oauth;
+pub mod profiles;
+pub mod prompts;
+pub mod resources;
 pub mod server;
 
 use std::path::{Path, PathBuf};

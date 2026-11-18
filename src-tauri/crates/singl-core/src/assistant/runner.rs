@@ -386,6 +386,7 @@ impl Assistant {
       Err(CoreError::Cancelled) | Ok(_) => None,
       Err(e) => Some(e.to_string()),
     };
+    self.emit(AssistantEvent::UsageUpdated { chat_id: chat.id.clone() });
     self.emit(AssistantEvent::TurnEnded { chat_id: chat.id.clone(), error, cancelled, unread });
     self.emit(AssistantEvent::ChatsChanged);
     result
@@ -431,6 +432,13 @@ impl Assistant {
     let (chat_id, this) = (chat.id.clone(), self.clone());
     let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
     self.api_loop(&job, &mut History::Chat(chat), &on_text, &on_thinking, cancel).await
+  }
+
+  /// Stores a call's token usage (best effort: metering never fails a turn).
+  async fn record_usage(&self, chat_id: &str, message_id: &str, provider: &str, model: &str, usage: &super::usage::Usage) {
+    if let Err(e) = super::usage::record(&self.pool().await, chat_id, message_id, provider, model, usage).await {
+      super::log_warn(&format!("Could not record usage: {e}"));
+    }
   }
 
   async fn record(&self, history: &mut History<'_>, msg: Message) -> Result<()> {
@@ -479,6 +487,7 @@ impl Assistant {
         _ => providers::openrouter::complete(&request, on_text, on_thinking, cancel).await?,
       };
       let mut msg = Message::new(Role::Assistant, reply.blocks);
+      self.record_usage(&job.chat_id, &msg.id, &job.provider, &job.model, &reply.usage).await;
       msg.provider = Some(job.provider.clone());
       msg.model = Some(job.model.clone());
       msg.effort = Some(job.effort.clone()).filter(|e| !e.is_empty());
@@ -645,7 +654,9 @@ impl Assistant {
     let reply = result?;
     let mut blocks: Vec<Block> = providers::shown_thinking(reply.thinking).into_iter().collect();
     blocks.push(Block::Text { text: reply.text.clone() });
-    self.push(chat, tag(Message::new(Role::Assistant, blocks))).await?;
+    let answer = tag(Message::new(Role::Assistant, blocks));
+    self.record_usage(&chat.id, &answer.id, &req.provider, &req.model, &reply.usage).await;
+    self.push(chat, answer).await?;
     if let Some(session_id) = reply.session_id.filter(|s| !s.is_empty()) {
       store::save_session(&pool, &chat.id, &req.provider, &req.model, &session_id, chat.messages.len() as i64).await?;
     }

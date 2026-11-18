@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{Args, Risk, Tool, schema, ser, tool, twx};
 use crate::assistant::Assistant;
+use crate::assistant::snapshots;
 use crate::db::environments;
 use crate::repo::files::{self, SearchOptions};
 use crate::twx::entities::{self as ents, ExportJob, SelectedEntity};
@@ -163,9 +164,12 @@ pub fn tools() -> Vec<Tool> {
         &["path", "content"],
       ),
       Risk::Write,
-      |a, args, _| async move {
+      |a, args, meta| async move {
         let rel = Args(&args).need("path")?;
-        ents::write(&base(&a)?, rel, text(&args, "content")?)?;
+        let content = text(&args, "content")?;
+        let base = base(&a)?;
+        let step = snapshots::write_step(&base, rel, content.as_bytes())?;
+        snapshots::guard(&a.pool().await, &meta, "entity_write", &[step], || ents::write(&base, rel, content)).await?;
         Ok(format!("Saved {rel}."))
       },
     ),
@@ -182,7 +186,7 @@ pub fn tools() -> Vec<Tool> {
         &["path", "old_string", "new_string"],
       ),
       Risk::Write,
-      |a, args, _| async move {
+      |a, args, meta| async move {
         let x = Args(&args);
         let rel = x.need("path")?;
         let base = base(&a)?;
@@ -193,7 +197,8 @@ pub fn tools() -> Vec<Tool> {
           text(&args, "new_string")?,
           x.bool("replace_all").unwrap_or(false),
         )?;
-        ents::write(&base, rel, &next)?;
+        let step = snapshots::write_step(&base, rel, next.as_bytes())?;
+        snapshots::guard(&a.pool().await, &meta, "entity_edit", &[step], || ents::write(&base, rel, &next)).await?;
         Ok(format!("Edited {rel} ({n} replacement{}).", if n == 1 { "" } else { "s" }))
       },
     ),
@@ -209,10 +214,13 @@ pub fn tools() -> Vec<Tool> {
         &["name"],
       ),
       Risk::Write,
-      |a, args, _| async move {
+      |a, args, meta| async move {
         let x = Args(&args);
-        let created =
-          ents::create(&base(&a)?, x.str("parent").unwrap_or(""), x.need("name")?, x.bool("dir").unwrap_or(false))?;
+        let dir = x.bool("dir").unwrap_or(false);
+        let created = ents::create(&base(&a)?, x.str("parent").unwrap_or(""), x.need("name")?, dir)?;
+        // Saved after the create: the new path is only known once it ran.
+        let step = snapshots::create_step(&created, dir)?;
+        snapshots::save(&a.pool().await, &meta, "entity_create", &[step]).await?;
         Ok(format!("Created {created}."))
       },
     ),
@@ -227,9 +235,16 @@ pub fn tools() -> Vec<Tool> {
         &["path", "name"],
       ),
       Risk::Destructive,
-      |a, args, _| async move {
+      |a, args, meta| async move {
         let x = Args(&args);
-        let new_path = ents::rename(&base(&a)?, x.need("path")?, x.need("name")?)?;
+        let rel = x.need("path")?;
+        let base = base(&a)?;
+        let before = snapshots::capture(&base, rel)?;
+        let new_path = ents::rename(&base, rel, x.need("name")?)?;
+        // Saved after the rename: the new path is only known once it ran.
+        if let Some(step) = snapshots::move_step(rel, &new_path, before)? {
+          snapshots::save(&a.pool().await, &meta, "entity_rename", &[step]).await?;
+        }
         Ok(format!("Renamed to {new_path}."))
       },
     ),
@@ -238,9 +253,11 @@ pub fn tools() -> Vec<Tool> {
       "Delete a local exported entity file or folder (folders with their contents). Local only; the server is not changed. Asks the user first.",
       schema(json!({ "path": path("Path relative to the entities folder.") }), &["path"]),
       Risk::Destructive,
-      |a, args, _| async move {
+      |a, args, meta| async move {
         let rel = Args(&args).need("path")?;
-        ents::delete(&base(&a)?, rel)?;
+        let base = base(&a)?;
+        let steps = snapshots::delete_steps(&base, rel)?;
+        snapshots::guard(&a.pool().await, &meta, "entity_delete", &steps, || ents::delete(&base, rel)).await?;
         Ok(format!("Deleted {rel}."))
       },
     ),

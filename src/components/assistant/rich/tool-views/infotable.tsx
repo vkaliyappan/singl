@@ -2,15 +2,16 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { IconArrowDown, IconArrowUp, IconCopy, IconTableExport } from "@tabler/icons-react";
+import { IconCopy, IconTableExport } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { openInJsonTable } from "@/lib/json-handoff";
+import { DataGrid, columnsFromFields, type GridColumn } from "@/components/data-grid";
 import { isRecord } from "../shared";
 
 export type InfoField = { name: string; baseType?: string };
 export type InfoTable = { fields: InfoField[]; rows: Record<string, unknown>[] };
 
-const MAX_ROWS = 500;
+const MAX_ROWS = 5000;
 const SAMPLE = 50;
 
 export function isInfoTableLike(v: unknown): v is { rows: unknown[] } {
@@ -73,16 +74,6 @@ export function asInfoTable(value: unknown): InfoTable | null {
   }
 }
 
-const cmp = (a: unknown, b: unknown): number => {
-  if (a == null) return b == null ? 0 : 1;
-  if (b == null) return -1;
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
-  const sa = typeof a === "object" ? JSON.stringify(a) : String(a);
-  const sb = typeof b === "object" ? JSON.stringify(b) : String(b);
-  return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: "base" });
-};
-
 export const cellText = (v: unknown): string => {
   if (v == null) return "";
   if (typeof v === "object") return JSON.stringify(v);
@@ -129,44 +120,60 @@ export function MiniBadge({ children, className }: { children: ReactNode; classN
   );
 }
 
-export function InfoTableView({ value }: { value: unknown }) {
+export function InfoTableView({
+  value,
+  id,
+  maxHeight = 360,
+  pageSize = 25,
+}: {
+  value: unknown;
+  id?: string;
+  maxHeight?: number;
+  pageSize?: number;
+}) {
   const router = useRouter();
   const table = useMemo(() => asInfoTable(value), [value]);
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
-  const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const rows = useMemo(() => {
+  const columns = useMemo<GridColumn<Record<string, unknown>>[]>(() => {
     if (!table) return [];
-    let r = table.rows;
-    const q = filter.trim().toLowerCase();
-    if (q) r = r.filter((row) => table.fields.some((f) => cellText(row[f.name]).toLowerCase().includes(q)));
-    if (sort) {
-      const { key, dir } = sort;
-      // Empty cells stay at the bottom in both directions.
-      const empty = (v: unknown) => v === null || v === undefined || v === "";
-      r = [...r].sort((a, b) =>
-        empty(a[key]) !== empty(b[key])
-          ? empty(a[key]) ? 1 : -1
-          : cmp(a[key], b[key]) * dir,
-      );
-    }
-    return r;
-  }, [table, filter, sort]);
+    const base = columnsFromFields(table.fields, table.rows);
+    return base.map((c, i) => {
+      const f = table.fields[i];
+      return {
+        ...c,
+        // Nested values are searchable as JSON; the type tag stays in the header.
+        header: (
+          <span className="flex items-center gap-1">
+            {f.name}
+            {f.baseType && <MiniBadge>{f.baseType}</MiniBadge>}
+          </span>
+        ),
+        // Dates and booleans render by kind in the grid; the rest keep the typed cell.
+        render:
+          c.kind === "date"
+            ? undefined
+            : (row) => (
+                <span className="block max-w-full truncate">
+                  <CellValue value={row[f.name]} />
+                </span>
+              ),
+        truncate: false,
+      };
+    });
+  }, [table]);
 
   if (!table) return null;
   const { fields } = table;
-  const total = table.rows.length;
-  const shown = rows.slice(0, MAX_ROWS);
-
-  const cycle = (key: string) =>
-    setSort((s) => (!s || s.key !== key ? { key, dir: 1 } : s.dir === 1 ? { key, dir: -1 } : null));
+  const shown = table.rows.slice(0, MAX_ROWS);
+  // Layout is remembered per table shape, so two results with the same columns share it.
+  const gridId = id ?? `infotable:${fields.map((f) => f.name).join("|").slice(0, 120)}`;
 
   const copyTsv = async () => {
     const clean = (v: unknown) => cellText(v).replace(/[\t\r\n]+/g, " ");
     const tsv = [
       fields.map((f) => f.name).join("\t"),
-      ...rows.map((r) => fields.map((f) => clean(r[f.name])).join("\t")),
+      ...shown.map((r) => fields.map((f) => clean(r[f.name])).join("\t")),
     ].join("\n");
     try {
       await navigator.clipboard.writeText(tsv);
@@ -181,22 +188,19 @@ export function InfoTableView({ value }: { value: unknown }) {
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground hover:bg-muted hover:text-foreground";
 
   return (
-    <div className="rounded-md border bg-card text-[11px]">
-      <div className="flex flex-wrap items-center gap-2 border-b px-2 py-1">
-        <span className="text-muted-foreground">
-          {filter && rows.length !== total ? `${rows.length} of ${total} rows` : `${total} rows`}
-          {rows.length > MAX_ROWS && ` · showing first ${MAX_ROWS}`}
-        </span>
-        {total > 8 && (
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter…"
-            aria-label="Filter rows"
-            className="h-5 w-28 rounded border bg-background px-1.5 text-[10.5px] outline-none focus:border-ring"
-          />
-        )}
-        <span className="ml-auto flex items-center gap-1">
+    <DataGrid
+      id={gridId}
+      columns={columns}
+      rows={shown}
+      pageSize={pageSize}
+      maxHeight={maxHeight}
+      csvName="table"
+      searchPlaceholder="Search…"
+      toolbarExtra={
+        <span className="flex items-center gap-1">
+          {table.rows.length > MAX_ROWS && (
+            <span className="text-[10.5px] text-muted-foreground">first {MAX_ROWS} of {table.rows.length}</span>
+          )}
           <button type="button" className={btn} onClick={copyTsv} aria-label="Copy table as TSV">
             <IconCopy className="size-3" />
             {copied ? "Copied" : "Copy TSV"}
@@ -214,66 +218,7 @@ export function InfoTableView({ value }: { value: unknown }) {
             Open in JSON to Table
           </button>
         </span>
-      </div>
-      <div className="max-h-[22rem] overflow-auto">
-        <table className="w-full border-collapse">
-          <thead className="sticky top-0 z-10 bg-muted">
-            <tr>
-              {fields.map((f) => {
-                const active = sort?.key === f.name;
-                const numeric = /INTEGER|NUMBER|LONG/.test(f.baseType ?? "");
-                return (
-                  <th
-                    key={f.name}
-                    scope="col"
-                    aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : "none"}
-                    className="border-b p-0 text-left font-medium whitespace-nowrap"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => cycle(f.name)}
-                      aria-label={`Sort by ${f.name}`}
-                      className={cn("flex w-full items-center gap-1 px-2 py-1 hover:bg-accent", numeric && "justify-end")}
-                    >
-                      {f.name}
-                      {f.baseType && <MiniBadge>{f.baseType}</MiniBadge>}
-                      {active &&
-                        (sort!.dir === 1 ? <IconArrowUp className="size-3" /> : <IconArrowDown className="size-3" />)}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((row, i) => (
-              <tr key={i} className={i % 2 ? "bg-muted/30" : undefined}>
-                {fields.map((f) => {
-                  const v = row[f.name];
-                  return (
-                    <td
-                      key={f.name}
-                      className={cn(
-                        "max-w-[22rem] truncate border-b border-border/40 px-2 py-0.5",
-                        typeof v === "number" && "text-right tabular-nums"
-                      )}
-                    >
-                      <CellValue value={v} />
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-            {!shown.length && (
-              <tr>
-                <td colSpan={fields.length} className="px-2 py-3 text-center text-muted-foreground">
-                  No rows
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      }
+    />
   );
 }

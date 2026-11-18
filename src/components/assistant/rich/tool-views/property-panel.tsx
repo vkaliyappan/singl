@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isRecord, parseJson, Placeholder, SourceToggle } from "../shared";
-import { CellValue, cellText, inferType } from "./infotable";
+import { CellValue, inferType } from "./infotable";
 import { absTime, relTime } from "./run-times";
+import { DataGrid, type GridColumn } from "@/components/data-grid";
 
 export type PropRow = {
   name: string;
@@ -87,96 +88,77 @@ function ValueCell({ value }: { value: unknown }) {
 
 export function PropertyPanel({ value }: { value: unknown }) {
   const rows = useMemo(() => (Array.isArray(value) && value.every(isPropRow) ? (value as PropRow[]) : asProperties(value)), [value]);
-  const [filter, setFilter] = useState("");
   const [now] = useState(() => Date.now());
 
-  const shown = useMemo(() => {
-    if (!rows) return [];
-    const q = filter.trim().toLowerCase();
-    return q ? rows.filter((r) => r.name.toLowerCase().includes(q) || cellText(r.value).toLowerCase().includes(q)) : rows;
-  }, [rows, filter]);
+  const columns = useMemo<GridColumn<PropRow>[]>(
+    () => [
+      { key: "name", label: "Name", kind: "text", width: 220, render: (r) => <span className="font-mono">{r.name}</span> },
+      {
+        key: "value",
+        label: "Value",
+        kind: "text",
+        width: 320,
+        value: (r) => r.value,
+        render: (r) => <ValueCell value={r.value} />,
+        truncate: false,
+      },
+      {
+        key: "type",
+        label: "Type",
+        kind: "text",
+        width: 100,
+        value: (r) => r.baseType ?? inferType(r.value),
+        render: (r) => (
+          <span className="text-[10px] text-muted-foreground uppercase">{r.baseType ?? inferType(r.value)}</span>
+        ),
+      },
+      {
+        key: "quality",
+        label: "Quality",
+        kind: "text",
+        width: 90,
+        hidden: !rows?.some((r) => r.quality),
+        render: (r) =>
+          r.quality ? (
+            <span className={cn("rounded px-1 text-[9.5px] leading-4", qualityClass(r.quality))}>{r.quality}</span>
+          ) : null,
+      },
+      {
+        key: "time",
+        label: "Time",
+        kind: "date",
+        width: 110,
+        hidden: !rows?.some((r) => r.time !== undefined),
+        render: (r) => {
+          const ms = r.time === undefined ? NaN : typeof r.time === "number" ? r.time : Date.parse(r.time);
+          const stale = !Number.isNaN(ms) && now - ms > STALE_MS;
+          return (
+            <span
+              className={cn("whitespace-nowrap", stale ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}
+              title={r.time !== undefined ? `${absTime(r.time)}${stale ? " (stale: older than 24h)" : ""}` : undefined}
+            >
+              {relTime(r.time)}
+            </span>
+          );
+        },
+      },
+    ],
+    [rows, now]
+  );
 
   if (!rows) return null;
-  const hasQuality = rows.some((r) => r.quality);
-  const hasTime = rows.some((r) => r.time !== undefined);
-
   return (
-    <div className="rounded-md border bg-card text-[11px]">
-      <div className="flex items-center gap-2 border-b px-2 py-1">
-        <span className="text-muted-foreground">
-          {filter ? `${shown.length} of ${rows.length}` : rows.length} {rows.length === 1 ? "property" : "properties"}
-        </span>
-        {rows.length > 12 && (
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter…"
-            aria-label="Filter properties"
-            className="h-5 w-32 rounded border bg-background px-1.5 text-[10.5px] outline-none focus:border-ring"
-          />
-        )}
-      </div>
-      <div className="max-h-[22rem] overflow-auto">
-        <table className="w-full table-fixed border-collapse">
-          <thead className="sticky top-0 z-10 bg-muted text-left">
-            <tr>
-              <th className="w-[32%] px-2 py-1 font-medium">Name</th>
-              <th className="px-2 py-1 font-medium">Value</th>
-              <th className="w-24 px-2 py-1 font-medium">Type</th>
-              {hasQuality && <th className="w-20 px-2 py-1 font-medium">Quality</th>}
-              {hasTime && <th className="w-24 px-2 py-1 font-medium">Time</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r, i) => {
-              const ms = r.time === undefined ? NaN : typeof r.time === "number" ? r.time : Date.parse(r.time);
-              const stale = !Number.isNaN(ms) && now - ms > STALE_MS;
-              const bad = r.quality?.toUpperCase() === "BAD";
-              return (
-                <tr key={r.name + i} className={cn(bad ? "bg-red-500/5" : i % 2 && "bg-muted/30")}>
-                  <td className="truncate px-2 py-0.5 font-mono" title={r.name}>
-                    {r.name}
-                  </td>
-                  <td className="px-2 py-0.5">
-                    <ValueCell value={r.value} />
-                  </td>
-                  <td className="truncate px-2 py-0.5 text-[10px] text-muted-foreground uppercase">
-                    {r.baseType ?? inferType(r.value)}
-                  </td>
-                  {hasQuality && (
-                    <td className="px-2 py-0.5">
-                      {r.quality && (
-                        <span className={cn("rounded px-1 text-[9.5px] leading-4", qualityClass(r.quality))}>
-                          {r.quality}
-                        </span>
-                      )}
-                    </td>
-                  )}
-                  {hasTime && (
-                    <td
-                      className={cn(
-                        "px-2 py-0.5 whitespace-nowrap",
-                        stale ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-                      )}
-                      title={r.time !== undefined ? `${absTime(r.time)}${stale ? " (stale: older than 24h)" : ""}` : undefined}
-                    >
-                      {relTime(r.time)}
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-            {!shown.length && (
-              <tr>
-                <td colSpan={5} className="px-2 py-3 text-center text-muted-foreground">
-                  No matches
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DataGrid
+      id="property-panel"
+      columns={columns}
+      rows={rows}
+      rowKey={(r, i) => `${r.name}|${i}`}
+      searchable={rows.length > 8}
+      pageSize={50}
+      maxHeight={352}
+      csvName="properties"
+      rowClassName={(r) => (r.quality?.toUpperCase() === "BAD" ? "bg-red-500/5" : undefined)}
+    />
   );
 }
 

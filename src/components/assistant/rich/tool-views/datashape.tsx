@@ -1,6 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { DataGrid, type GridColumn } from "@/components/data-grid";
 import { isRecord } from "../shared";
 
 export type ShapeField = {
@@ -71,42 +73,44 @@ export function TypeBadge({ type }: { type: string }) {
   return <span className={cn("rounded px-1 font-mono text-[10px] leading-4", family(type))}>{type}</span>;
 }
 
+const FIELD_COLUMNS: GridColumn<ShapeField & { n: number }>[] = [
+  { key: "n", label: "#", kind: "number", width: 56 },
+  {
+    key: "name",
+    label: "Name",
+    kind: "text",
+    width: 200,
+    render: (f) => (
+      <span className="font-mono">
+        {f.name}
+        {f.primaryKey && (
+          <span
+            title="Primary key"
+            className="ml-1 rounded bg-amber-500/15 px-1 font-sans text-[9px] text-amber-700 dark:text-amber-300"
+          >
+            PK
+          </span>
+        )}
+      </span>
+    ),
+  },
+  { key: "baseType", label: "Type", kind: "text", width: 120, render: (f) => <TypeBadge type={f.baseType} /> },
+  { key: "description", label: "Description", kind: "text", width: 320, truncate: false },
+];
+
 export function FieldsTable({ fields }: { fields: ShapeField[] }) {
+  const rows = useMemo(() => fields.map((f, i) => ({ ...f, n: f.ordinal ?? i + 1 })), [fields]);
   return (
-    <div className="max-h-[22rem] overflow-auto">
-      <table className="w-full border-collapse text-[11px]">
-        <thead className="sticky top-0 bg-muted text-left">
-          <tr>
-            <th className="w-8 px-2 py-1 font-medium">#</th>
-            <th className="px-2 py-1 font-medium">Name</th>
-            <th className="px-2 py-1 font-medium">Type</th>
-            <th className="px-2 py-1 font-medium">Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          {fields.map((f, i) => (
-            <tr key={f.name + i} className={i % 2 ? "bg-muted/30" : undefined}>
-              <td className="px-2 py-0.5 text-muted-foreground tabular-nums">{f.ordinal ?? i + 1}</td>
-              <td className="px-2 py-0.5 font-mono">
-                {f.name}
-                {f.primaryKey && (
-                  <span
-                    title="Primary key"
-                    className="ml-1 rounded bg-amber-500/15 px-1 font-sans text-[9px] text-amber-700 dark:text-amber-300"
-                  >
-                    PK
-                  </span>
-                )}
-              </td>
-              <td className="px-2 py-0.5">
-                <TypeBadge type={f.baseType} />
-              </td>
-              <td className="px-2 py-0.5 text-muted-foreground">{f.description}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataGrid
+      id="datashape-fields"
+      columns={FIELD_COLUMNS}
+      rows={rows}
+      rowKey={(f, i) => `${f.name}|${i}`}
+      searchable={rows.length > 8}
+      pageSize={50}
+      maxHeight={352}
+      csvName="fields"
+    />
   );
 }
 

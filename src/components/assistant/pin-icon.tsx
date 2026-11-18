@@ -8,6 +8,7 @@ import {
   IconFileCode,
   IconHierarchy2,
   IconPin,
+  IconPlugConnected,
   IconTable,
   IconTerminal2,
 } from "@tabler/icons-react";
@@ -36,6 +37,8 @@ export function PinIcon({ kind, className }: { kind: string; className?: string 
       return <IconAlertTriangle className={cls} />;
     case "script":
       return <IconTerminal2 className={cls} />;
+    case "mcp-resource":
+      return <IconPlugConnected className={cls} />;
     default:
       return <IconPin className={cls} />;
   }

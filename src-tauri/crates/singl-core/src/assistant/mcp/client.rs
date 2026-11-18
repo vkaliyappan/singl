@@ -10,22 +10,24 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
+use super::host::{Handler, LoggedCall};
+use crate::assistant::Assistant;
 use crate::assistant::settings::McpServerConfig;
 use crate::assistant::tools::{Risk, ToolSpec};
 use crate::{CoreError, Result};
 
 const PROTOCOL: &str = "2025-06-18";
 const START_TIMEOUT: Duration = Duration::from_secs(30);
-const LIST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const RETRY_AFTER: Duration = Duration::from_secs(60);
 const STDERR_LINES: usize = 50;
 const MAX_NAME: usize = 64;
@@ -202,31 +204,33 @@ fn is_response(msg: &Value, id: u64) -> bool {
   msg.get("method").is_none() && msg.get("id").and_then(Value::as_u64) == Some(id)
 }
 
-/// The response with `id` in an SSE body. Unless `done`, only events closed by a
+/// Every JSON-RPC message in an SSE body. Unless `done`, only events closed by a
 /// blank line count, since the last one may still be arriving.
-fn sse_find(body: &str, id: u64, done: bool) -> Option<Value> {
+fn sse_messages(body: &str, done: bool) -> Vec<Value> {
   let body = body.replace("\r\n", "\n");
   let mut events: Vec<&str> = body.split("\n\n").collect();
   if !done {
     events.pop();
   }
+  let mut out = Vec::new();
   for event in events {
     let data: Vec<&str> = event.lines().filter_map(|l| l.strip_prefix("data:")).map(|d| d.strip_prefix(' ').unwrap_or(d)).collect();
     if data.is_empty() {
       continue;
     }
-    if let Ok(v) = serde_json::from_str::<Value>(&data.join("\n")) {
-      let found = match v {
-        Value::Array(items) => items.into_iter().find(|m| is_response(m, id)),
-        one if is_response(&one, id) => Some(one),
-        _ => None,
-      };
-      if found.is_some() {
-        return found;
-      }
+    match serde_json::from_str::<Value>(&data.join("\n")) {
+      Ok(Value::Array(items)) => out.extend(items),
+      Ok(one) => out.push(one),
+      Err(_) => {}
     }
   }
-  None
+  out
+}
+
+/// The response with `id` in an SSE body (see [`sse_messages`]).
+#[cfg(test)]
+fn sse_find(body: &str, id: u64, done: bool) -> Option<Value> {
+  sse_messages(body, done).into_iter().find(|m| is_response(m, id))
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -243,6 +247,7 @@ struct StdioShared {
   alive: AtomicBool,
   stale: AtomicBool,
   stderr: StdMutex<VecDeque<String>>,
+  handler: Handler,
 }
 
 impl StdioShared {
@@ -261,7 +266,7 @@ impl StdioShared {
   }
 }
 
-struct StdioConn {
+pub(super) struct StdioConn {
   shared: Arc<StdioShared>,
   child: StdMutex<Option<Child>>,
   pid: Option<u32>,
@@ -352,7 +357,7 @@ fn kill_tree(pid: u32) {
 }
 
 impl StdioConn {
-  fn spawn(cfg: &McpServerConfig) -> Result<Self> {
+  fn spawn(cfg: &McpServerConfig, handler: Handler) -> Result<Self> {
     if cfg.command.trim().is_empty() {
       return Err(invalid("No command or url is set for this MCP server."));
     }
@@ -373,6 +378,7 @@ impl StdioConn {
       alive: AtomicBool::new(true),
       stale: AtomicBool::new(false),
       stderr: StdMutex::new(VecDeque::new()),
+      handler,
     });
     if let Some(stderr) = stderr {
       let shared = shared.clone();
@@ -416,13 +422,14 @@ impl StdioConn {
     let id = msg.get("id").cloned();
     match (method, id) {
       (Some(method), Some(id)) => {
-        // A request from the server.
-        let reply = match method {
-          "ping" => json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
-          "roots/list" => json!({ "jsonrpc": "2.0", "id": id, "result": { "roots": [] } }),
-          other => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": format!("Method not found: {other}") } }),
-        };
-        let _ = shared.send(&reply).await;
+        // A request from the server; answering may wait on the user, so not on the reader.
+        let method = method.to_string();
+        let params = msg.get("params").cloned().unwrap_or(Value::Null);
+        let shared = shared.clone();
+        tokio::spawn(async move {
+          let reply = shared.handler.respond(id, &method, params).await;
+          let _ = shared.send(&reply).await;
+        });
       }
       (Some("notifications/tools/list_changed"), None) => shared.stale.store(true, Ordering::SeqCst),
       (Some(_), None) => {}
@@ -490,7 +497,7 @@ impl Drop for StdioConn {
 
 // ---- streamable HTTP transport -----------------------------------------------
 
-struct HttpConn {
+pub(super) struct HttpConn {
   client: reqwest::Client,
   url: String,
   headers: Vec<(String, String)>,
@@ -498,10 +505,11 @@ struct HttpConn {
   protocol: StdMutex<Option<String>>,
   next_id: AtomicU64,
   stale: AtomicBool,
+  handler: Handler,
 }
 
 impl HttpConn {
-  fn new(cfg: &McpServerConfig) -> Result<Self> {
+  fn new(cfg: &McpServerConfig, handler: Handler) -> Result<Self> {
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build().map_err(|e| invalid(e.to_string()))?;
     Ok(Self {
       client,
@@ -511,6 +519,7 @@ impl HttpConn {
       protocol: StdMutex::new(None),
       next_id: AtomicU64::new(1),
       stale: AtomicBool::new(false),
+      handler,
     })
   }
 
@@ -544,6 +553,27 @@ impl HttpConn {
     }
   }
 
+  /// A message from the server inside a response stream: answers a request
+  /// (once), notes a notification.
+  fn serve(&self, msg: &Value, replies: &mpsc::UnboundedSender<Value>, answered: &mut HashSet<String>) {
+    let method = msg.get("method").and_then(Value::as_str);
+    match (method, msg.get("id")) {
+      (Some(method), Some(id)) => {
+        if !answered.insert(id.to_string()) {
+          return;
+        }
+        let (handler, method, id) = (self.handler.clone(), method.to_string(), id.clone());
+        let params = msg.get("params").cloned().unwrap_or(Value::Null);
+        let tx = replies.clone();
+        tokio::spawn(async move {
+          let _ = tx.send(handler.respond(id, &method, params).await);
+        });
+      }
+      (Some(_), None) => self.note(msg),
+      _ => {}
+    }
+  }
+
   async fn exchange(&self, body: Value, id: u64, is_init: bool) -> Result<Value> {
     let mut resp = self.post(&body).await?;
     if is_init {
@@ -557,19 +587,37 @@ impl HttpConn {
       .and_then(|v| v.to_str().ok())
       .is_some_and(|v| v.to_ascii_lowercase().contains("text/event-stream"));
     if sse {
-      let mut buf = String::new();
+      // Requests from the server (elicitation, sampling...) arrive in this stream;
+      // their answers go back as separate POSTs while the stream stays open.
+      let (tx, mut replies) = mpsc::unbounded_channel::<Value>();
+      let mut answered: HashSet<String> = HashSet::new();
       let mut raw: Vec<u8> = Vec::new();
-      while let Some(chunk) = resp.chunk().await.map_err(|e| invalid(format!("Stream failed: {e}")))? {
-        raw.extend_from_slice(&chunk);
-        buf = String::from_utf8_lossy(&raw).into_owned();
-        if let Some(msg) = sse_find(&buf, id, false) {
-          return rpc_result(&msg);
+      let mut open = true;
+      loop {
+        tokio::select! {
+          chunk = resp.chunk(), if open => {
+            match chunk.map_err(|e| invalid(format!("Stream failed: {e}")))? {
+              Some(chunk) => raw.extend_from_slice(&chunk),
+              None => open = false,
+            }
+            let buf = String::from_utf8_lossy(&raw).into_owned();
+            for msg in sse_messages(&buf, !open) {
+              if is_response(&msg, id) {
+                return rpc_result(&msg);
+              }
+              self.serve(&msg, &tx, &mut answered);
+            }
+            if !open {
+              return Err(invalid("The server's event stream ended without a response."));
+            }
+          }
+          Some(reply) = replies.recv() => {
+            if let Err(e) = self.post(&reply).await {
+              super::super::log_warn(&format!("assistant MCP: could not answer a server request: {e}"));
+            }
+          }
         }
       }
-      return match sse_find(&buf, id, true) {
-        Some(msg) => rpc_result(&msg),
-        None => Err(invalid("The server's event stream ended without a response.")),
-      };
     }
     let bytes = resp.bytes().await.map_err(|e| invalid(e.to_string()))?;
     let value: Value = serde_json::from_slice(&bytes).map_err(|e| invalid(format!("Bad JSON reply: {e}")))?;
@@ -602,13 +650,13 @@ impl HttpConn {
 
 // ---- connection --------------------------------------------------------------
 
-enum Conn {
+pub(super) enum Conn {
   Stdio(StdioConn),
   Http(HttpConn),
 }
 
 impl Conn {
-  async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+  pub(super) async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
     match self {
       Conn::Stdio(c) => c.request(method, params, timeout).await,
       Conn::Http(c) => c.request(method, params, timeout).await,
@@ -649,11 +697,11 @@ impl Conn {
     }
   }
 
-  /// `initialize`, `notifications/initialized`.
-  async fn handshake(&self) -> Result<()> {
+  /// `initialize`, `notifications/initialized`. Returns what the server can do.
+  async fn handshake(&self) -> Result<Value> {
     let params = json!({
       "protocolVersion": PROTOCOL,
-      "capabilities": {},
+      "capabilities": { "roots": { "listChanged": true }, "sampling": {}, "elicitation": {} },
       "clientInfo": { "name": "singl", "version": env!("CARGO_PKG_VERSION") },
     });
     let result = self.request("initialize", params, START_TIMEOUT).await?;
@@ -661,33 +709,68 @@ impl Conn {
       let version = result.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL).to_string();
       *h.protocol.lock().unwrap_or_else(|e| e.into_inner()) = Some(version);
     }
-    self.notify("notifications/initialized", json!({})).await
+    self.notify("notifications/initialized", json!({})).await?;
+    Ok(result.get("capabilities").cloned().unwrap_or_else(|| json!({})))
   }
 
-  /// Every tool, following `nextCursor`.
-  async fn list_tools(&self) -> Result<Vec<Value>> {
-    let mut tools = Vec::new();
+  /// Every item of a paginated list (`tools/list`, `resources/list`...) under
+  /// `key`, following `nextCursor`.
+  pub(super) async fn list_paged(&self, method: &str, key: &str) -> Result<Vec<Value>> {
+    let mut items = Vec::new();
     let mut cursor: Option<String> = None;
     for _ in 0..50 {
       let params = match &cursor {
         Some(c) => json!({ "cursor": c }),
         None => json!({}),
       };
-      let result = self.request("tools/list", params, LIST_TIMEOUT).await?;
-      tools.extend(result.get("tools").and_then(Value::as_array).cloned().unwrap_or_default());
+      let result = self.request(method, params, LIST_TIMEOUT).await?;
+      items.extend(result.get(key).and_then(Value::as_array).cloned().unwrap_or_default());
       cursor = result.get("nextCursor").and_then(Value::as_str).filter(|c| !c.is_empty()).map(String::from);
       if cursor.is_none() {
         break;
       }
     }
-    Ok(tools)
+    Ok(items)
+  }
+
+  async fn list_tools(&self) -> Result<Vec<Value>> {
+    self.list_paged("tools/list", "tools").await
   }
 }
 
 #[derive(Clone)]
-struct ToolEntry {
+pub(super) struct ToolEntry {
   original: String,
   spec: ToolSpec,
+}
+
+/// Whether a tool is offered: not switched off, and on a read-only server only reads.
+fn visible(cfg: &McpServerConfig, tool: &ToolEntry) -> bool {
+  !cfg.disabled_tools.iter().any(|d| *d == tool.original) && (!cfg.read_only || tool.spec.risk == Risk::Read)
+}
+
+/// Whether a changed config needs a new connection; the tool filter does not.
+fn needs_restart(old: &McpServerConfig, new: &McpServerConfig) -> bool {
+  let mut old = old.clone();
+  old.disabled_tools = new.disabled_tools.clone();
+  old != *new
+}
+
+/// One tool of a running server as Settings lists it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolInfo {
+  pub server: String,
+  /// The name the assistant sees (`<server>__<tool>`).
+  pub name: String,
+  /// The server's own name for it; what `disabledTools` holds.
+  pub original: String,
+  pub description: String,
+  pub risk: Risk,
+  /// Switched off in Settings.
+  pub disabled: bool,
+  /// Not offered because the server is read-only and this tool is not a read.
+  pub hidden: bool,
 }
 
 fn build_tools(cfg: &McpServerConfig, raw: &[Value]) -> Vec<ToolEntry> {
@@ -712,16 +795,26 @@ fn build_tools(cfg: &McpServerConfig, raw: &[Value]) -> Vec<ToolEntry> {
   out
 }
 
-/// Starts a server and lists its tools. A failed start kills the process.
-async fn connect(cfg: &McpServerConfig) -> Result<(Arc<Conn>, Vec<ToolEntry>)> {
-  let conn = Arc::new(if cfg.url.trim().is_empty() { Conn::Stdio(StdioConn::spawn(cfg)?) } else { Conn::Http(HttpConn::new(cfg)?) });
+/// Starts a server and lists its tools; also returns its capabilities. A failed start kills the process.
+async fn connect(cfg: &McpServerConfig, handler: &Handler) -> Result<(Arc<Conn>, Vec<ToolEntry>, Value)> {
+  let conn = Arc::new(if cfg.url.trim().is_empty() {
+    Conn::Stdio(StdioConn::spawn(cfg, handler.clone())?)
+  } else {
+    Conn::Http(HttpConn::new(cfg, handler.clone())?)
+  });
   let result = async {
-    conn.handshake().await?;
-    conn.list_tools().await
+    let caps = conn.handshake().await?;
+    let tools = match conn.list_tools().await {
+      Ok(tools) => tools,
+      // A server with only resources or prompts may not know the method.
+      Err(_) if caps.get("tools").is_none() => Vec::new(),
+      Err(e) => return Err(e),
+    };
+    Ok::<_, CoreError>((tools, caps))
   }
   .await;
   match result {
-    Ok(raw) => Ok((conn.clone(), build_tools(cfg, &raw))),
+    Ok((raw, caps)) => Ok((conn.clone(), build_tools(cfg, &raw), caps)),
     Err(e) => {
       let message = if conn.alive() { e.to_string() } else { format!("{e}\n{}", conn.death()) };
       conn.close();
@@ -739,11 +832,13 @@ struct Info {
   tools: Arc<Vec<ToolEntry>>,
   conn: Option<Arc<Conn>>,
   failed_at: Option<Instant>,
+  /// What the server said it can do (`initialize`).
+  caps: Value,
 }
 
 impl Info {
   fn new(config: McpServerConfig) -> Self {
-    Self { config, state: "stopped", error: None, tools: Arc::new(Vec::new()), conn: None, failed_at: None }
+    Self { config, state: "stopped", error: None, tools: Arc::new(Vec::new()), conn: None, failed_at: None, caps: Value::Null }
   }
 
   /// Back to stopped; returns the connection to close.
@@ -752,6 +847,7 @@ impl Info {
     self.error = None;
     self.tools = Arc::new(Vec::new());
     self.failed_at = None;
+    self.caps = Value::Null;
     self.conn.take()
   }
 
@@ -768,6 +864,7 @@ struct Slot {
   /// Serializes start / stop / refresh of this server.
   gate: Mutex<()>,
   info: StdMutex<Info>,
+  handler: Handler,
 }
 
 impl Slot {
@@ -785,11 +882,12 @@ impl Slot {
     let _gate = self.gate.lock().await;
     let old = {
       let mut info = self.info();
-      if info.config != cfg {
+      if needs_restart(&info.config, &cfg) {
         let old = info.reset();
         info.config = cfg.clone();
         old
       } else {
+        info.config = cfg.clone();
         None
       }
     };
@@ -826,11 +924,12 @@ impl Slot {
       info.state = "starting";
       info.error = None;
     }
-    match tokio::time::timeout(START_TIMEOUT, connect(&cfg)).await {
-      Ok(Ok((conn, tools))) => {
+    match tokio::time::timeout(START_TIMEOUT, connect(&cfg, &self.handler)).await {
+      Ok(Ok((conn, tools, caps))) => {
         let mut info = self.info();
         info.state = "running";
         info.tools = Arc::new(tools);
+        info.caps = caps;
         info.conn = Some(conn);
         info.failed_at = None;
       }
@@ -856,9 +955,44 @@ impl Slot {
 #[derive(Default)]
 pub struct McpClients {
   slots: StdMutex<HashMap<String, Arc<Slot>>>,
+  /// The assistant, for requests a server makes of us (roots, elicitation, sampling).
+  host: StdMutex<Weak<Assistant>>,
+  /// Hash of the roots the servers last heard of.
+  roots_seen: StdMutex<Option<u64>>,
 }
 
 impl McpClients {
+  pub(crate) fn set_host(&self, host: Weak<Assistant>) {
+    *self.host.lock().unwrap_or_else(|e| e.into_inner()) = host;
+  }
+
+  /// Tells running servers when the roots changed since the last call.
+  pub async fn sync_roots(&self, roots: &[Value]) {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    roots.iter().for_each(|r| r.to_string().hash(&mut h));
+    let hash = h.finish();
+    let changed = self.roots_seen.lock().unwrap_or_else(|e| e.into_inner()).replace(hash).is_some_and(|old| old != hash);
+    if !changed {
+      return;
+    }
+    for (_, slot) in self.slots() {
+      let conn = slot.info().conn.clone();
+      if let Some(conn) = conn {
+        let _ = conn.notify("notifications/roots/list_changed", json!({})).await;
+      }
+    }
+  }
+
+  /// The live connection and capabilities of a running server.
+  pub(super) fn conn_for(&self, server: &str) -> Result<(Arc<Conn>, Value)> {
+    let slot = self.slots.lock().unwrap_or_else(|e| e.into_inner()).get(server).cloned();
+    let info = slot.as_ref().map(|s| s.info());
+    match info.as_ref().and_then(|i| i.conn.clone().map(|c| (c, i.caps.clone()))) {
+      Some(found) => Ok(found),
+      None => Err(invalid(format!("MCP server \"{server}\" is not running."))),
+    }
+  }
+
   fn slots(&self) -> Vec<(String, Arc<Slot>)> {
     self.slots.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(k, v)| (k.clone(), v.clone())).collect()
   }
@@ -881,23 +1015,52 @@ impl McpClients {
         let mut map = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         map
           .entry(cfg.name.clone())
-          .or_insert_with(|| Arc::new(Slot { gate: Mutex::new(()), info: StdMutex::new(Info::new(cfg.clone())) }))
+          .or_insert_with(|| {
+            let host = self.host.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            Arc::new(Slot { gate: Mutex::new(()), info: StdMutex::new(Info::new(cfg.clone())), handler: Handler::new(host, &cfg.name) })
+          })
           .clone()
       };
       let cfg = cfg.clone();
       handles.push(tokio::spawn(async move {
-        slot.ensure(cfg).await;
+        slot.ensure(cfg.clone()).await;
         let info = slot.info();
-        if info.state == "running" { Some(info.tools.clone()) } else { None }
+        if info.state == "running" { Some((cfg, info.tools.clone())) } else { None }
       }));
     }
     let mut specs = Vec::new();
     for h in handles {
-      if let Ok(Some(tools)) = h.await {
-        specs.extend(tools.iter().map(|t| t.spec.clone()));
+      if let Ok(Some((cfg, tools))) = h.await {
+        specs.extend(tools.iter().filter(|t| visible(&cfg, t)).map(|t| t.spec.clone()));
       }
     }
     specs
+  }
+
+  /// Every tool of every running server, including the ones switched off or hidden.
+  pub async fn server_tools(&self, servers: &[McpServerConfig]) -> Vec<McpToolInfo> {
+    let mut out = Vec::new();
+    for cfg in servers.iter().filter(|s| s.enabled) {
+      let slot = self.slots.lock().unwrap_or_else(|e| e.into_inner()).get(&cfg.name).cloned();
+      let Some(slot) = slot else { continue };
+      let info = slot.info();
+      if info.state != "running" {
+        continue;
+      }
+      for t in info.tools.iter() {
+        let description = t.spec.description.split_once("] ").map(|(_, d)| d).unwrap_or(&t.spec.description);
+        out.push(McpToolInfo {
+          server: cfg.name.clone(),
+          name: t.spec.name.clone(),
+          original: t.original.clone(),
+          description: description.to_string(),
+          risk: t.spec.risk,
+          disabled: cfg.disabled_tools.iter().any(|d| *d == t.original),
+          hidden: cfg.read_only && t.spec.risk != Risk::Read,
+        });
+      }
+    }
+    out
   }
 
   fn find(&self, name: &str) -> Option<(Arc<Slot>, ToolEntry, Option<Arc<Conn>>, McpServerConfig)> {
@@ -924,15 +1087,25 @@ impl McpClients {
   }
 
   pub async fn call(&self, servers: &[McpServerConfig], name: &str, args: Value, timeout: Duration) -> Result<String> {
+    self.call_in(servers, name, args, timeout, None).await
+  }
+
+  /// [`Self::call`] for a tool call made in chat `chat_id`, so a question the
+  /// server asks meanwhile (elicitation, sampling) shows up there. Logged.
+  pub async fn call_in(&self, servers: &[McpServerConfig], name: &str, args: Value, timeout: Duration, chat_id: Option<&str>) -> Result<String> {
     let unknown = || invalid(format!("Unknown tool \"{name}\"."));
     let (slot, tool, conn, cfg) = self.find(name).ok_or_else(unknown)?;
-    if !servers.iter().any(|s| s.name == cfg.name && s.enabled) {
-      return Err(unknown());
+    let live = servers.iter().find(|s| s.name == cfg.name && s.enabled).ok_or_else(unknown)?;
+    if !visible(live, &tool) {
+      return Err(invalid(format!("{name} is switched off in Settings.")));
     }
     let conn = conn.ok_or_else(|| invalid(format!("MCP server \"{}\" is not running.", cfg.name)))?;
     let args = if args.is_null() { json!({}) } else { args };
+    let logged = LoggedCall::start("tool", &cfg.name, &tool.original, &args);
+    *slot.handler.chat.lock().unwrap_or_else(|e| e.into_inner()) = chat_id.map(String::from);
     let result = conn.request("tools/call", json!({ "name": tool.original, "arguments": args }), timeout).await;
-    match result {
+    *slot.handler.chat.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let out = match result {
       Ok(v) => flatten_result(&v),
       Err(e) => {
         if !conn.alive() {
@@ -945,7 +1118,8 @@ impl McpClients {
         }
         Err(e)
       }
-    }
+    };
+    logged.finish(out)
   }
 
   pub async fn status(&self, servers: &[McpServerConfig]) -> Vec<McpServerStatus> {
@@ -1113,6 +1287,172 @@ mod tests {
 
     clients.shutdown_all().await;
     cancel.cancel();
+  }
+
+  /// An HTTP server that, during `tools/call`, asks `roots/list` inside its event
+  /// stream and finishes only once the client POSTs the answer.
+  #[tokio::test(flavor = "multi_thread")]
+  async fn answers_requests_made_inside_an_event_stream() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let waiting: Arc<StdMutex<Option<oneshot::Sender<Value>>>> = Arc::new(StdMutex::new(None));
+    tokio::spawn(async move {
+      loop {
+        let Ok((mut sock, _)) = listener.accept().await else { return };
+        let waiting = waiting.clone();
+        tokio::spawn(async move {
+          let mut buf = Vec::new();
+          let (head_end, len) = loop {
+            let mut chunk = [0u8; 4096];
+            let n = sock.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+              return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf).into_owned();
+            if let Some(at) = text.find("\r\n\r\n") {
+              let len = text[..at]
+                .lines()
+                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                .unwrap_or(0);
+              break (at + 4, len);
+            }
+          };
+          while buf.len() < head_end + len {
+            let mut chunk = [0u8; 4096];
+            let n = sock.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+              return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+          }
+          let msg: Value = serde_json::from_slice(&buf[head_end..head_end + len]).unwrap();
+          let json_reply = |result: Value| {
+            let body = json!({ "jsonrpc": "2.0", "id": msg["id"], "result": result }).to_string();
+            format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+          };
+          let accepted = "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string();
+          let reply = match msg.get("method").and_then(Value::as_str) {
+            Some("initialize") => json_reply(json!({ "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } })),
+            Some("tools/list") => json_reply(json!({ "tools": [{ "name": "ask", "inputSchema": { "type": "object" } }] })),
+            Some("tools/call") => {
+              let (tx, rx) = oneshot::channel();
+              *waiting.lock().unwrap() = Some(tx);
+              let ask = json!({ "jsonrpc": "2.0", "id": 77, "method": "roots/list" });
+              let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {ask}\n\n");
+              sock.write_all(head.as_bytes()).await.unwrap();
+              let answer = rx.await.unwrap();
+              let done = json!({ "jsonrpc": "2.0", "id": msg["id"], "result": { "content": [{ "type": "text", "text": answer.to_string() }] } });
+              sock.write_all(format!("data: {done}\n\n").as_bytes()).await.unwrap();
+              return;
+            }
+            Some(_) => accepted,
+            None => {
+              if let Some(tx) = waiting.lock().unwrap().take() {
+                let _ = tx.send(msg["result"].clone());
+              }
+              accepted
+            }
+          };
+          let _ = sock.write_all(reply.as_bytes()).await;
+        });
+      }
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = crate::db::open(&dir.path().join("singl.db")).await.unwrap();
+    let assistant = Assistant::new(
+      Arc::new(tokio::sync::RwLock::new(pool)),
+      Arc::new(RwLock::new(Workspace::new(Some(dir.path().to_path_buf())))),
+      Default::default(),
+    );
+    let servers = vec![McpServerConfig { name: "h".into(), enabled: true, url: format!("http://127.0.0.1:{port}/mcp"), ..Default::default() }];
+    assert_eq!(assistant.mcp_clients.tools(&servers).await.len(), 1);
+    let out = assistant.mcp_clients.call(&servers, "h__ask", json!({}), Duration::from_secs(20)).await.unwrap();
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert!(v["roots"][0]["uri"].as_str().unwrap().starts_with("file:///"), "{out}");
+    assistant.mcp_clients.shutdown_all().await;
+  }
+
+  #[tokio::test(flavor = "multi_thread")]
+  #[ignore = "needs node on PATH"]
+  async fn answers_server_requests_and_lists_resources_and_prompts() {
+    let script = r#"
+      const rl = require('readline').createInterface({ input: process.stdin });
+      const send = (o) => console.log(JSON.stringify({ jsonrpc: '2.0', ...o }));
+      let callId = null, roots = null;
+      rl.on('line', l => {
+        const m = JSON.parse(l);
+        if (m.method === undefined && m.id === 'r1') { roots = m.result; send({ id: 'r2', method: 'elicitation/create', params: { message: 'm', requestedSchema: { type: 'object', properties: {} } } }); return; }
+        if (m.method === undefined && m.id === 'r2') { send({ id: callId, result: { content: [{ type: 'text', text: JSON.stringify({ roots, elicit: m.result }) }] } }); return; }
+        if (m.id === undefined) return;
+        let r = {};
+        if (m.method === 'initialize') r = { protocolVersion: '2025-06-18', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 't', version: '1' } };
+        else if (m.method === 'tools/list') r = { tools: [{ name: 'ask', inputSchema: { type: 'object' } }, { name: 'update_it', inputSchema: { type: 'object' } }] };
+        else if (m.method === 'tools/call') { callId = m.id; send({ id: 'r1', method: 'roots/list' }); return; }
+        else if (m.method === 'resources/list') r = m.params.cursor ? { resources: [{ uri: 'mem://b', name: 'b' }] } : { resources: [{ uri: 'mem://a', name: 'a' }], nextCursor: '2' };
+        else if (m.method === 'resources/read') r = { contents: [{ uri: m.params.uri, mimeType: 'text/plain', text: 'body of ' + m.params.uri }] };
+        else if (m.method === 'prompts/list') r = { prompts: [{ name: 'p', arguments: [{ name: 'x', required: true }] }] };
+        else if (m.method === 'prompts/get') r = { messages: [{ role: 'user', content: { type: 'text', text: 'hello ' + m.params.arguments.x } }] };
+        send({ id: m.id, result: r });
+      });
+    "#;
+    let dir = tempfile::tempdir().unwrap();
+    let pool = crate::db::open(&dir.path().join("singl.db")).await.unwrap();
+    let work = dir.path().join("my work");
+    std::fs::create_dir_all(&work).unwrap();
+    let assistant = Assistant::new(
+      Arc::new(tokio::sync::RwLock::new(pool)),
+      Arc::new(RwLock::new(Workspace::new(Some(work)))),
+      Default::default(),
+    );
+    let mut cfg = McpServerConfig {
+      name: "n".into(),
+      enabled: true,
+      command: "node".into(),
+      args: vec!["-e".into(), script.into()],
+      ..Default::default()
+    };
+    let clients = &assistant.mcp_clients;
+
+    // Tool filters: a switched-off tool is neither offered nor callable; read-only hides writes.
+    cfg.disabled_tools = vec!["ask".into()];
+    let servers = vec![cfg.clone()];
+    let names: Vec<_> = clients.tools(&servers).await.into_iter().map(|t| t.name).collect();
+    assert_eq!(names, ["n__update_it"]);
+    assert!(clients.call(&servers, "n__ask", json!({}), Duration::from_secs(30)).await.is_err());
+    cfg.disabled_tools.clear();
+    let servers = vec![cfg.clone()];
+    let all = clients.tools(&servers).await;
+    assert_eq!(all.len(), 2);
+    assert_eq!(clients.server_tools(&servers).await.len(), 2);
+
+    // The server's roots/list and elicitation requests are answered (no window: declined).
+    let out = clients.call(&servers, "n__ask", json!({}), Duration::from_secs(30)).await.unwrap();
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["roots"]["roots"][0]["uri"].as_str().unwrap().ends_with("/my%20work"), true, "{out}");
+    assert_eq!(v["elicit"]["action"], "decline");
+
+    // Resources page through the cursor; prompts expand.
+    let list = clients.resources(&servers, false).await;
+    assert_eq!(list.iter().map(|r| r.uri.as_str()).collect::<Vec<_>>(), ["mem://a", "mem://b"]);
+    assert_eq!(clients.read_resource("n", "mem://a").await.unwrap().text, "body of mem://a");
+    let prompts = clients.prompts(&servers).await;
+    assert!(prompts[0].arguments[0].required);
+    let got = clients.get_prompt("n", "p", HashMap::from([("x".to_string(), "w".to_string())])).await.unwrap();
+    assert_eq!(got.messages[0].text, "hello w");
+    let log = crate::assistant::mcp::host::call_log();
+    assert!(log.iter().any(|e| e.kind == "resource" && e.tool == "mem://a" && e.error.is_none()));
+
+    // Read-only: the write-named tool disappears.
+    cfg.read_only = true;
+    let servers = vec![cfg];
+    let names: Vec<_> = clients.tools(&servers).await.into_iter().map(|t| t.name).collect();
+    assert_eq!(names, ["n__ask"]);
+    clients.shutdown_all().await;
   }
 
   #[tokio::test(flavor = "multi_thread")]

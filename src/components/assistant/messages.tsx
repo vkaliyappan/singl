@@ -3,6 +3,7 @@
 import { PinIcon } from "./pin-icon";
 import { ImagePreview } from "./image-preview";
 import { createContext, memo, use, useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -21,6 +22,7 @@ import { PropsBlock } from "./rich/tool-views/property-panel";
 import { ToolResultView } from "./rich/tool-views";
 import {
   IconAlertTriangle,
+  IconArrowBackUp,
   IconCheck,
   IconChevronRight,
   IconBook2,
@@ -293,13 +295,81 @@ const markdownComponents: Components = {
   ),
 };
 
-/** A table in a scroll box, with a hover button to copy it as TSV (pastes into Excel). */
+/**
+ * A table in a scroll box, with a hover button to copy it as TSV (pastes into Excel).
+ * Past 5 body rows the headers sort on click and a box filters the rows. The
+ * cells are inline markdown the grid can't rebuild from children, so this works
+ * on the rendered DOM: rows are hidden or re-ordered in place (never removed).
+ */
 function MdTable({ children }: { children: React.ReactNode }) {
   const [el, setEl] = useState<HTMLTableElement | null>(null);
+  const [big, setBig] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<{ col: number; dir: 1 | -1 } | null>(null);
+
+  // Runs after every render: streamed rows and re-renders must be re-sorted and re-filtered.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!el) return;
+    const body = el.tBodies[0];
+    if (!body) return;
+    const rows = Array.from(body.rows);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the row count is only known from the rendered DOM
+    setBig(rows.length > 5);
+    rows.forEach((r, i) => {
+      if (!r.dataset.i) r.dataset.i = String(i);
+    });
+    const q = filter.trim().toLowerCase();
+    const text = (r: HTMLTableRowElement, c: number) => (r.cells[c]?.innerText ?? "").trim();
+    for (const r of rows) r.hidden = !!q && !r.innerText.toLowerCase().includes(q);
+    const order = [...rows].sort((x, y) => {
+      if (!sort) return Number(x.dataset.i) - Number(y.dataset.i);
+      const a = text(x, sort.col);
+      const b = text(y, sort.col);
+      if (!a !== !b) return a ? -1 : 1; // blanks last either way
+      const na = Number(a.replace(/,/g, ""));
+      const nb = Number(b.replace(/,/g, ""));
+      const d =
+        a && b && !Number.isNaN(na) && !Number.isNaN(nb)
+          ? na - nb
+          : a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+      return d * sort.dir;
+    });
+    order.forEach((r, i) => {
+      if (body.rows[i] !== r) body.insertBefore(r, body.rows[i] ?? null);
+    });
+    Array.from(el.tHead?.rows[0]?.cells ?? []).forEach((th, i) => {
+      th.style.cursor = rows.length > 5 ? "pointer" : "";
+      th.setAttribute("aria-sort", sort?.col === i ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+    });
+  });
+
   return (
     <div className="group/table relative my-2 overflow-hidden rounded-md border">
+      {big && (
+        <div className="flex items-center gap-2 border-b bg-muted/30 px-2 py-1">
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter rows…"
+            aria-label="Filter table rows"
+            className="h-5 w-32 rounded border bg-background px-1.5 text-[10.5px] outline-none focus:border-ring"
+          />
+          <span className="text-[10.5px] text-muted-foreground">Click a header to sort</span>
+        </div>
+      )}
       <div className="max-h-[28rem] overflow-auto">
-        <table ref={setEl} className="w-full border-collapse text-[11px]">
+        <table
+          ref={setEl}
+          className="w-full border-collapse text-[11px] [&_th[aria-sort=ascending]]:after:content-['_▲'] [&_th[aria-sort=descending]]:after:content-['_▼']"
+          onClick={(e) => {
+            if (!big) return;
+            const th = (e.target as HTMLElement).closest("th");
+            if (!th) return;
+            const col = (th as HTMLTableCellElement).cellIndex;
+            setSort((s) => (!s || s.col !== col ? { col, dir: 1 } : s.dir === 1 ? { col, dir: -1 } : null));
+          }}
+        >
           {children}
         </table>
       </div>
@@ -656,6 +726,50 @@ function SubAgentCard({
   );
 }
 
+/** Entity tools that save a snapshot the page can undo (see the backend's snapshots). */
+const UNDOABLE_TOOLS = new Set([
+  "entity_write",
+  "entity_edit",
+  "entity_create",
+  "entity_rename",
+  "entity_delete",
+]);
+
+/** Undo for one local entity change; shows Undone or the refusal inline. */
+function EntityUndo({ callId }: { callId: string }) {
+  const [status, setStatus] = useState<"idle" | "busy" | "done" | "failed">("idle");
+  const [error, setError] = useState("");
+  if (status === "done")
+    return <span className="text-[10px] text-muted-foreground">Undone</span>;
+  const undo = async () => {
+    setStatus("busy");
+    try {
+      await invoke<string>("assistant_entity_undo", { callId });
+      setStatus("done");
+    } catch (e) {
+      setError(String(e));
+      setStatus("failed");
+    }
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        disabled={status === "busy"}
+        onClick={undo}
+      >
+        <IconArrowBackUp />
+        Undo
+      </Button>
+      {status === "failed" && (
+        <span className="min-w-0 text-[10px] text-destructive">{error}</span>
+      )}
+    </div>
+  );
+}
+
 export function ToolCard({
   name,
   input,
@@ -717,6 +831,11 @@ export function ToolCard({
       {content && !isError && !running && (
         <div className="border-t px-2 py-2 empty:hidden">
           <ToolResultView name={name} input={input} content={content} />
+        </div>
+      )}
+      {callId && UNDOABLE_TOOLS.has(name) && !running && !isError && content !== undefined && (
+        <div className="border-t px-2 py-1.5">
+          <EntityUndo callId={callId} />
         </div>
       )}
       {open && (

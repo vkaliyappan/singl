@@ -78,6 +78,7 @@ pub fn build_body(req: &ApiRequest) -> Value {
     "model": req.model,
     "max_tokens": req.max_tokens,
     "stream": true,
+    "usage": {"include": true},
     "messages": convert_messages(&req.system, &req.messages),
   });
   if !req.effort.is_empty() {
@@ -108,6 +109,7 @@ pub struct Accumulator {
   reasoning: String,
   calls: BTreeMap<u64, Call>,
   finish_reason: String,
+  usage: super::super::usage::Usage,
 }
 
 impl Accumulator {
@@ -120,6 +122,9 @@ impl Accumulator {
     if let Some(err) = chunk.get("error").filter(|e| !e.is_null()) {
       let msg = err["message"].as_str().or_else(|| err.as_str()).unwrap_or("The provider reported an error.");
       return Err(CoreError::Invalid(msg.to_string()));
+    }
+    if chunk["usage"].is_object() {
+      self.usage = super::super::usage::Usage::from_openai(&chunk["usage"]);
     }
     let choice = &chunk["choices"][0];
     if let Some(t) = choice["delta"]["reasoning"].as_str().filter(|t| !t.is_empty()) {
@@ -180,7 +185,7 @@ impl Accumulator {
     if has_tools && stop_reason == "end_turn" {
       stop_reason = "tool_use".into();
     }
-    ApiReply { blocks, stop_reason }
+    ApiReply { blocks, stop_reason, usage: self.usage }
   }
 }
 

@@ -251,6 +251,8 @@ pub struct Parser {
   thinking: String,
   /// A new reasoning block began: its first text goes apart from the last.
   think_sep: bool,
+  /// Tokens and cost the CLI reported (claude `result`, codex `turn.completed`).
+  usage: crate::assistant::usage::Usage,
   last_step: Option<i64>,
   final_text: Option<String>,
   /// Ends the turn as a failure.
@@ -275,6 +277,7 @@ impl Parser {
       partial_seen: false,
       thinking: String::new(),
       think_sep: false,
+      usage: Default::default(),
       last_step: None,
       final_text: None,
       error: None,
@@ -407,6 +410,10 @@ impl Parser {
       }
       "result" => {
         self.results += 1;
+        let mut used = crate::assistant::usage::Usage::default();
+        used.merge_anthropic(&ev["usage"]);
+        used.cost_usd = ev["total_cost_usd"].as_f64();
+        self.usage.add(&used);
         self.set_session(ev["session_id"].as_str());
         let text = ev["result"].as_str().unwrap_or("").trim().to_string();
         if ev["is_error"].as_bool().unwrap_or(false) {
@@ -442,6 +449,7 @@ impl Parser {
         self.start_segment();
         self.emit(ev["item"]["text"].as_str().unwrap_or(""), on_text);
       }
+      "turn.completed" => self.usage.add(&crate::assistant::usage::Usage::from_codex(&ev["usage"])),
       "turn.failed" => {
         self.error = Some(ev["error"]["message"].as_str().unwrap_or("Codex failed.").to_string());
       }
@@ -528,7 +536,7 @@ impl Parser {
       .or_else(|| (!self.segment.trim().is_empty()).then(|| self.segment.trim().to_string()))
       .or_else(|| (!self.streamed.trim().is_empty()).then(|| self.streamed.trim().to_string()));
     match text {
-      Some(text) => Ok(CliReply { text, thinking: self.thinking, session_id: self.session }),
+      Some(text) => Ok(CliReply { text, thinking: self.thinking, session_id: self.session, usage: self.usage }),
       None => {
         let why = self
           .soft_error

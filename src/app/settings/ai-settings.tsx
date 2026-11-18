@@ -58,6 +58,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RiskBadge } from "@/components/assistant/messages";
+import { McpCallLog } from "@/components/assistant/mcp/call-log";
+import { McpToolFilters } from "@/components/assistant/mcp/server-tools";
+import { UsageSettings } from "@/components/assistant/usage-meter";
 import { errorMessage } from "@/lib/settings";
 import {
   type ApprovalMode,
@@ -79,6 +82,7 @@ import {
   type ProviderInfo,
   type ToolSpec,
 } from "@/lib/assistant/api";
+import { McpServerProfiles } from "@/components/assistant/mcp-server-profiles";
 import { AgentSettings } from "./agent-settings";
 
 function SectionCard({
@@ -346,7 +350,8 @@ function ServerDialog({
               checked={readOnly}
               onCheckedChange={(c) => setReadOnly(c === true)}
             />
-            Read-only: its tools only read, so they run without approval
+            Read-only: only tools that read are offered, and they run without
+            approval
           </label>
         </div>
         <DialogFooter>
@@ -371,6 +376,7 @@ function ServerDialog({
                 url: mode === "url" ? url.trim() : "",
                 headers: mode === "url" ? fromLines(headers) : {},
                 readOnly,
+                disabledTools: server?.disabledTools ?? [],
               })
             }
           >
@@ -639,6 +645,8 @@ export function AiSettings() {
 
       <AgentSettings />
 
+      <UsageSettings />
+
       <SectionCard
         title="Approvals"
         description="Each message picks Ask, Auto or Read-only in the composer, separately for changes in singl (files, flows, presets) and for the ThingWorx server (running services and flows, uploads). In Ask mode, read tools run and destructive tools always ask."
@@ -849,6 +857,8 @@ export function AiSettings() {
           </>
         )}
       </SectionCard>
+
+      <McpServerProfiles />
 
       <SectionCard
         title="MCP servers the assistant uses"
@@ -1078,6 +1088,22 @@ export function AiSettings() {
             })}
           </ul>
         )}
+        <McpToolFilters
+          servers={servers}
+          configs={s.mcpServers}
+          onReadOnly={(name, on) =>
+            void save({
+              mcpServers: s.mcpServers.map((m) =>
+                m.name === name ? { ...m, readOnly: on } : m,
+              ),
+            }).then(() => connect(name))
+          }
+          onChanged={() =>
+            assistantTools(false)
+              .then(setTools)
+              .catch(() => {})
+          }
+        />
       </SectionCard>
 
       <Card className="gap-0 py-0">
@@ -1113,6 +1139,8 @@ export function AiSettings() {
           </ul>
         )}
       </Card>
+
+      <McpCallLog />
 
       <ServerDialog
         server={editing}

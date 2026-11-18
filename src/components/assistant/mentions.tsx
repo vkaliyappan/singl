@@ -29,6 +29,13 @@ import { groupOf, type ComposerExtras } from "./composer-extras";
 import { effortLabel } from "./model-picker";
 import { RiskBadge } from "./messages";
 import type { ChatChoice } from "./use-assistant-chat";
+import {
+  McpArgsForm,
+  McpPromptIcon,
+  McpResourceIcon,
+  resourceLabel,
+  useMcpComposer,
+} from "./mcp/composer-mcp";
 
 export const MENTION_HINT = "/ commands · @ files · # tools · $ skills";
 
@@ -141,6 +148,11 @@ export function useMentions({
   const fileQuery = trigger === "@" ? token!.query : null;
   const needSkills = trigger === "/" || trigger === "$";
   const { skillList, loadSkills } = extras;
+  // MCP resources (`@`) and prompts (`/`) of the connected servers.
+  const mcp = useMcpComposer(editor, {
+    resources: trigger === "@",
+    prompts: trigger === "/",
+  });
 
   useEffect(() => {
     if (needSkills && skillList === null && isTauri()) loadSkills();
@@ -250,6 +262,19 @@ export function useMentions({
           }),
         ),
         ...skillItems("/", token).map((i) => ({ ...i, group: "Skills" })),
+        ...filterBy(mcp.prompts, q, (p) => [`${p.server}:${p.name}`, p.description ?? p.title ?? ""]).map(
+          (p): Item => ({
+            key: `mcp-prompt:${p.server}:${p.name}`,
+            label: `/${p.server}:${p.name}`,
+            detail: p.description ?? p.title ?? undefined,
+            group: "MCP prompts",
+            icon: <McpPromptIcon />,
+            run: () => {
+              replace(token, "");
+              mcp.pickPrompt(p);
+            },
+          }),
+        ),
       ].slice(0, MAX_ROWS);
       empty = "No matching commands";
     } else if (token.trigger === "$") {
@@ -310,7 +335,24 @@ export function useMentions({
           extras.addAttachments([f.path], f.isDir);
         },
       }));
-      items = [...pinItems, ...fileItems];
+      const mcpItems: Item[] = filterBy(
+        [...mcp.resources, ...mcp.templates],
+        q,
+        (r) => [resourceLabel(r), r.description ?? r.uri],
+      )
+        .slice(0, 20)
+        .map((r) => ({
+          key: `mcp-resource:${r.server}:${r.uri}`,
+          label: resourceLabel(r),
+          detail: r.description ?? r.uri,
+          group: "MCP resources",
+          icon: <McpResourceIcon />,
+          run: () => {
+            replace(token, "");
+            mcp.pickResource(r);
+          },
+        }));
+      items = [...pinItems, ...fileItems, ...mcpItems];
       empty = !loaded && !pinItems.length
         ? "Searching…"
         : token.query === ""
@@ -431,6 +473,8 @@ export function useMentions({
     setIndex,
     pick,
     onKeyDown,
+    argsForm: mcp.form,
+    closeArgsForm: mcp.closeForm,
   };
 }
 
@@ -438,6 +482,7 @@ export type Mentions = ReturnType<typeof useMentions>;
 
 /** The list, anchored above the composer card (its parent must be `relative`). */
 export function MentionPopup({ m }: { m: Mentions }) {
+  if (m.argsForm) return <McpArgsForm form={m.argsForm} onClose={m.closeArgsForm} />;
   if (!m.open) return null;
   return (
     <div

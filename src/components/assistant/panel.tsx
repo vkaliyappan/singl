@@ -24,6 +24,7 @@ import {
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { UsageMeter } from "@/components/assistant/usage-meter";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
@@ -67,6 +68,7 @@ import {
 } from "./composer-extras";
 import { isImageFile } from "@/lib/assistant/images";
 import { MENTION_HINT, MentionPopup, useMentions } from "./mentions";
+import { ElicitationCards } from "./mcp/elicitation";
 import {
   EditorContent,
   editorMarkdown,
@@ -333,6 +335,7 @@ function Header({
         </button>
       )}
       {!editing && <div className="min-w-4 flex-1 self-stretch" />}
+      <UsageMeter chatId={chat.chatId} />
       <Button
         variant="ghost"
         size="icon-sm"
@@ -892,6 +895,7 @@ export function AssistantPanel({
               showAlways={a.chatId !== null}
             />
           ))}
+          <ElicitationCards chatId={chat.chatId} />
 
           {chat.error && (
             <div

@@ -55,5 +55,13 @@ pub enum AssistantEvent {
   /// Asks the UI to do something only it can (navigate, select…). Answered with `assistant_ui_reply`.
   #[serde(rename_all = "camelCase")]
   UiRequest { request_id: String, action: String, args: Value },
+  /// A turn recorded token usage; the UI refreshes its meters.
+  #[serde(rename_all = "camelCase")]
+  UsageUpdated { chat_id: String },
+  /// An MCP server asks the user for input (a form from its JSON schema). Answered with `assistant_mcp_elicit_reply`.
+  #[serde(rename_all = "camelCase")]
+  ElicitationRequest { request_id: String, chat_id: Option<String>, server: String, message: String, schema: Value },
+  #[serde(rename_all = "camelCase")]
+  ElicitationResolved { request_id: String },
   ChatsChanged,
 }

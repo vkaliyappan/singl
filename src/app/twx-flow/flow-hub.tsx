@@ -1,5 +1,6 @@
 "use client";
 
+import { DataGrid, type GridColumn } from "@/components/data-grid";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1113,66 +1114,78 @@ function FlowTable({
   onDragStart: (e: React.DragEvent, flow: FlowRow) => void;
   onDragEnd: () => void;
 }) {
+  const columns: GridColumn<FlowRow>[] = [
+    {
+      key: "name",
+      label: "Flow",
+      kind: "text",
+      width: 260,
+      render: (flow) => (
+        // The cell is the drag handle: drop it on a folder to move the flow.
+        <span
+          draggable
+          onDragStart={(e) => onDragStart(e, flow)}
+          onDragEnd={onDragEnd}
+          className="block cursor-grab truncate font-medium active:cursor-grabbing"
+        >
+          <Link href={flowHref(flow.id)} className="hover:underline" draggable={false}>
+            {flow.name}
+          </Link>
+        </span>
+      ),
+    },
+    {
+      key: "folder",
+      label: "Folder",
+      kind: "text",
+      width: 160,
+      value: (flow) => (flow.folderId ? (byId.get(flow.folderId)?.name ?? "—") : "Root"),
+    },
+    {
+      key: "environment",
+      label: "Environment",
+      kind: "text",
+      width: 140,
+      value: (flow) => flow.environment || "—",
+      render: (flow) => <span className="font-mono text-[11px] text-muted-foreground">{flow.environment || "—"}</span>,
+    },
+    { key: "steps", label: "Steps", kind: "number", width: 80, value: (flow) => graphStats(flow.graph).nodes.length },
+    { key: "wires", label: "Wires", kind: "number", width: 80, value: (flow) => graphStats(flow.graph).edges.length },
+    {
+      key: "updatedAt",
+      label: "Updated",
+      kind: "date",
+      width: 130,
+      render: (flow) => <span className="text-muted-foreground">{formatRelativeTime(flow.updatedAt)}</span>,
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      kind: "none",
+      width: 70,
+      align: "end",
+      render: (flow) => (
+        <FlowActionsMenu
+          flowId={flow.id}
+          flowName={flow.name}
+          folderOptions={folderOptions}
+          onMove={(folderId) => onMove(flow.id, folderId)}
+          onExport={() => onExport(flow)}
+          onAddToChat={() => onAddToChat(flow)}
+          onDuplicate={() => onDuplicate(flow.id)}
+        />
+      ),
+    },
+  ];
   return (
-    <div className="overflow-hidden rounded-xl border">
-      <table className="w-full text-left text-xs">
-        <thead className="border-b bg-muted/50 text-muted-foreground">
-          <tr>
-            <th className="p-2.5 font-medium">Flow</th>
-            <th className="p-2.5 font-medium">Folder</th>
-            <th className="p-2.5 font-medium">Environment</th>
-            <th className="p-2.5 font-medium">Steps</th>
-            <th className="p-2.5 font-medium">Wires</th>
-            <th className="p-2.5 font-medium">Updated</th>
-            <th className="p-2.5" />
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {flows.map((flow) => {
-            const { nodes, edges } = graphStats(flow.graph);
-            return (
-              <tr
-                key={flow.id}
-                draggable
-                onDragStart={(e) => onDragStart(e, flow)}
-                onDragEnd={onDragEnd}
-                className="cursor-grab transition-colors hover:bg-muted/30 active:cursor-grabbing"
-              >
-                <td className="p-2.5 font-medium">
-                  <Link
-                    href={flowHref(flow.id)}
-                    className="hover:underline"
-                  >
-                    {flow.name}
-                  </Link>
-                </td>
-                <td className="p-2.5 text-muted-foreground">
-                  {flow.folderId ? (byId.get(flow.folderId)?.name ?? "—") : "Root"}
-                </td>
-                <td className="p-2.5 font-mono text-[11px] text-muted-foreground">
-                  {flow.environment || "—"}
-                </td>
-                <td className="p-2.5 tabular-nums">{nodes.length}</td>
-                <td className="p-2.5 tabular-nums">{edges.length}</td>
-                <td className="p-2.5 text-muted-foreground">
-                  {formatRelativeTime(flow.updatedAt)}
-                </td>
-                <td className="p-2.5 text-right">
-                  <FlowActionsMenu
-                    flowId={flow.id}
-                    flowName={flow.name}
-                    folderOptions={folderOptions}
-                    onMove={(folderId) => onMove(flow.id, folderId)}
-                    onExport={() => onExport(flow)}
-                    onAddToChat={() => onAddToChat(flow)}
-                    onDuplicate={() => onDuplicate(flow.id)}
-                  />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <DataGrid
+      id="flow-hub"
+      columns={columns}
+      rows={flows}
+      rowKey={(f) => f.id}
+      searchable={flows.length > 8}
+      pageSize={50}
+      csvName="flows"
+    />
   );
 }

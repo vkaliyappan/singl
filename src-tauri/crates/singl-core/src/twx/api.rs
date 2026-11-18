@@ -429,6 +429,18 @@ impl Client {
     res.text().await.map_err(|e| CoreError::Twx { status: 0, message: format!("{what} failed — {e}") })
   }
 
+  /// POSTs a raw body (the import feature's hand-built multipart form) and
+  /// resolves with the response text. `path` is under the Thingworx root.
+  pub(crate) async fn post_raw(&self, path: &str, content_type: &str, body: Vec<u8>, what: &str) -> Result<String> {
+    let req = self
+      .request(Method::POST, &format!("{}{path}", self.base), "application/json, text/xml, */*")
+      .header("X-XSRF-TOKEN", "TWX-XSRF-TOKEN-VALUE")
+      .header("Content-Type", content_type)
+      .body(body);
+    let res = self.send(req, what).await?;
+    res.text().await.map_err(|e| CoreError::Twx { status: 0, message: format!("{what} failed — {e}") })
+  }
+
   /// Exports a project as `<file_name>` (".zip" optional) into SystemRepository/`remote_dir`.
   pub async fn export_project_to_zip(&self, project: &str, remote_dir: &str, file_name: &str) -> Result<()> {
     let name = file_name.strip_suffix(".zip").unwrap_or(file_name);
@@ -630,6 +642,14 @@ impl Client {
     serde_json::from_str::<serde::de::IgnoredAny>(&text)
       .map_err(|e| CoreError::Twx { status: 0, message: format!("{what} failed — unexpected response: {e}") })?;
     Ok(text)
+  }
+
+  /// `PUT /Things/<thing>/Properties/*`: writes several property values at once.
+  pub async fn set_property_values(&self, thing: &str, values: &Value) -> Result<()> {
+    let what = format!("SetProperties {thing}");
+    let url = format!("{}/Things/{}/Properties/*", self.base, encode(thing));
+    self.send(self.request(Method::PUT, &url, "application/json").json(values), &what).await?;
+    Ok(())
   }
 
   pub async fn delete_repository_file(&self, repository: &str, path: &str) -> Result<()> {

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { WorldClock } from "@/components/world-clock"
 import { TeamsPresenceKeeper } from "@/components/teams-presence-keeper"
+import { ServerHealthTiles } from "@/components/server-health-tiles"
 
 export default function Home() {
   return (
@@ -73,6 +74,8 @@ export default function Home() {
 
           <WorldClock />
         </div>
+
+        <ServerHealthTiles />
 
         <TeamsPresenceKeeper />
       </div>

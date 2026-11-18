@@ -123,6 +123,8 @@ pub struct ApiReply {
   pub blocks: Vec<Block>,
   /// `"end_turn"`, `"tool_use"`, `"max_tokens"`… (provider wording mapped to Anthropic's).
   pub stop_reason: String,
+  /// What the call used, when the provider said.
+  pub usage: super::usage::Usage,
 }
 
 /// Streamed answer text, or (as the second sink providers take) streamed reasoning.
@@ -182,6 +184,8 @@ pub struct CliReply {
   pub thinking: String,
   /// The CLI's session id, to resume next turn.
   pub session_id: Option<String>,
+  /// What the turn used; empty when the CLI reports none.
+  pub usage: super::usage::Usage,
 }
 
 /// Cancelled is reported as [`crate::CoreError::Cancelled`].

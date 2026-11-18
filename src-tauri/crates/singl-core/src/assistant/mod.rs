@@ -20,10 +20,12 @@ pub mod providers;
 pub mod runner;
 pub mod settings;
 pub mod skills;
+pub mod snapshots;
 pub mod store;
 pub mod subagents;
 pub mod tools;
 pub mod types;
+pub mod usage;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -164,7 +166,7 @@ pub struct Assistant {
 
 impl Assistant {
   pub fn new(db: Arc<tokio::sync::RwLock<SqlitePool>>, workspace: Arc<RwLock<Workspace>>, procs: ProcRegistry) -> Arc<Self> {
-    Arc::new(Self {
+    let this = Arc::new(Self {
       db,
       workspace,
       procs,
@@ -183,7 +185,9 @@ impl Assistant {
       steered: Mutex::new(HashMap::new()),
       allow_all: Mutex::new(HashSet::new()),
       mcp_endpoint: RwLock::new(None),
-    })
+    });
+    this.mcp_clients.set_host(Arc::downgrade(&this));
+    this
   }
 
   /// Where events go: the app crate forwards them to the window.
@@ -346,6 +350,7 @@ impl Assistant {
           if settings.disabled_project_servers.contains(&s.name) {
             s.enabled = false;
           }
+          s.disabled_tools = settings.project_disabled_tools.get(&s.name).cloned().unwrap_or_default();
           servers.push(s);
         }
       }
@@ -416,6 +421,7 @@ impl Assistant {
   pub async fn tool_specs(&self, external: bool) -> Vec<ToolSpec> {
     let mut specs: Vec<ToolSpec> =
       self.tools.iter().filter(|t| external || !t.spec.external_only).map(|t| t.spec.clone()).collect();
+    self.mcp_clients.sync_roots(&self.mcp_roots().await).await;
     match self.mcp_servers().await {
       Ok(servers) => specs.extend(self.mcp_clients.tools(&servers).await),
       Err(e) => log_warn(&format!("assistant: MCP servers unavailable: {e}")),
@@ -563,7 +569,7 @@ impl Assistant {
         return Err(CoreError::Invalid("The user declined this action.".into()));
       }
       let timeout = self.settings().await?.tool_timeout();
-      return self.mcp_clients.call(&servers, name, args, timeout).await;
+      return self.mcp_clients.call_in(&servers, name, args, timeout, meta.chat_id.as_deref()).await;
     }
     Err(CoreError::Invalid(format!("Unknown tool \"{name}\".")))
   }

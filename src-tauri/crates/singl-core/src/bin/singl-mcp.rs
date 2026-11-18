@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use singl_core::agents::process::ProcRegistry;
 use singl_core::assistant::Assistant;
-use singl_core::assistant::mcp::server::{Caller, error_response, handle_payload};
+use singl_core::assistant::mcp::server::{Caller, client_name, error_response, handle_payload};
 use singl_core::assistant::mcp::discovery_path;
 use singl_core::db;
 use singl_core::workspace::Workspace;
@@ -62,6 +62,7 @@ async fn main() {
     }
   });
 
+  let mut client: Option<String> = None;
   let mut lines = BufReader::new(tokio::io::stdin()).lines();
   while let Ok(Some(line)) = lines.next_line().await {
     if line.trim().is_empty() {
@@ -74,9 +75,13 @@ async fn main() {
         continue;
       }
     };
-    let (backend, tx) = (backend.clone(), tx.clone());
+    // The client's name (from `initialize`) picks its tool profile in the app.
+    if let Some(name) = client_name(&msg) {
+      client = Some(name);
+    }
+    let (backend, tx, client) = (backend.clone(), tx.clone(), client.clone());
     tokio::spawn(async move {
-      if let Some(reply) = backend.handle(msg).await {
+      if let Some(reply) = backend.handle(msg, client).await {
         let _ = tx.send(reply);
       }
     });
@@ -90,12 +95,12 @@ async fn main() {
 }
 
 impl Backend {
-  async fn handle(&self, msg: Value) -> Option<Value> {
+  async fn handle(&self, msg: Value, client: Option<String>) -> Option<Value> {
     match self {
-      Backend::Local(assistant) => handle_payload(assistant, msg, &Caller::external()).await,
-      Backend::Proxy { client, url, token } => {
+      Backend::Local(assistant) => handle_payload(assistant, msg, &Caller::external_as(client)).await,
+      Backend::Proxy { client: http, url, token } => {
         let id = msg.get("id").cloned();
-        match forward(client, url, token, &msg).await {
+        match forward(http, url, token, client.as_deref(), &msg).await {
           Ok(reply) => reply,
           Err(e) => id.map(|id| error_response(id, -32603, &format!("Could not reach the singl app: {e}"))),
         }
@@ -104,9 +109,18 @@ impl Backend {
   }
 }
 
-async fn forward(client: &reqwest::Client, url: &str, token: &str, msg: &Value) -> Result<Option<Value>, String> {
-  let resp = client
-    .post(url)
+async fn forward(
+  http: &reqwest::Client,
+  url: &str,
+  token: &str,
+  client: Option<&str>,
+  msg: &Value,
+) -> Result<Option<Value>, String> {
+  let mut req = http.post(url);
+  if let Some(name) = client.filter(|n| n.is_ascii()) {
+    req = req.header("X-Singl-Client", name);
+  }
+  let resp = req
     .header("Authorization", format!("Bearer {token}"))
     .header("Content-Type", "application/json")
     .header("Accept", "application/json, text/event-stream")
@@ -133,7 +147,7 @@ async fn running_app(db_path: &std::path::Path) -> Option<Backend> {
   let token = file.get("token")?.as_str()?.to_string();
   let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(3)).build().ok()?;
   let probe = json!({ "jsonrpc": "2.0", "id": 0, "method": "ping" });
-  let reply = tokio::time::timeout(Duration::from_secs(3), forward(&client, &url, &token, &probe)).await.ok()?;
+  let reply = tokio::time::timeout(Duration::from_secs(3), forward(&client, &url, &token, None, &probe)).await.ok()?;
   reply.ok()??;
   Some(Backend::Proxy { client, url, token })
 }

@@ -106,6 +106,7 @@ pub struct Accumulator {
   blocks: Vec<Block>,
   open: Option<Open>,
   stop_reason: String,
+  usage: super::super::usage::Usage,
 }
 
 impl Accumulator {
@@ -177,7 +178,9 @@ impl Accumulator {
         }),
         _ => {}
       },
+      "message_start" => self.usage.merge_anthropic(&ev["message"]["usage"]),
       "message_delta" => {
+        self.usage.merge_anthropic(&ev["usage"]);
         if let Some(r) = ev["delta"]["stop_reason"].as_str() {
           self.stop_reason = r.to_string();
         }
@@ -186,7 +189,7 @@ impl Accumulator {
         let msg = ev["error"]["message"].as_str().unwrap_or("The Anthropic API reported an error.");
         return Err(CoreError::Invalid(msg.to_string()));
       }
-      // message_start, message_stop, ping
+      // message_stop, ping
       _ => {}
     }
     Ok(())
@@ -201,7 +204,7 @@ impl Accumulator {
     } else {
       "end_turn".into()
     };
-    ApiReply { blocks: self.blocks, stop_reason }
+    ApiReply { blocks: self.blocks, stop_reason, usage: self.usage }
   }
 }
 

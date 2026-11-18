@@ -43,8 +43,12 @@ pub struct AssistantSettings {
   pub disabled_project_servers: Vec<String>,
   /// How long one MCP tool call may take, approval wait included, in minutes.
   pub tool_timeout_minutes: u32,
+  /// What each outside MCP client (by `clientInfo.name`, or `*`) may use. Empty: everything.
+  pub mcp_profiles: Vec<super::mcp::profiles::McpProfile>,
   /// OAuth sign-ins by server URL. Never in the view.
   pub mcp_oauth: HashMap<String, super::mcp::oauth::OAuthToken>,
+  /// Tools switched off per project (`.mcp.json`) server; Settings-page servers keep theirs in their config.
+  pub project_disabled_tools: HashMap<String, Vec<String>>,
 }
 
 impl Default for AssistantSettings {
@@ -65,7 +69,9 @@ impl Default for AssistantSettings {
       project_mcp_root: String::new(),
       disabled_project_servers: Vec::new(),
       tool_timeout_minutes: DEFAULT_TOOL_TIMEOUT_MINUTES,
+      mcp_profiles: Vec::new(),
       mcp_oauth: HashMap::new(),
+      project_disabled_tools: HashMap::new(),
     }
   }
 }
@@ -84,8 +90,11 @@ pub struct McpServerConfig {
   pub headers: HashMap<String, String>,
   /// Working directory for a stdio server (the workspace root for project servers).
   pub cwd: String,
-  /// Its tools only read, so they run without approval.
+  /// Its tools only read, so they run without approval, and only the ones
+  /// that resolve to a read are offered.
   pub read_only: bool,
+  /// The server's own names of tools switched off.
+  pub disabled_tools: Vec<String>,
   /// `"app"` (Settings page) or `"project"` (`.mcp.json`). Not stored.
   #[serde(skip_deserializing)]
   pub source: String,
@@ -272,6 +281,13 @@ pub async fn load(pool: &SqlitePool) -> Result<AssistantSettings> {
   Ok(settings)
 }
 
+/// Replaces the MCP client tool profiles.
+pub async fn set_mcp_profiles(pool: &SqlitePool, profiles: Vec<super::mcp::profiles::McpProfile>) -> Result<()> {
+  let mut settings = load(pool).await?;
+  settings.mcp_profiles = super::mcp::profiles::normalize(profiles);
+  store(pool, &settings).await
+}
+
 /// Stores (`Some`) or forgets (`None`) the sign-in for the server at `url`.
 pub async fn set_oauth(pool: &SqlitePool, url: &str, token: Option<super::mcp::oauth::OAuthToken>) -> Result<()> {
   let mut settings = load(pool).await?;
@@ -281,6 +297,21 @@ pub async fn set_oauth(pool: &SqlitePool, url: &str, token: Option<super::mcp::o
     }
     None => {
       settings.mcp_oauth.remove(url);
+    }
+  }
+  store(pool, &settings).await
+}
+
+/// Switches off exactly `tools` (the server's own names) of the server `server`.
+pub async fn set_disabled_tools(pool: &SqlitePool, server: &str, tools: Vec<String>) -> Result<()> {
+  let mut settings = load(pool).await?;
+  match settings.mcp_servers.iter_mut().find(|s| s.name == server) {
+    Some(s) => s.disabled_tools = tools,
+    None if tools.is_empty() => {
+      settings.project_disabled_tools.remove(server);
+    }
+    None => {
+      settings.project_disabled_tools.insert(server.to_string(), tools);
     }
   }
   store(pool, &settings).await
@@ -363,6 +394,7 @@ fn server_from(name: &str, def: &Value, root: &Path) -> McpServerConfig {
     headers,
     cwd: if cwd.is_empty() { root_str.clone() } else { root.join(cwd).to_string_lossy().into_owned() },
     read_only: false,
+    disabled_tools: Vec::new(),
     source: "project".into(),
     signed_in: false,
   }

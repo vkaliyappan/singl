@@ -20,3 +20,4 @@ pub mod admin;
 pub mod import;
 pub mod permissions;
 pub mod deps;
+pub mod subscriptions;

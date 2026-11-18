@@ -1,0 +1,120 @@
+"use client"
+
+import { useMemo } from "react"
+import { IconCopy } from "@tabler/icons-react"
+import { toast } from "sonner"
+import { cn } from "@/lib/utils"
+import { DataGrid, type GridColumn } from "@/components/data-grid"
+import type { LogRow } from "@/lib/twx-logs"
+
+const LEVEL_STYLE: Record<string, string> = {
+  ERROR: "bg-red-500/15 text-red-600 dark:text-red-400",
+  WARN: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  INFO: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+}
+
+export function LevelBadge({ level }: { level: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-block w-12 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold",
+        LEVEL_STYLE[level] ?? "bg-muted text-muted-foreground",
+      )}
+    >
+      {level || "?"}
+    </span>
+  )
+}
+
+export function rowKey(r: LogRow) {
+  return `${r.timestamp}|${r.level}|${r.thread}|${r.origin}|${r.message}`
+}
+
+const time = (ms: number) => {
+  const d = new Date(ms)
+  const p = (n: number, w = 2) => String(n).padStart(w, "0")
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
+}
+
+function copyRow(r: LogRow) {
+  const head = [time(r.timestamp), r.level, r.origin, r.thread, r.user].filter(Boolean).join(" | ")
+  navigator.clipboard.writeText(`${head}\n${r.message}`).then(
+    () => toast.success("Copied log entry"),
+    () => toast.error("Could not copy"),
+  )
+}
+
+const COLUMNS: GridColumn<LogRow>[] = [
+  {
+    key: "timestamp",
+    label: "Time",
+    kind: "date",
+    width: 220,
+    render: (r) => <span className="font-mono text-[11px] whitespace-nowrap text-muted-foreground">{time(r.timestamp)}</span>,
+  },
+  { key: "level", label: "Level", kind: "text", width: 112, value: (r) => r.level || "?", render: (r) => <LevelBadge level={r.level} /> },
+  { key: "message", label: "Message", kind: "text", width: 520, maxWidthRem: 40, render: (r) => <span className="block truncate font-mono text-xs">{firstLine(r.message)}</span> },
+  { key: "origin", label: "Origin", kind: "text", width: 200 },
+  { key: "thread", label: "Thread", kind: "text", width: 140, hidden: true },
+  { key: "user", label: "User", kind: "text", width: 110 },
+  { key: "instance", label: "Instance", kind: "text", width: 110, hidden: true },
+]
+
+const firstLine = (m: string) => {
+  const i = m.indexOf("\n")
+  return i < 0 ? m : `${m.slice(0, i)} …`
+}
+
+function Detail({ r }: { r: LogRow }) {
+  return (
+    <div className="flex items-start gap-2 px-3 py-2">
+      <pre
+        className={cn(
+          "min-w-0 flex-1 font-mono text-xs break-words whitespace-pre-wrap",
+          (r.level === "DEBUG" || r.level === "TRACE") && "text-muted-foreground",
+        )}
+      >
+        {r.message}
+      </pre>
+      <button
+        type="button"
+        aria-label="Copy entry"
+        onClick={() => copyRow(r)}
+        className="shrink-0 text-muted-foreground hover:text-foreground"
+      >
+        <IconCopy className="size-3.5" />
+      </button>
+    </div>
+  )
+}
+
+export function LogTable({ rows }: { rows: LogRow[] }) {
+  // Identical lines can repeat, so a counter keeps each key unique without
+  // tying it to the row's position (live tail prepends rows).
+  const keys = useMemo(() => {
+    const seen = new Map<string, number>()
+    const out = new Map<LogRow, string>()
+    for (const r of rows) {
+      const base = rowKey(r)
+      const n = seen.get(base) ?? 0
+      seen.set(base, n + 1)
+      out.set(r, `${base}|${n}`)
+    }
+    return out
+  }, [rows])
+
+  return (
+    <DataGrid
+      id="twx-logs"
+      columns={COLUMNS}
+      rows={rows}
+      rowKey={(r) => keys.get(r) ?? ""}
+      renderRowDetail={(r) => <Detail r={r} />}
+      initialSort={{ key: "timestamp", dir: "desc" }}
+      pageSize={100}
+      csvName="twx-logs"
+      searchPlaceholder="Search entries…"
+      emptyText="No log entries"
+    />
+  )
+}
