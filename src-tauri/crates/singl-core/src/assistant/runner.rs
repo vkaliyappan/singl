@@ -298,19 +298,9 @@ impl Assistant {
       Some(id) => store::get(&pool, id).await?,
       None => store::create(&pool).await?,
     };
-    let cancel = CancellationToken::new();
-    {
-      let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
-      if running.contains_key(&chat.id) {
-        return Err(CoreError::Invalid("This chat is still answering. Stop it or wait.".into()));
-      }
-      running.insert(chat.id.clone(), cancel.clone());
-    }
-    self.set_turn_tools(&chat.id, req.tools.clone());
-    self.set_turn_mode(
-      &chat.id,
-      Some(super::TurnModes { local: req.approval, server: req.server_approval.unwrap_or(req.approval) }),
-    );
+    // Everything that can fail on the request comes before the chat is marked
+    // running: an early return after that would leave it "still answering"
+    // for good, refusing every later message.
     let mut blocks = read_attachments(&req.attachments, self.workspace_root().as_deref())?;
     let dropped = inline_attachments(&req.inline_attachments, &blocks)?;
     blocks.extend(dropped);
@@ -333,6 +323,19 @@ impl Assistant {
         })
         .collect::<Result<_>>()?
     };
+    let cancel = CancellationToken::new();
+    {
+      let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+      if running.contains_key(&chat.id) {
+        return Err(CoreError::Invalid("This chat is still answering. Stop it or wait.".into()));
+      }
+      running.insert(chat.id.clone(), cancel.clone());
+    }
+    self.set_turn_tools(&chat.id, req.tools.clone());
+    self.set_turn_mode(
+      &chat.id,
+      Some(super::TurnModes { local: req.approval, server: req.server_approval.unwrap_or(req.approval) }),
+    );
     let mut msg = Message::new(Role::User, blocks);
     msg.skills = skill_names;
     msg.provider = Some(req.provider.clone());

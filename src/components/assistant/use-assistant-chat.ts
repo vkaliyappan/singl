@@ -469,6 +469,11 @@ export function useAssistantChat(opts: {
         setRunningProvider(null);
         setMessages((m) => m.filter((x) => !x.id.startsWith("tmp-")));
         setError(errorMessage(e));
+        // Refused because a turn is still going: show it as running, so Stop is there.
+        if (existing)
+          void assistantChatRunning(existing)
+            .then((on) => on && chatIdRef.current === existing && setRunning(true))
+            .catch(() => {});
         return false;
       }
     },
