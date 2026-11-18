@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod http;
+pub mod oauth;
 pub mod server;
 
 use std::path::{Path, PathBuf};

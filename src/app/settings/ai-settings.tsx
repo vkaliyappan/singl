@@ -14,6 +14,8 @@ import {
   IconEyeOff,
   IconPlus,
   IconLoader2,
+  IconLogin,
+  IconLogout,
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
@@ -61,6 +63,8 @@ import {
   type ApprovalMode,
   assistantMcpInfo,
   assistantMcpRestart,
+  assistantMcpSignIn,
+  assistantMcpSignOut,
   assistantMcpServers,
   assistantModels,
   assistantProviders,
@@ -406,6 +410,15 @@ export function AiSettings() {
   const [mcpRoot, setMcpRoot] = useState("");
   /** Servers a Restart is (re)starting; it waits for every enabled one. */
   const [connecting, setConnecting] = useState<Set<string>>(new Set());
+  /** Server whose browser sign-in is under way. */
+  const [signingIn, setSigningIn] = useState<string | null>(null);
+  /** A server that needs a client ID before it can sign in. */
+  const [clientIdFor, setClientIdFor] = useState<{
+    name: string;
+    message: string;
+  } | null>(null);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
 
   const refreshMcp = useCallback(() => {
     assistantMcpInfo()
@@ -493,6 +506,34 @@ export function AiSettings() {
       .catch((e) => toast.error(errorMessage(e)))
       .finally(() => setConnecting(new Set()));
   };
+
+  const signIn = (name: string, id?: string, secret?: string) => {
+    setSigningIn(name);
+    void assistantMcpSignIn(name, id, secret)
+      .then((list) => {
+        setServers(list);
+        setClientIdFor(null);
+        setClientId("");
+        setClientSecret("");
+        toast.success(`Signed in to ${name}`);
+      })
+      .catch((e) => {
+        const msg = errorMessage(e);
+        const at = msg.indexOf("NEEDS_CLIENT_ID:");
+        if (at >= 0)
+          setClientIdFor({
+            name,
+            message: msg.slice(at + "NEEDS_CLIENT_ID:".length).trim(),
+          });
+        else toast.error(msg);
+      })
+      .finally(() => setSigningIn(null));
+  };
+
+  const signOut = (name: string) =>
+    void assistantMcpSignOut(name)
+      .then(setServers)
+      .catch((e) => toast.error(errorMessage(e)));
 
   const setServerEnabled = (st: McpServerStatus, on: boolean) => {
     const saved =
@@ -861,6 +902,11 @@ export function AiSettings() {
               const isApp = st.source === "app" && idx >= 0;
               const busy = connecting.has(st.name);
               const state = busy ? "starting" : st.state;
+              const needsSignIn =
+                st.http &&
+                !st.signedIn &&
+                /(401|403)|unauthori[sz]ed/i.test(st.error ?? "");
+              const waiting = signingIn === st.name;
               return (
                 <li
                   key={`${st.source}:${st.name}`}
@@ -886,12 +932,75 @@ export function AiSettings() {
                         {st.toolCount} tools
                       </span>
                     </div>
-                    {st.error && !busy && (
+                    {st.error && !busy && !waiting && (
                       <p className="mt-0.5 text-[10px] break-words text-destructive">
                         {st.error}
                       </p>
                     )}
+                    {clientIdFor?.name === st.name && (
+                      <div className="mt-1.5 space-y-1">
+                        <p className="text-[10px] text-muted-foreground">
+                          {clientIdFor.message}
+                        </p>
+                        <div className="flex gap-1.5">
+                          <Input
+                            className="h-7 text-xs"
+                            placeholder="Client ID"
+                            value={clientId}
+                            onChange={(e) => setClientId(e.target.value)}
+                          />
+                          <Input
+                            className="h-7 text-xs"
+                            type="password"
+                            placeholder="Client secret (if required)"
+                            value={clientSecret}
+                            onChange={(e) => setClientSecret(e.target.value)}
+                          />
+                          <Button
+                            size="sm"
+                            className="h-7"
+                            disabled={!clientId.trim() || waiting}
+                            onClick={() =>
+                              signIn(st.name, clientId.trim(), clientSecret.trim())
+                            }
+                          >
+                            Sign in
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                  {st.http && (needsSignIn || st.signedIn || waiting) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 gap-1 px-2 text-[10px]"
+                      disabled={signingIn !== null}
+                      title={
+                        st.signedIn
+                          ? "Forget this sign-in"
+                          : "Sign in through the browser"
+                      }
+                      onClick={() =>
+                        st.signedIn ? signOut(st.name) : signIn(st.name)
+                      }
+                    >
+                      {waiting ? (
+                        <>
+                          <IconLoader2 className="size-3 animate-spin" />
+                          Waiting for browser…
+                        </>
+                      ) : st.signedIn ? (
+                        <>
+                          <IconLogout className="size-3" /> Sign out
+                        </>
+                      ) : (
+                        <>
+                          <IconLogin className="size-3" /> Sign in
+                        </>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon-xs"

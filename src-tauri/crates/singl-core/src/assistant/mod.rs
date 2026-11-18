@@ -21,6 +21,7 @@ pub mod runner;
 pub mod settings;
 pub mod skills;
 pub mod store;
+pub mod subagents;
 pub mod tools;
 pub mod types;
 
@@ -151,6 +152,8 @@ pub struct Assistant {
   turn_modes: Mutex<HashMap<String, TurnModes>>,
   /// Tools a chat's running turn may use, when the user narrowed them.
   turn_tools: Mutex<HashMap<String, Vec<String>>>,
+  /// Sub-agent settings and budget of a chat's running turn, when it may start them.
+  turn_sub_agents: Mutex<HashMap<String, Arc<subagents::Turn>>>,
   /// Chats (or `"mcp"`) where the user said "don't ask again".
   allow_all: Mutex<HashSet<String>>,
   mcp_endpoint: RwLock<Option<McpEndpoint>>,
@@ -173,6 +176,7 @@ impl Assistant {
       collected: Mutex::new(HashMap::new()),
       turn_tools: Mutex::new(HashMap::new()),
       turn_modes: Mutex::new(HashMap::new()),
+      turn_sub_agents: Mutex::new(HashMap::new()),
       allow_all: Mutex::new(HashSet::new()),
       mcp_endpoint: RwLock::new(None),
     })
@@ -342,7 +346,65 @@ impl Assistant {
         }
       }
     }
+    self.attach_sign_ins(&settings, &mut servers).await;
     Ok(servers)
+  }
+
+  /// Adds the stored OAuth token to each HTTP server that has no `Authorization`
+  /// header of its own, refreshing it first when it is about to expire.
+  async fn attach_sign_ins(&self, settings: &AssistantSettings, servers: &mut [McpServerConfig]) {
+    static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    for s in servers.iter_mut().filter(|s| !s.url.is_empty()) {
+      if s.headers.keys().any(|k| k.eq_ignore_ascii_case("authorization")) {
+        continue;
+      }
+      let Some(mut token) = settings.mcp_oauth.get(&s.url).filter(|t| t.signed_in()).cloned() else { continue };
+      if token.expiring() {
+        // One refresh at a time: a rotated refresh token works only once.
+        let _gate = REFRESH.lock().await;
+        let pool = self.pool().await;
+        let current = settings::load(&pool).await.ok().and_then(|st| st.mcp_oauth.get(&s.url).cloned());
+        match current {
+          Some(t) if !t.expiring() => token = t,
+          _ => match mcp::oauth::refresh(&s.url, &token).await {
+            Ok(t) => {
+              if let Err(e) = settings::set_oauth(&pool, &s.url, Some(t.clone())).await {
+                log_warn(&format!("assistant MCP: could not save refreshed token for {}: {e}", s.name));
+              }
+              token = t;
+            }
+            Err(e) => log_warn(&format!("assistant MCP: refreshing the sign-in for {} failed: {e}", s.name)),
+          },
+        }
+      }
+      s.headers.insert("Authorization".into(), format!("Bearer {}", token.access_token));
+      s.signed_in = true;
+    }
+  }
+
+  /// Browser sign-in for the HTTP server `name`; restarts it with the new token.
+  pub async fn mcp_sign_in(&self, name: &str, client_id: Option<String>, client_secret: Option<String>) -> Result<()> {
+    let servers = self.mcp_servers().await?;
+    let s = servers.iter().find(|s| s.name == name).ok_or_else(|| CoreError::Invalid(format!("No MCP server \"{name}\".")))?;
+    if s.url.is_empty() {
+      return Err(CoreError::Invalid(format!("\"{name}\" is not an HTTP server; it has nothing to sign in to.")));
+    }
+    let pool = self.pool().await;
+    let known = settings::load(&pool).await?.mcp_oauth.get(&s.url).cloned();
+    let token = mcp::oauth::sign_in(&s.url, client_id, client_secret, known.as_ref()).await?;
+    settings::set_oauth(&pool, &s.url, Some(token)).await?;
+    self.mcp_clients.restart(name).await;
+    Ok(())
+  }
+
+  /// Forgets the sign-in for `name` (its client id too, so a new one can be entered).
+  pub async fn mcp_sign_out(&self, name: &str) -> Result<()> {
+    let servers = self.mcp_servers().await?;
+    if let Some(s) = servers.iter().find(|s| s.name == name && !s.url.is_empty()) {
+      settings::set_oauth(&self.pool().await, &s.url, None).await?;
+    }
+    self.mcp_clients.restart(name).await;
+    Ok(())
   }
 
   /// Every tool: built-in ones, then those of connected MCP servers.
@@ -394,15 +456,39 @@ impl Assistant {
     };
   }
 
-  /// The tools a chat's turn sees: [`Self::tool_specs`] narrowed to its selection.
+  pub(crate) fn set_sub_agent_turn(&self, chat_id: &str, turn: Option<Arc<subagents::Turn>>) {
+    let mut map = self.turn_sub_agents.lock().unwrap_or_else(|e| e.into_inner());
+    match turn {
+      Some(t) => map.insert(chat_id.to_string(), t),
+      None => map.remove(chat_id),
+    };
+  }
+
+  /// The running turn's sub-agent budget; `None` when it may not start any.
+  pub fn sub_agent_turn(&self, chat_id: &str) -> Option<Arc<subagents::Turn>> {
+    self.turn_sub_agents.lock().unwrap_or_else(|e| e.into_inner()).get(chat_id).cloned()
+  }
+
+  /// The cancel token of a chat's running turn.
+  pub(crate) fn turn_cancel(&self, chat_id: &str) -> Option<CancellationToken> {
+    self.running.lock().unwrap_or_else(|e| e.into_inner()).get(chat_id).cloned()
+  }
+
+  /// The tools a chat's turn sees: [`Self::tool_specs`] narrowed to its
+  /// selection, plus `agent_task` when the turn may start sub-agents (the
+  /// composer's sub-agent switch decides that, not the tool selection).
   pub async fn tool_specs_for(&self, chat_id: &str) -> Vec<ToolSpec> {
     let specs = self.tool_specs(false).await;
     let modes = self.turn_mode(Some(chat_id));
-    specs
+    let mut out: Vec<ToolSpec> = specs
       .into_iter()
       .filter(|t| self.tool_allowed(Some(chat_id), &t.name))
       .filter(|t| modes.offers(&t.name, t.risk))
-      .collect()
+      .collect();
+    if let Some(turn) = self.sub_agent_turn(chat_id) {
+      out.push(subagents::spec(&turn.settings));
+    }
+    out
   }
 
   /// The risk of one call. `run_ui_action` takes the risk the page declared.
@@ -449,11 +535,14 @@ impl Assistant {
 
   async fn run_tool(self: &Arc<Self>, name: &str, args: &Value, meta: &CallMeta) -> Result<String> {
     let args = if args.is_null() { json!({}) } else { args.clone() };
+    if name == subagents::TOOL {
+      return subagents::run(self.clone(), args, meta.clone()).await;
+    }
     if !self.tool_allowed(meta.chat_id.as_deref(), name) {
       return Err(CoreError::Invalid(format!("{name} is switched off for this message.")));
     }
     if let Some(tool) = self.tools.iter().find(|t| t.spec.name == name) {
-      if tool.spec.external_only && meta.source == "assistant" {
+      if tool.spec.external_only && meta.source != "mcp" {
         return Err(CoreError::Invalid(format!("{name} is not available inside an assistant turn.")));
       }
       let risk = self.risk_of(name, &args, tool.spec.risk);

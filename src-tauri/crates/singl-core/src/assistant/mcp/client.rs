@@ -41,6 +41,9 @@ pub struct McpServerStatus {
   pub state: String,
   pub error: Option<String>,
   pub tool_count: usize,
+  /// An HTTP server, so it can take an OAuth sign-in.
+  pub http: bool,
+  pub signed_in: bool,
 }
 
 fn invalid(msg: impl Into<String>) -> CoreError {
@@ -965,6 +968,8 @@ impl McpClients {
           state: state.into(),
           error,
           tool_count,
+          http: !s.url.is_empty(),
+          signed_in: s.signed_in,
         }
       })
       .collect()

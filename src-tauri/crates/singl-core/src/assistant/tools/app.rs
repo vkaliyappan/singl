@@ -184,6 +184,7 @@ pub fn tools() -> Vec<Tool> {
             inline_attachments: Vec::new(),
             references: Vec::new(),
             images: Vec::new(),
+            sub_agents: None,
           })
           .await?;
         ser(&json!({ "chatId": chat_id, "answer": text }))

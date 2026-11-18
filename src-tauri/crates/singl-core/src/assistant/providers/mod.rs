@@ -160,6 +160,10 @@ pub struct CliRequest {
   pub foreign_mcp: Vec<String>,
   /// Images of the new message (base64).
   pub images: Vec<CliImage>,
+  /// Sub-agent controls; only Claude Code takes them. `None` = the CLI's default.
+  pub sub_agents: Option<super::subagents::SubAgentSettings>,
+  /// The `--agents` file for claude (filled in by [`cli::run`]).
+  pub agents_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]

@@ -39,6 +39,8 @@ pub struct AssistantSettings {
   pub project_mcp_root: String,
   /// Names of project (`.mcp.json`) servers switched off.
   pub disabled_project_servers: Vec<String>,
+  /// OAuth sign-ins by server URL. Never in the view.
+  pub mcp_oauth: HashMap<String, super::mcp::oauth::OAuthToken>,
 }
 
 impl Default for AssistantSettings {
@@ -58,6 +60,7 @@ impl Default for AssistantSettings {
       use_project_mcp: true,
       project_mcp_root: String::new(),
       disabled_project_servers: Vec::new(),
+      mcp_oauth: HashMap::new(),
     }
   }
 }
@@ -81,6 +84,9 @@ pub struct McpServerConfig {
   /// `"app"` (Settings page) or `"project"` (`.mcp.json`). Not stored.
   #[serde(skip_deserializing)]
   pub source: String,
+  /// Its `Authorization` header comes from an OAuth sign-in. Not stored.
+  #[serde(skip)]
+  pub signed_in: bool,
 }
 
 /// What the Settings page sees.
@@ -246,6 +252,20 @@ pub async fn load(pool: &SqlitePool) -> Result<AssistantSettings> {
   Ok(settings)
 }
 
+/// Stores (`Some`) or forgets (`None`) the sign-in for the server at `url`.
+pub async fn set_oauth(pool: &SqlitePool, url: &str, token: Option<super::mcp::oauth::OAuthToken>) -> Result<()> {
+  let mut settings = load(pool).await?;
+  match token {
+    Some(t) => {
+      settings.mcp_oauth.insert(url.to_string(), t);
+    }
+    None => {
+      settings.mcp_oauth.remove(url);
+    }
+  }
+  store(pool, &settings).await
+}
+
 pub async fn update(pool: &SqlitePool, patch: AssistantSettingsPatch) -> Result<AssistantSettings> {
   let mut settings = load(pool).await?;
   settings.apply(patch);
@@ -324,6 +344,7 @@ fn server_from(name: &str, def: &Value, root: &Path) -> McpServerConfig {
     cwd: if cwd.is_empty() { root_str.clone() } else { root.join(cwd).to_string_lossy().into_owned() },
     read_only: false,
     source: "project".into(),
+    signed_in: false,
   }
 }
 

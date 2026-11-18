@@ -174,6 +174,27 @@ pub async fn assistant_mcp_servers(state: State<'_, AppState>) -> IpcResult<Vec<
   Ok(state.assistant.mcp_clients.status(&servers).await)
 }
 
+/// Browser OAuth sign-in for an HTTP MCP server, then reports every server.
+#[tauri::command]
+pub async fn assistant_mcp_sign_in(
+  state: State<'_, AppState>,
+  name: String,
+  client_id: Option<String>,
+  client_secret: Option<String>,
+) -> IpcResult<Vec<McpServerStatus>> {
+  state.assistant.mcp_sign_in(&name, client_id, client_secret).await?;
+  let servers = state.assistant.mcp_servers().await?;
+  let _ = state.assistant.mcp_clients.tools(&servers).await;
+  Ok(state.assistant.mcp_clients.status(&servers).await)
+}
+
+#[tauri::command]
+pub async fn assistant_mcp_sign_out(state: State<'_, AppState>, name: String) -> IpcResult<Vec<McpServerStatus>> {
+  state.assistant.mcp_sign_out(&name).await?;
+  let servers = state.assistant.mcp_servers().await?;
+  Ok(state.assistant.mcp_clients.status(&servers).await)
+}
+
 /// Restarts one connected MCP server (or starts it), then reports every server.
 #[tauri::command]
 pub async fn assistant_mcp_restart(state: State<'_, AppState>, name: String) -> IpcResult<Vec<McpServerStatus>> {

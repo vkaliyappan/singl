@@ -1,7 +1,8 @@
 "use client";
 
-// Assistant panel for every route: a drawer over the right side of the page, or a floating window
-// that can be moved and resized. AssistantDock stays mounted, so chat state
+// Assistant panel for every route: a drawer over the right side of the page, a
+// panel docked beside it (the page shrinks), or a floating window that can be
+// moved and resized. AssistantDock stays mounted, so chat state
 // (and a running turn) survives closing the panel or switching layout.
 
 import {
@@ -31,6 +32,7 @@ export function useDockChat() {
 const OPEN_KEY = "singl.assistant.open";
 const DRAWER_KEY = "singl.assistant.drawerWidth";
 const FLOAT_KEY = "singl.assistant.floating";
+const BESIDE_KEY = "singl.assistant.beside";
 const RECT_KEY = "singl.assistant.rect";
 
 const listeners = new Set<() => void>();
@@ -88,10 +90,11 @@ function readDrawerWidth() {
 }
 
 /**
- * The assistant as a sheet over the right side of the page: the page keeps its
- * full width underneath and stays usable. Drag the left edge to resize.
+ * The assistant on the right side of the page: a sheet over it (the page keeps
+ * its full width underneath), or `beside` it so the page shrinks to make room.
+ * Drag the left edge to resize.
  */
-function Drawer({ children }: { children: React.ReactNode }) {
+function Drawer({ beside, children }: { beside: boolean; children: React.ReactNode }) {
   const [width, setWidth] = useState(readDrawerWidth);
   useEffect(() => {
     try {
@@ -118,7 +121,11 @@ function Drawer({ children }: { children: React.ReactNode }) {
     <div
       role="complementary"
       aria-label="Assistant"
-      className="absolute inset-y-0 right-0 z-40 flex max-w-[85%] border-l bg-background shadow-2xl duration-200 animate-in slide-in-from-right"
+      className={
+        beside
+          ? "relative flex max-w-[85%] shrink-0 border-l bg-background"
+          : "absolute inset-y-0 right-0 z-40 flex max-w-[85%] border-l bg-background shadow-2xl duration-200 animate-in slide-in-from-right"
+      }
       style={{ width }}
     >
       <div
@@ -233,6 +240,41 @@ function useFloating() {
       };
     },
     readFloating,
+    () => false,
+  );
+}
+
+let besideState: boolean | null = null;
+
+function readBeside() {
+  if (besideState === null) {
+    try {
+      besideState = localStorage.getItem(BESIDE_KEY) === "1";
+    } catch {
+      besideState = false;
+    }
+  }
+  return besideState;
+}
+
+/** Drawer over the page vs. docked beside it. */
+function toggleBeside() {
+  besideState = !readBeside();
+  try {
+    localStorage.setItem(BESIDE_KEY, besideState ? "1" : "0");
+  } catch {}
+  listeners.forEach((l) => l());
+}
+
+function useBeside() {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => {
+        listeners.delete(l);
+      };
+    },
+    readBeside,
     () => false,
   );
 }
@@ -353,6 +395,7 @@ export function AssistantDock({ children }: { children: React.ReactNode }) {
   const open = useAssistantOpen() && !onPage;
   const close = useCallback(() => setAssistantOpen(false), []);
   const floating = useFloating();
+  const beside = useBeside();
   const chat = useAssistantChat({
     onNeedPanel: () => setAssistantOpen(true),
     panelOpen: open || onPage,
@@ -376,14 +419,15 @@ export function AssistantDock({ children }: { children: React.ReactNode }) {
 
   return (
     <DockChat.Provider value={chat}>
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        {children}
+      {/* Same tree in every layout, so switching never remounts the page. */}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
         {open && !floating && (
-          <Drawer>
+          <Drawer beside={beside}>
             <AssistantPanel
               chat={chat}
               onClose={close}
-              layout={{ floating: false, onToggleFloating: toggleFloating }}
+              layout={{ floating: false, onToggleFloating: toggleFloating, beside, onToggleBeside: toggleBeside }}
             />
           </Drawer>
         )}

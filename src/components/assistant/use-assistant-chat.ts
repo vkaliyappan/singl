@@ -20,6 +20,7 @@ import {
   type Risk,
   type ApprovalMode,
   type ToolScope,
+  type SubAgentSettings,
 } from "@/lib/assistant/api";
 import { emitAssistantChange } from "@/lib/assistant/changes";
 
@@ -60,6 +61,7 @@ export type SendExtras = {
   /** Pinned screen items. */
   references?: { kind: string; label: string; screen?: string; content: string }[];
   images?: { name: string; mediaType: string; data: string }[];
+  subAgents?: SubAgentSettings;
 };
 
 export type ChatChoice = { provider: string; model: string; effort?: string };
@@ -456,6 +458,7 @@ export function useAssistantChat(opts: {
           inlineAttachments: extras?.dropped ?? [],
           references: extras?.references?.length ? extras.references : undefined,
           images: extras?.images?.length ? extras.images : undefined,
+          subAgents: extras?.subAgents,
         });
         adoptNext.current = false;
         if (!chatIdRef.current) setChat(id);

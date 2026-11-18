@@ -2,7 +2,7 @@
 
 import { PinIcon } from "./pin-icon";
 import { ImagePreview } from "./image-preview";
-import { memo, useEffect, useMemo, useState } from "react";
+import { createContext, memo, use, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -27,6 +27,7 @@ import {
   IconCopy,
   IconLoader2,
   IconFolder,
+  IconHierarchy2,
   IconPaperclip,
   IconTool,
 } from "@tabler/icons-react";
@@ -485,6 +486,113 @@ function thinkingText(b: Block): string {
     : "";
 }
 
+/** Sub-agent tool calls carry this source plus the `agent_task` call id (subagents.rs). */
+const SUB_AGENT_SOURCE = "sub-agent:";
+const SUB_AGENT_TOOL = "agent_task";
+/** Live tool calls of running sub-agents, by the `agent_task` call that started them. */
+const SubAgentCalls = createContext<Map<string, LiveCall[]>>(new Map());
+
+/** The parent call id of a sub-agent's tool call, or null for the turn's own. */
+function subAgentParent(source: string | undefined) {
+  return source?.startsWith(SUB_AGENT_SOURCE) ? source.slice(SUB_AGENT_SOURCE.length) : null;
+}
+
+/** One sub-agent: what it was asked, on which model, what it is doing, then its answer. */
+function SubAgentCard({
+  callId,
+  input,
+  content,
+  isError,
+  running,
+}: {
+  callId?: string;
+  input: unknown;
+  content?: string;
+  isError?: boolean;
+  running?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const children = use(SubAgentCalls).get(callId ?? "") ?? [];
+  const inp = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const description = typeof inp.description === "string" && inp.description ? inp.description : "Sub-agent";
+  const prompt = typeof inp.prompt === "string" ? inp.prompt : "";
+  const model = typeof inp.model === "string" ? inp.model : "";
+  const recent = children.slice(-6);
+  return (
+    <div
+      className={cn(
+        "my-1.5 rounded-md border border-violet-500/30 bg-violet-500/[0.03] text-xs",
+        isError && "border-destructive/40",
+      )}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
+      >
+        <IconChevronRight
+          className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+        />
+        {running ? (
+          <IconLoader2 className="size-3.5 shrink-0 animate-spin text-violet-600 dark:text-violet-400" />
+        ) : isError ? (
+          <IconAlertTriangle className="size-3.5 shrink-0 text-destructive" />
+        ) : (
+          <IconHierarchy2 className="size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{description}</span>
+        {model && (
+          <span className="shrink-0 rounded-full border px-1.5 py-px text-[10px] text-muted-foreground" title={model}>
+            {shortModelName(model)}
+          </span>
+        )}
+        {running && children.length > 0 && (
+          <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+            {children.length} tool call{children.length > 1 ? "s" : ""}
+          </span>
+        )}
+        {isError && <span className="text-[10px] text-destructive">failed</span>}
+      </button>
+      {running && recent.length > 0 && (
+        <ul className="space-y-0.5 border-t px-2 py-1.5" aria-label="What the sub-agent is doing">
+          {recent.map((c) => (
+            <li key={c.callId} className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              {c.done ? (
+                c.isError ? (
+                  <IconAlertTriangle className="size-3 shrink-0 text-destructive" />
+                ) : (
+                  <IconCheck className="size-3 shrink-0" />
+                )
+              ) : (
+                <IconLoader2 className="size-3 shrink-0 animate-spin" />
+              )}
+              <span className="truncate font-mono">{c.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {content && !running && (
+        <div className="max-h-80 overflow-auto border-t px-2.5 py-2">
+          {isError ? (
+            <p className="text-[11.5px] text-destructive">{content}</p>
+          ) : (
+            <Markdown text={content} className="text-[12px]/relaxed" />
+          )}
+        </div>
+      )}
+      {open && prompt && (
+        <div className="border-t px-2 py-2">
+          <p className="mb-0.5 text-[10px] font-medium text-muted-foreground">Task</p>
+          <pre className="selectable max-h-48 overflow-auto rounded bg-muted/50 p-1.5 font-mono text-[10.5px] whitespace-pre-wrap">
+            {prompt}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ToolCard({
   name,
   input,
@@ -492,6 +600,7 @@ export function ToolCard({
   isError,
   running,
   source,
+  callId,
 }: {
   name: string;
   input: unknown;
@@ -499,8 +608,12 @@ export function ToolCard({
   isError?: boolean;
   running?: boolean;
   source?: string;
+  /** Lets a sub-agent card find its live tool calls. */
+  callId?: string;
 }) {
   const [open, setOpen] = useState(false);
+  if (name === SUB_AGENT_TOOL)
+    return <SubAgentCard callId={callId} input={input} content={content} isError={isError} running={running} />;
   return (
     <div
       className={cn(
@@ -767,6 +880,7 @@ function AssistantBlocks({
           return (
             <ToolCard
               key={b.id}
+              callId={b.id}
               name={b.name}
               input={b.input}
               content={r?.content}
@@ -849,8 +963,17 @@ export function MessageList({
     return { visible, results, savedToolIds: ids };
   }, [messages]);
 
+  // Sub-agents' own calls show inside their card, not as cards of the turn.
+  const subAgentCalls = useMemo(() => {
+    const m = new Map<string, LiveCall[]>();
+    for (const c of Object.values(liveCalls)) {
+      const parent = subAgentParent(c.source);
+      if (parent) m.set(parent, [...(m.get(parent) ?? []), c]);
+    }
+    return m;
+  }, [liveCalls]);
   const pending = Object.values(liveCalls).filter(
-    (c) => !savedToolIds.has(c.callId),
+    (c) => !savedToolIds.has(c.callId) && !subAgentParent(c.source),
   );
   // A saved tool_use whose result has not been saved yet may have a live result.
   const merged = useMemo(() => {
@@ -884,6 +1007,7 @@ export function MessageList({
   });
 
   return (
+    <SubAgentCalls value={subAgentCalls}>
     <div className="flex flex-col gap-5">
       {visible.map((m, i) =>
         m.role === "user" ? (
@@ -939,6 +1063,7 @@ export function MessageList({
             ) : (
               <ToolCard
                 key={c.callId}
+                callId={c.callId}
                 name={c.name}
                 input={c.input}
                 content={c.content}
@@ -963,5 +1088,6 @@ export function MessageList({
         </div>
       )}
     </div>
+    </SubAgentCalls>
   );
 }

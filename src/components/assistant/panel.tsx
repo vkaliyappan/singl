@@ -5,6 +5,8 @@ import {
   IconCheck,
   IconHistory,
   IconLayoutSidebarRight,
+  IconPin,
+  IconPinnedOff,
   IconChevronUp,
   IconMinus,
   IconWindowMaximize,
@@ -73,6 +75,7 @@ import {
 } from "./composer-editor";
 import { ApprovalModePicker, useApprovalMode, type ApprovalModes } from "./approval-mode";
 import { ModelPicker, useModelChoice } from "./model-picker";
+import { SubAgentPicker, subAgentsFor, useSubAgents } from "./sub-agents";
 import type {
   AssistantChat,
   ChatChoice,
@@ -244,6 +247,9 @@ function History({ chat }: { chat: AssistantChat }) {
 export type PanelLayout = {
   floating: boolean;
   onToggleFloating: () => void;
+  /** Side panel only: docked beside the page (page shrinks) instead of over it. */
+  beside?: boolean;
+  onToggleBeside?: () => void;
   /** Starts moving the floating window (pointer down on the header). */
   onDragStart?: (e: React.PointerEvent) => void;
   /** Floating window only. */
@@ -351,6 +357,17 @@ function Header({
           {layout.state === "max" ? <IconWindowMinimize /> : <IconWindowMaximize />}
         </Button>
       )}
+      {layout?.onToggleBeside && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={layout.beside ? "Show over the page" : "Dock beside the page"}
+          title={layout.beside ? "Show over the page (drawer)" : "Dock beside the page (page shrinks)"}
+          onClick={layout.onToggleBeside}
+        >
+          {layout.beside ? <IconPinnedOff /> : <IconPin />}
+        </Button>
+      )}
       {layout && (
         <Button
           variant="ghost"
@@ -404,6 +421,7 @@ function Composer({
   const pins = usePins();
   const [modelOpen, setModelOpen] = useState(false);
   const { modes: approval, setModes: saveApproval } = useApprovalMode();
+  const { prefs: subAgents, setPrefs: setSubAgents } = useSubAgents();
   // New modes also apply to the turn already running, and settle what it is
   // waiting on, per scope: Auto approves the open cards, Read-only denies them.
   const setApproval = (m: ApprovalModes) => {
@@ -469,6 +487,7 @@ function Composer({
       skillNames: extras.skillNames,
       approval: approval.local,
       serverApproval: approval.server,
+      subAgents: subAgentsFor(subAgents, choice?.provider),
       references: pins.map((p) => ({
         kind: p.kind,
         label: p.label,
@@ -527,6 +546,12 @@ function Composer({
               <span className="truncate">{context}</span>
             </span>
             <span className="flex-1" />
+            <SubAgentPicker
+              prefs={subAgents}
+              onChange={setSubAgents}
+              choice={choice}
+              providers={providers}
+            />
             <ApprovalModePicker modes={approval} onChange={setApproval} />
             <ModelPicker
               providers={providers}

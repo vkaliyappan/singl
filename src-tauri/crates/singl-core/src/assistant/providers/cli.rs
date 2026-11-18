@@ -120,7 +120,14 @@ pub fn build_launch(req: &CliRequest, mcp_file: Option<&Path>, system_file: Opti
       l.args.extend(["--append-system-prompt-file".into(), path_str(system_file)]);
       // `=` keeps each variadic flag from swallowing what follows.
       l.args.push(format!("--allowedTools=mcp__{SERVER}"));
-      l.args.push(format!("--disallowedTools={CLAUDE_DENIED}"));
+      match &req.sub_agents {
+        // Sub-agents off: deny the tool that starts them (`Agent`, `Task` in older releases).
+        Some(s) if !s.enabled => l.args.push(format!("--disallowedTools={CLAUDE_DENIED},Agent,Task")),
+        _ => l.args.push(format!("--disallowedTools={CLAUDE_DENIED}")),
+      }
+      if let Some(file) = &req.agents_file {
+        l.args.extend(["--agents".into(), file.to_string_lossy().into_owned()]);
+      }
       flag(&mut l.args, "--model", &req.model);
       flag(&mut l.args, "--effort", &req.effort);
       if let Some(id) = resume {
@@ -595,6 +602,9 @@ pub async fn run(
     _ => None,
   };
   let system_file = (req.provider == "claude").then(|| files.write("md", &req.system)).transpose()?;
+  if let Some(s) = req.sub_agents.as_ref().filter(|s| req.provider == "claude" && s.enabled && !s.models.is_empty()) {
+    req.agents_file = Some(files.write("json", &crate::assistant::subagents::claude_agents_json(s))?);
+  }
   // Claude takes images inline; the other CLIs read them from files.
   let image_files = if req.provider == "claude" {
     Vec::new()
@@ -880,6 +890,8 @@ mod tests {
       read_only: false,
       foreign_mcp: vec!["context7".into(), "my server".into(), "singl".into()],
       images: Vec::new(),
+      sub_agents: None,
+      agents_file: None,
     }
   }
 
@@ -967,6 +979,26 @@ mod tests {
     let json: Value = serde_json::from_str(&mcp_config_json(&r, false)).unwrap();
     assert_eq!(json["mcpServers"]["singl"]["headers"]["Authorization"], "Bearer tok");
     assert_eq!(json["mcpServers"]["singl"]["type"], "http");
+    assert!(!a.contains(&"--agents".to_string()));
+  }
+
+  #[test]
+  fn claude_sub_agent_flags() {
+    use crate::assistant::subagents::{SubAgentSettings, claude_agents_json};
+    let mut r = req("claude");
+    r.sub_agents = Some(SubAgentSettings::default());
+    let l = build_launch(&r, None, None, &[]).unwrap();
+    assert!(l.args.iter().any(|x| x.starts_with("--disallowedTools=") && x.ends_with(",Agent,Task")));
+    let on = SubAgentSettings { enabled: true, ..Default::default() }.normalized("claude", "");
+    r.sub_agents = Some(on.clone());
+    r.agents_file = Some(PathBuf::from("agents.json"));
+    let l = build_launch(&r, None, None, &[]).unwrap();
+    let at = l.args.iter().position(|x| x == "--agents").unwrap();
+    assert_eq!(l.args[at + 1], "agents.json");
+    assert!(!l.args.iter().any(|x| x.ends_with(",Agent,Task")));
+    let agents: Value = serde_json::from_str(&claude_agents_json(&on)).unwrap();
+    assert_eq!(agents["singl-haiku-5-5"]["model"], "claude-haiku-5-5");
+    assert_eq!(agents["singl-sonnet-5-5"]["model"], "claude-sonnet-5-5");
   }
 
   #[test]

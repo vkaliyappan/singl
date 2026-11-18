@@ -124,6 +124,9 @@ export type McpServerStatus = {
   state: "stopped" | "starting" | "running" | "error" | string;
   error: string | null;
   toolCount: number;
+  /** An HTTP server, so it can take an OAuth sign-in. */
+  http: boolean;
+  signedIn: boolean;
 };
 
 export type McpInfo = {
@@ -237,6 +240,22 @@ export type SendRequest = {
   references?: ReferenceInput[];
   /** Images (max 8, base64 without the data: prefix, <= 5 MB each). */
   images?: { name: string; mediaType: string; data: string }[];
+  /** Sub-agent controls; omitted = off (Claude Code keeps its own default). */
+  subAgents?: SubAgentSettings;
+};
+
+/** Composer sub-agent controls, sent with each message. */
+export type SubAgentSettings = {
+  enabled: boolean;
+  /** Model ids of the message's provider; empty = the backend default. */
+  models: string[];
+  maxParallel: number;
+  maxPerTurn: number;
+  maxSteps: number;
+  /** Empty = the message's own effort. */
+  effort: string;
+  /** Nudge the model to split broad work across sub-agents. */
+  prefer: boolean;
 };
 
 export type ReferenceInput = {
@@ -322,6 +341,19 @@ export const assistantMcpServers = () =>
   invoke<McpServerStatus[]>("assistant_mcp_servers");
 export const assistantMcpRestart = (name: string) =>
   invoke<McpServerStatus[]>("assistant_mcp_restart", { name });
+/** Opens the browser to sign in; resolves once the login finished (up to 5 minutes). */
+export const assistantMcpSignIn = (
+  name: string,
+  clientId?: string,
+  clientSecret?: string,
+) =>
+  invoke<McpServerStatus[]>("assistant_mcp_sign_in", {
+    name,
+    clientId: clientId || null,
+    clientSecret: clientSecret || null,
+  });
+export const assistantMcpSignOut = (name: string) =>
+  invoke<McpServerStatus[]>("assistant_mcp_sign_out", { name });
 
 /** Subscribes to `assistant://event`; resolves to the unlisten function. */
 export async function onAssistantEvent(

@@ -11,8 +11,9 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use super::events::AssistantEvent;
-use super::providers::{self, ApiRequest, CliRequest};
-use super::tools::CallMeta;
+use super::providers::{self, ApiRequest, CliRequest, TextSink};
+use super::subagents::{self, SubAgentSettings};
+use super::tools::{CallMeta, ToolSpec};
 use super::types::{Block, Chat, Message, Role};
 use super::{Assistant, prompt, store};
 use crate::{CoreError, Result};
@@ -60,6 +61,50 @@ pub struct SendRequest {
   /// Pasted, dropped or picked images (base64).
   #[serde(default)]
   pub images: Vec<ImageInput>,
+  /// Sub-agent controls from the composer; `None` = off (Claude Code keeps its own default).
+  #[serde(default)]
+  pub sub_agents: Option<SubAgentSettings>,
+}
+
+/// One model loop's fixed inputs: a turn's, or a sub-agent's.
+pub struct Job {
+  pub provider: String,
+  pub model: String,
+  pub effort: String,
+  /// Skills whose instructions join the system prompt (rebuilt every step, so it follows the screen).
+  pub skills: Vec<String>,
+  /// Appended to the system prompt.
+  pub system_extra: String,
+  pub tools: Vec<ToolSpec>,
+  pub max_steps: usize,
+  pub chat_id: String,
+  /// `"assistant"` for a turn, `sub-agent:<call id>` for a sub-agent.
+  pub source: String,
+}
+
+impl Job {
+  /// A sub-agent's call ids get its own prefix: models number calls per
+  /// conversation, and two sub-agents must not share a card in the UI.
+  fn meta(&self, id: &str) -> CallMeta {
+    let call_id = if self.source == "assistant" { id.to_string() } else { format!("{}/{id}", self.source) };
+    CallMeta { chat_id: Some(self.chat_id.clone()), source: self.source.clone(), call_id }
+  }
+}
+
+/// Where a loop keeps its messages: the chat (stored and shown) or, for a
+/// sub-agent, a scratch list only it sees.
+pub enum History<'a> {
+  Chat(&'a mut Chat),
+  Scratch(Vec<Message>),
+}
+
+impl History<'_> {
+  fn messages(&self) -> &[Message] {
+    match self {
+      Self::Chat(chat) => &chat.messages,
+      Self::Scratch(list) => list,
+    }
+  }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -301,6 +346,15 @@ impl Assistant {
       self.set_turn_mode(&chat.id, None);
       return Err(e);
     }
+    let sub_agents = req
+      .sub_agents
+      .clone()
+      .filter(|s| s.enabled && providers::is_api(&req.provider))
+      .map(|s| s.normalized(&req.provider, &req.model));
+    if let Some(s) = sub_agents {
+      let turn = subagents::Turn::new(s, &req.provider, &req.effort, req.skills.clone());
+      self.set_sub_agent_turn(&chat.id, Some(Arc::new(turn)));
+    }
     self.emit(AssistantEvent::ChatsChanged);
     self.emit(AssistantEvent::MessageSaved { chat_id: chat.id.clone(), message: msg });
     self.emit(AssistantEvent::TurnStarted { chat_id: chat.id.clone(), provider: req.provider.clone(), model: req.model.clone() });
@@ -317,6 +371,7 @@ impl Assistant {
     self.running.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat.id);
     self.set_turn_tools(&chat.id, None);
     self.set_turn_mode(&chat.id, None);
+    self.set_sub_agent_turn(&chat.id, None);
     let cancelled = matches!(result, Err(CoreError::Cancelled)) || cancel.is_cancelled();
     let error = match &result {
       Err(CoreError::Cancelled) | Ok(_) => None,
@@ -336,46 +391,88 @@ impl Assistant {
 
   /// The system prompt, plus the instructions of the skills picked for this turn.
   fn system(&self, req: &SendRequest) -> Result<String> {
-    let skills = super::skills::prompt_section(self.workspace_root().as_deref(), &req.skills)?;
+    self.system_for(&req.skills)
+  }
+
+  /// The system prompt with these skills' instructions.
+  pub(crate) fn system_for(&self, skills: &[String]) -> Result<String> {
+    let skills = super::skills::prompt_section(self.workspace_root().as_deref(), skills)?;
     Ok(prompt::system_prompt(&self.context.prompt_block(), &self.context.get()) + &skills)
   }
 
   async fn api_turn(self: &Arc<Self>, chat: &mut Chat, req: &SendRequest, cancel: &CancellationToken) -> Result<String> {
-    let settings = self.settings().await?;
-    let api_key = match req.provider.as_str() {
-      "anthropic" => settings.anthropic_key(),
-      _ => settings.openrouter_key(),
+    let system_extra = self
+      .sub_agent_turn(&chat.id)
+      .map(|t| subagents::prompt_section(&t.settings, subagents::TOOL))
+      .unwrap_or_default();
+    let job = Job {
+      provider: req.provider.clone(),
+      model: req.model.clone(),
+      effort: req.effort.clone(),
+      skills: req.skills.clone(),
+      system_extra,
+      tools: self.tool_specs_for(&chat.id).await,
+      max_steps: MAX_STEPS,
+      chat_id: chat.id.clone(),
+      source: "assistant".into(),
     };
-    if api_key.is_empty() {
-      return Err(CoreError::Invalid(format!("Add a {} key in Settings → AI.", providers::title(&req.provider))));
-    }
-    let tools = self.tool_specs_for(&chat.id).await;
     let chat_id = chat.id.clone();
     let this = self.clone();
     let on_text = move |t: &str| this.emit(AssistantEvent::Text { chat_id: chat_id.clone(), text: t.to_string() });
     let (chat_id, this) = (chat.id.clone(), self.clone());
     let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
+    self.api_loop(&job, &mut History::Chat(chat), &on_text, &on_thinking, cancel).await
+  }
 
+  async fn record(&self, history: &mut History<'_>, msg: Message) -> Result<()> {
+    match history {
+      History::Chat(chat) => self.push(chat, msg).await,
+      History::Scratch(list) => {
+        list.push(msg);
+        Ok(())
+      }
+    }
+  }
+
+  /// The API tool loop: call the model, run the tools it asks for, feed the
+  /// results back, until it answers. Serves both a turn and a sub-agent;
+  /// `agent_task` calls in one reply run in parallel.
+  pub(crate) async fn api_loop(
+    self: &Arc<Self>,
+    job: &Job,
+    history: &mut History<'_>,
+    on_text: TextSink<'_>,
+    on_thinking: TextSink<'_>,
+    cancel: &CancellationToken,
+  ) -> Result<String> {
+    let settings = self.settings().await?;
+    let api_key = match job.provider.as_str() {
+      "anthropic" => settings.anthropic_key(),
+      _ => settings.openrouter_key(),
+    };
+    if api_key.is_empty() {
+      return Err(CoreError::Invalid(format!("Add a {} key in Settings → AI.", providers::title(&job.provider))));
+    }
     let mut last_text = String::new();
-    for _ in 0..MAX_STEPS {
+    for _ in 0..job.max_steps {
       providers::check_cancel(cancel)?;
       let request = ApiRequest {
         api_key: api_key.clone(),
-        model: req.model.clone(),
-        system: self.system(req)?,
-        messages: sanitize(&chat.messages),
-        tools: tools.clone(),
+        model: job.model.clone(),
+        system: self.system_for(&job.skills)? + &job.system_extra,
+        messages: sanitize(history.messages()),
+        tools: job.tools.clone(),
         max_tokens: MAX_TOKENS,
-        effort: req.effort.clone(),
+        effort: job.effort.clone(),
       };
-      let reply = match req.provider.as_str() {
-        "anthropic" => providers::anthropic::complete(&request, &on_text, &on_thinking, cancel).await?,
-        _ => providers::openrouter::complete(&request, &on_text, &on_thinking, cancel).await?,
+      let reply = match job.provider.as_str() {
+        "anthropic" => providers::anthropic::complete(&request, on_text, on_thinking, cancel).await?,
+        _ => providers::openrouter::complete(&request, on_text, on_thinking, cancel).await?,
       };
       let mut msg = Message::new(Role::Assistant, reply.blocks);
-      msg.provider = Some(req.provider.clone());
-      msg.model = Some(req.model.clone());
-      msg.effort = Some(req.effort.clone()).filter(|e| !e.is_empty());
+      msg.provider = Some(job.provider.clone());
+      msg.model = Some(job.model.clone());
+      msg.effort = Some(job.effort.clone()).filter(|e| !e.is_empty());
       let text = msg.text();
       if !text.is_empty() {
         last_text = text;
@@ -391,23 +488,34 @@ impl Assistant {
       if msg.blocks.is_empty() {
         msg.blocks.push(Block::Text { text: String::new() });
       }
-      self.push(chat, msg).await?;
+      self.record(history, msg).await?;
       if calls.is_empty() {
         return Ok(last_text);
       }
+      // Sub-agents start at once and run side by side; other calls run in order meanwhile.
+      let spawned: Vec<Option<tokio::task::JoinHandle<(String, bool)>>> = calls
+        .iter()
+        .map(|(id, name, input)| {
+          (name == subagents::TOOL && !cancel.is_cancelled()).then(|| {
+            let (this, name, input, meta) = (self.clone(), name.clone(), input.clone(), job.meta(id));
+            tokio::spawn(async move { this.call_tool(&name, input, meta).await })
+          })
+        })
+        .collect();
       let mut results = Vec::new();
-      for (id, name, input) in calls {
-        let meta = CallMeta { chat_id: Some(chat.id.clone()), source: "assistant".into(), call_id: id.clone() };
-        let (content, is_error) = if cancel.is_cancelled() {
+      for ((id, name, input), handle) in calls.into_iter().zip(spawned) {
+        let (content, is_error) = if let Some(handle) = handle {
+          handle.await.unwrap_or_else(|_| ("The sub-agent stopped unexpectedly.".to_string(), true))
+        } else if cancel.is_cancelled() {
           ("Cancelled by the user.".to_string(), true)
         } else {
-          self.call_tool(&name, input, meta).await
+          self.call_tool(&name, input, job.meta(&id)).await
         };
         results.push(Block::ToolResult { tool_use_id: id, content, is_error });
       }
-      self.push(chat, Message::new(Role::User, results)).await?;
+      self.record(history, Message::new(Role::User, results)).await?;
     }
-    Err(CoreError::Invalid(format!("Stopped after {MAX_STEPS} steps without a final answer.")))
+    Err(CoreError::Invalid(format!("Stopped after {} steps without a final answer.", job.max_steps)))
   }
 
   async fn cli_turn(self: &Arc<Self>, chat: &mut Chat, req: &SendRequest, cancel: &CancellationToken) -> Result<String> {
@@ -440,13 +548,16 @@ impl Assistant {
     let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
     let (chat_id, this) = (chat.id.clone(), self.clone());
     let on_status = move |t: &str| this.emit(AssistantEvent::Status { chat_id: chat_id.clone(), text: t.to_string() });
-    let cwd =crate::agents::agent_root(self.workspace_root().as_deref());
+    let cwd = crate::agents::agent_root(self.workspace_root().as_deref());
+    // Only Claude Code takes sub-agent settings: models as `--agents`, off as a denied tool.
+    let claude_sub_agents =
+      req.sub_agents.clone().filter(|_| req.provider == "claude").map(|s| s.normalized(&req.provider, &req.model));
     let result = providers::cli::run(
       &self.procs,
       CliRequest {
         provider: req.provider.clone(),
         model: req.model.clone(),
-        system: self.system(req)?,
+        system: self.system(req)? + &claude_sub_agents.as_ref().map(subagents::claude_prompt_section).unwrap_or_default(),
         prompt,
         resume,
         mcp_url: endpoint.url,
@@ -455,6 +566,8 @@ impl Assistant {
         effort: req.effort.clone(),
         read_only: req.approval == super::ApprovalMode::ReadOnly,
         foreign_mcp: Vec::new(),
+        sub_agents: claude_sub_agents.clone(),
+        agents_file: None,
         images: chat
           .messages
           .last()

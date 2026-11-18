@@ -158,6 +158,8 @@ pub fn run() {
       commands::assistant::assistant_mcp_info,
       commands::assistant::assistant_mcp_servers,
       commands::assistant::assistant_mcp_restart,
+      commands::assistant::assistant_mcp_sign_in,
+      commands::assistant::assistant_mcp_sign_out,
       commands::settings::settings_get,
       commands::settings::settings_azure_pat_set,
       commands::settings::settings_compare_paths_set,
