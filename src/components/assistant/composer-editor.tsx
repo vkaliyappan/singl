@@ -5,12 +5,96 @@
 // type; what is sent is the message as markdown.
 
 import { useEffect, useRef } from "react";
-import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
+import {
+  EditorContent,
+  mergeAttributes,
+  Node,
+  useEditor,
+  useEditorState,
+  type Editor,
+} from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 
 export { EditorContent };
+
+/**
+ * An attached file or pinned item named inline as an `@name` badge. `ref`
+ * ties it to its chip above the box (see the Composer's sync); it is sent as
+ * plain `@name`.
+ */
+const MentionChip = Node.create({
+  name: "mentionChip",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: false,
+  addAttributes() {
+    return {
+      ref: {
+        default: "",
+        parseHTML: (el) => el.getAttribute("data-ref") ?? "",
+        renderHTML: (a) => ({ "data-ref": a.ref }),
+      },
+      label: {
+        default: "",
+        parseHTML: (el) => el.getAttribute("data-label") ?? "",
+        renderHTML: (a) => ({ "data-label": a.label, title: a.label }),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[data-mention-chip]" }];
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    return [
+      "span",
+      mergeAttributes(HTMLAttributes, {
+        "data-mention-chip": "",
+        class:
+          "mx-px inline-block max-w-56 truncate rounded-md bg-primary/10 px-1.5 align-bottom text-[12px] font-medium text-primary",
+      }),
+      `@${node.attrs.label}`,
+    ];
+  },
+  renderText: ({ node }) => `@${node.attrs.label}`,
+  renderMarkdown: (node) => `@${node.attrs?.label ?? ""}`,
+});
+
+/** Puts an `@name` badge at the caret (at the end if the box is not focused). */
+export function insertMention(editor: Editor, ref: string, label: string) {
+  const chain = editor.isFocused ? editor.chain() : editor.chain().focus("end");
+  chain
+    .insertContent([
+      { type: MentionChip.name, attrs: { ref, label } },
+      { type: "text", text: " " },
+    ])
+    .run();
+}
+
+/** The `ref`s of the badges in the box. */
+export function mentionRefs(editor: Editor): Set<string> {
+  const refs = new Set<string>();
+  editor.state.doc.descendants((n) => {
+    if (n.type.name === MentionChip.name) refs.add(n.attrs.ref);
+  });
+  return refs;
+}
+
+/** Deletes the badges for these refs. */
+export function removeMentions(editor: Editor, refs: string[]) {
+  if (!refs.length) return;
+  const gone = new Set(refs);
+  const at: number[] = [];
+  editor.state.doc.descendants((n, pos) => {
+    if (n.type.name === MentionChip.name && gone.has(n.attrs.ref)) at.push(pos);
+  });
+  if (!at.length) return;
+  const tr = editor.state.tr;
+  for (const pos of at.reverse()) tr.delete(pos, pos + 1);
+  editor.view.dispatch(tr);
+}
 
 type Handlers = {
   /** True when the key was handled (the editor then ignores it). */
@@ -39,6 +123,7 @@ export function useComposerEditor({
         link: { openOnClick: false, autolink: true },
       }),
       Markdown,
+      MentionChip,
       Placeholder.configure({ placeholder }),
     ],
     editorProps: {

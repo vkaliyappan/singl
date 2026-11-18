@@ -1826,7 +1826,7 @@ export function TwxExplorer({
                           <div className="flex-1 min-h-0 flex overflow-hidden">
                             {/* OVERVIEW MODE */}
                             {viewMode === "overview" && parsedEntity ? (
-                              <div className="flex-1 min-h-0 overflow-hidden">
+                              <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
                                 <EntityOverview
                                   entity={parsedEntity}
                                   filePath={activeTab}
@@ -1876,7 +1876,7 @@ export function TwxExplorer({
                               </div>
                             ) : (
                               /* CODE MODE (Full Monaco Editor) */
-                              <div className="flex-1 min-h-0">
+                              <div className="flex-1 min-h-0 min-w-0">
                                 <MonacoEditor
                                   key={activeTab}
                                   height="100%"

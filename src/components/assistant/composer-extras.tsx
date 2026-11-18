@@ -83,7 +83,7 @@ function loadDisabled(): Set<string> {
   }
 }
 
-function baseName(path: string) {
+export function baseName(path: string) {
   return path.split(/[\\/]/).pop() || path;
 }
 

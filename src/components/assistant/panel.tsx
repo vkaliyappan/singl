@@ -38,7 +38,7 @@ import {
   readDragPaths,
   readDragPins,
 } from "@/lib/assistant/drag";
-import { addPins, clearPins, usePins } from "@/lib/assistant/pins";
+import { addPins, clearPins, removePin, usePins } from "@/lib/assistant/pins";
 
 /** A drag carrying files from outside the app. */
 function hasFiles(e: React.DragEvent) {
@@ -58,6 +58,7 @@ import { describeContext, useScreenContext } from "@/lib/assistant/context";
 import { ApprovalCard, CopyButton, MessageList, ToolCard } from "./messages";
 import {
   AddMenu,
+  baseName,
   type ComposerExtras,
   ExtrasChips,
   ToolsChip,
@@ -68,6 +69,9 @@ import { MENTION_HINT, MentionPopup, useMentions } from "./mentions";
 import {
   EditorContent,
   editorMarkdown,
+  insertMention,
+  mentionRefs,
+  removeMentions,
   openFence,
   pasteMarkdown,
   setEditorMarkdown,
@@ -469,10 +473,63 @@ function Composer({
     onOpenModel: () => setModelOpen(true),
     onApproval: setApproval,
   });
+  // Every chip (file, dropped file, pinned item) also gets an @name badge in
+  // the text. Removing a chip removes its badge; deleting a badge removes its chip.
+  const chips: [ref: string, label: string][] = [
+    ...pins.map((p): [string, string] => [`pin:${p.id}`, p.label]),
+    ...extras.attachments.map((p): [string, string] => [
+      `file:${p}`,
+      baseName(p) + (extras.dirs.includes(p) ? "/" : ""),
+    ]),
+    ...extras.dropped.map((f): [string, string] => [`drop:${f.name}`, f.name]),
+  ];
+  const chipKey = JSON.stringify(chips);
+  const seenChips = useRef(new Set<string>());
+  useEffect(() => {
+    if (!editor) return;
+    const now = new Set(chips.map(([r]) => r));
+    const prev = seenChips.current;
+    seenChips.current = now;
+    removeMentions(editor, [...prev].filter((r) => !now.has(r)));
+    for (const [r, label] of chips) if (!prev.has(r)) insertMention(editor, r, label);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chipKey is chips
+  }, [editor, chipKey]);
+
+  const latestExtras = useRef(extras);
+  useEffect(() => {
+    latestExtras.current = extras;
+  });
+  const sending = useRef(false);
+  useEffect(() => {
+    if (!editor) return;
+    let inDoc = mentionRefs(editor);
+    const onUpdate = () => {
+      const now = mentionRefs(editor);
+      const gone = [...inDoc].filter((r) => !now.has(r));
+      inDoc = now;
+      if (sending.current) return;
+      for (const r of gone) {
+        const [kind, ...rest] = r.split(":");
+        const id = rest.join(":");
+        seenChips.current.delete(r);
+        if (kind === "pin") removePin(id);
+        else if (kind === "file") latestExtras.current.removeAttachment(id);
+        else if (kind === "drop") latestExtras.current.removeDropped(id);
+      }
+    };
+    editor.on("update", onUpdate);
+    return () => {
+      editor.off("update", onUpdate);
+    };
+  }, [editor]);
+
   const submit = async () => {
     const sent = editorMarkdown(editor);
     if ((!sent && !extras.images.length) || chat.running || !canSend) return;
+    // Clearing the box must not take the chips with it: they are sent below.
+    sending.current = true;
     editor?.commands.clearContent(true);
+    sending.current = false;
     const ok = await onSend(sent, {
       attachments: extras.attachments,
       dirs: extras.dirs,
