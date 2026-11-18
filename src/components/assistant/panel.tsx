@@ -446,7 +446,8 @@ function Composer({
       if (mentions.onKeyDown(e)) return true;
       // Shift+Enter starts a new paragraph, not a hard break inside this one,
       // so markdown shortcuts (`- `, `1. `, `# `, `> `) work on the new line.
-      // Lists and code blocks keep their own Shift+Enter.
+      // In a list it starts the next item (an empty item leaves the list).
+      // Code blocks keep their own Shift+Enter.
       if (
         e.key === "Enter" &&
         e.shiftKey &&
@@ -454,11 +455,12 @@ function Composer({
         !e.metaKey &&
         !e.isComposing &&
         editor &&
-        !editor.isActive("codeBlock") &&
-        !editor.isActive("listItem")
+        !editor.isActive("codeBlock")
       ) {
         e.preventDefault();
-        return editor.commands.splitBlock();
+        return editor.isActive("listItem")
+          ? editor.commands.splitListItem("listItem") || editor.commands.liftListItem("listItem")
+          : editor.commands.splitBlock();
       }
       if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229)
         return false;
