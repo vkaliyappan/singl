@@ -4,6 +4,7 @@ import { PinIcon } from "./pin-icon";
 import { ImagePreview } from "./image-preview";
 import { createContext, memo, use, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -123,6 +124,21 @@ function textOf(node: React.ReactNode): string {
   return "";
 }
 
+/**
+ * Inline code naming an exported entity script or XML, optionally with a line
+ * (`SyncEndItems.js:37`, `…/Things/X.xml:12-20`): a link that opens it in TWX
+ * Entities there. Only the file name is sent; the page finds it in the
+ * environment shown last.
+ */
+function entityFileRef(text: string): { href: string; name: string; line?: number } | null {
+  const m = /^(?:[\w .\-]+[\\/])*([\w.\-]+\.(?:js|xml))(?::(\d+)(?:[-–]\d+)?)?$/i.exec(text.trim());
+  if (!m) return null;
+  const [, name, line] = m;
+  const q = new URLSearchParams({ file: name });
+  if (line) q.set("line", line);
+  return { href: `/twx-entities?${q}`, name, line: line ? Number(line) : undefined };
+}
+
 const markdownComponents: Components = {
   pre({ children }) {
     const code = textOf(children).replace(/\n$/, "");
@@ -153,13 +169,25 @@ const markdownComponents: Components = {
           {children}
         </code>
       );
-    return (
+    const code = (
       <code
         className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]"
         {...rest}
       >
         {children}
       </code>
+    );
+    const ref = typeof children === "string" ? entityFileRef(children) : null;
+    return ref ? (
+      <Link
+        href={ref.href}
+        title={`Open ${ref.name}${ref.line ? ` at line ${ref.line}` : ""} in TWX Entities`}
+        className="rounded underline decoration-primary/40 underline-offset-2 hover:decoration-primary [&>code]:text-primary"
+      >
+        {code}
+      </Link>
+    ) : (
+      code
     );
   },
   p: ({ children }) => (

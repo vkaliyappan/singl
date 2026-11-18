@@ -81,6 +81,7 @@ import { cn } from "@/lib/utils";
 import {
   createEntityEntry,
   deleteEntityEntry,
+  findEntities,
   getRunTimes,
   listEntityFiles,
   locateEntity as locateEntityFiles,
@@ -248,15 +249,23 @@ interface TwxExplorerProps {
   initialEnvs: EnvSetting[];
   /** Deep link from another module; wins over whatever was open last time. */
   link?: TwxEntityLink | null;
-  /** A file to open, relative to the exports: `<env folder>/…`. */
+  /**
+   * A file to open, relative to the exports: `<env folder>/…`. A bare name
+   * (no `/`, e.g. `SyncEndItems.js` from an assistant answer) is looked up
+   * in the environment shown last.
+   */
   fileLink?: string | null;
+  /** 1-based line to put the cursor on in `fileLink`. */
+  fileLine?: number | null;
 }
 
 export function TwxExplorer({
   initialEnvs,
   link = null,
   fileLink = null,
+  fileLine = null,
 }: TwxExplorerProps) {
+  const bareFile = !!fileLink && !fileLink.includes("/");
   const router = useRouter();
   const { resolvedTheme } = useTheme();
 
@@ -276,7 +285,7 @@ export function TwxExplorer({
   const linkEnv =
     link && initialEnvs.some((e) => e.environment === link.env)
       ? link.env
-      : fileLink
+      : fileLink && !bareFile
         ? (initialEnvs.find((e) => safeEnvDir(e.environment) === fileLink.split("/")[0])?.environment ?? "")
         : "";
   const [selectedEnv, setSelectedEnv] = useState(linkEnv || (initialEnvs[0]?.environment ?? ""));
@@ -401,8 +410,46 @@ export function TwxExplorer({
   const pendingRestorePathRef = useRef<string | null>(null);
   const pendingFileLinkRef = useRef<string | null>(null);
 
+  // A bare file name: find it among the exports of the environment shown last,
+  // preferring the file that was open then, else an exact name match.
+  const [foundFile, setFoundFile] = useState<string | null>(null);
+  useEffect(() => {
+    if (!fileLink || !bareFile) return;
+    let cancelled = false;
+    let last: { selectedEnv?: string; activeTab?: string | null } = {};
+    try {
+      last = JSON.parse(localStorage.getItem("singl:twx") ?? "{}");
+    } catch {}
+    const env =
+      initialEnvs.find((e) => e.environment === last.selectedEnv)?.environment ?? selectedEnv;
+    const name = fileLink.toLowerCase();
+    const isIt = (p: string) => p.split("/").pop()?.toLowerCase() === name;
+    if (last.activeTab && isIt(last.activeTab)) {
+      setFoundFile(last.activeTab);
+      return;
+    }
+    findEntities(safeEnvDir(env), fileLink, 50)
+      .then((hits) => {
+        if (cancelled) return;
+        const hit = hits.find((h) => h.type === "file" && isIt(h.path));
+        if (hit) setFoundFile(hit.path);
+        else toast.error(`${fileLink} was not found in the ${env} exports`);
+      })
+      .catch((err) => !cancelled && toast.error(errorMessage(err)));
+    return () => {
+      cancelled = true;
+    };
+    // Runs once: the page remounts this component for a new link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (foundFile) pendingFileLinkRef.current = foundFile;
+  }, [foundFile]);
+
   useEffect(() => {
     try {
+      // A file link wins over whatever was open last time.
+      if (fileLink && !bareFile) pendingFileLinkRef.current = fileLink;
       const raw = localStorage.getItem("singl:twx");
       if (!raw) return;
       const s = JSON.parse(raw) as {
@@ -414,7 +461,7 @@ export function TwxExplorer({
         selectedFile?: string | null;
         viewMode?: ViewMode;
       };
-      if (!link && !fileLink && s.selectedEnv && initialEnvs.find((e) => e.environment === s.selectedEnv)) {
+      if (!link && (!fileLink || bareFile) && s.selectedEnv && initialEnvs.find((e) => e.environment === s.selectedEnv)) {
         setSelectedEnv(s.selectedEnv);
       }
       if (s.selectedProject) setSelectedProject(s.selectedProject);
@@ -425,10 +472,7 @@ export function TwxExplorer({
       }
       // A deep link opens its own entity, in the view that shows its services.
       if (link) return;
-      if (fileLink) {
-        pendingFileLinkRef.current = fileLink;
-        return;
-      }
+      if (fileLink) return;
       if (s.viewMode && ["overview", "code", "split"].includes(s.viewMode)) {
         setViewMode(s.viewMode);
       }
@@ -455,6 +499,8 @@ export function TwxExplorer({
     if (fileToOpen) {
       pendingFileLinkRef.current = null;
       setViewMode("code");
+      // The code editor jumps there when it mounts.
+      if (fileLine && fileLine > 0) pendingJumpRef.current = { line: fileLine, col: 1 };
       revealPath(fileToOpen);
       return;
     }
@@ -463,7 +509,7 @@ export function TwxExplorer({
     pendingRestorePathRef.current = null;
     handleFileClick(path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [treePaths]);
+  }, [treePaths, foundFile]);
 
   useEffect(() => {
     if (!hasMountedRef.current) {

@@ -46,13 +46,16 @@ function TwxEntities() {
   // A file to open, e.g. from another page: `<env folder>/…`.
   const rawFile = params.file
   const fileLink = rawFile && !rawFile.split("/").includes("..") ? rawFile : null
+  const fileLine = Number(params.line) > 0 ? Math.floor(Number(params.line)) : null
 
   return (
     <TwxExplorer
-      key={link ? JSON.stringify(link) : (fileLink ?? "default")}
+      // `line` too, so a second link into the same file still jumps.
+      key={link ? JSON.stringify(link) : fileLink ? `${fileLink}:${fileLine ?? ""}` : "default"}
       initialEnvs={envs}
       link={link}
       fileLink={fileLink}
+      fileLine={fileLine}
     />
   )
 }
