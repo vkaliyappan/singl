@@ -88,6 +88,17 @@ fn mcp_config_json(req: &CliRequest, copilot: bool) -> String {
   json!({"mcpServers": {SERVER: server}}).to_string()
 }
 
+/// One SDK user message for claude's `--input-format stream-json`.
+pub fn claude_user_line(text: &str, images: &[super::CliImage]) -> String {
+  let mut content = vec![json!({"type": "text", "text": text})];
+  for i in images {
+    content.push(json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data}}));
+  }
+  let msg = json!({"type": "user", "session_id": "", "parent_tool_use_id": null, "message": {"role": "user", "content": content}});
+  format!("{msg}
+")
+}
+
 /// Provider CLIs without a system-prompt flag get it in front of the prompt.
 fn with_instructions(system: &str, prompt: &str, note: &str) -> String {
   let note = if note.is_empty() { String::new() } else { format!("\n\n{note}") };
@@ -138,18 +149,9 @@ pub fn build_launch(req: &CliRequest, mcp_file: Option<&Path>, system_file: Opti
       }
       // Print mode connects MCP servers in the background and may look for tools first.
       l.env.insert("MCP_CONNECTION_NONBLOCKING".into(), "0".into());
-      if req.images.is_empty() {
-        l.stdin = req.prompt.clone();
-      } else {
-        // Images need structured input: one SDK user message on stdin.
-        l.args.extend(["--input-format".into(), "stream-json".into()]);
-        let mut content = vec![json!({"type": "text", "text": req.prompt})];
-        for i in &req.images {
-          content.push(json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data}}));
-        }
-        let msg = json!({"type": "user", "session_id": "", "parent_tool_use_id": null, "message": {"role": "user", "content": content}});
-        l.stdin = format!("{msg}\n");
-      }
+      // Structured input: images ride along, and the pipe can stay open for steered messages.
+      l.args.extend(["--input-format".into(), "stream-json".into()]);
+      l.stdin = claude_user_line(&req.prompt, &req.images);
     }
     "codex" => {
       l.args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only"].map(String::from).to_vec();
@@ -257,6 +259,9 @@ pub struct Parser {
   soft_error: Option<String>,
   /// Activity line not yet reported (see `take_status`).
   status: Option<String>,
+  /// claude: `result` events seen; a steered message read too late for the
+  /// turn gets a turn (and result) of its own.
+  pub results: usize,
 }
 
 impl Parser {
@@ -275,6 +280,7 @@ impl Parser {
       error: None,
       soft_error: None,
       status: None,
+      results: 0,
     }
   }
 
@@ -400,13 +406,19 @@ impl Parser {
         self.partial_seen = false;
       }
       "result" => {
+        self.results += 1;
         self.set_session(ev["session_id"].as_str());
         let text = ev["result"].as_str().unwrap_or("").trim().to_string();
         if ev["is_error"].as_bool().unwrap_or(false) {
           let why = if text.is_empty() { ev["subtype"].as_str().unwrap_or("Claude Code failed.").to_string() } else { text };
           self.error = Some(why);
         } else if !text.is_empty() {
-          self.final_text = Some(text);
+          self.final_text = Some(match self.final_text.take() {
+            Some(prev) => format!("{prev}
+
+{text}"),
+            None => text,
+          });
         }
       }
       _ => {}
@@ -587,12 +599,21 @@ fn claude_activity(block: &Value) -> Option<String> {
   })
 }
 
+/// Takes the messages steered into the turn since the last call.
+pub type SteerSource<'a> = &'a (dyn Fn() -> Vec<String> + Send + Sync);
+
+/// How often a running claude turn checks for steered messages.
+const STEER_POLL: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Runs one turn. `steer` (claude only) feeds messages into the running turn
+/// over its open stdin; claude reads them before its next step.
 pub async fn run(
   procs: &ProcRegistry,
   mut req: CliRequest,
   on_text: TextSink<'_>,
   on_thinking: TextSink<'_>,
   on_status: TextSink<'_>,
+  steer: Option<SteerSource<'_>>,
   cancel: &CancellationToken,
 ) -> Result<CliReply> {
   check_cancel(cancel)?;
@@ -625,6 +646,7 @@ pub async fn run(
     out
   };
   let launch = build_launch(&req, mcp_file.as_deref(), system_file.as_deref(), &image_files)?;
+  let steer = steer.filter(|_| req.provider == "claude");
 
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
   let sink: Sink = Arc::new(move |e| {
@@ -635,13 +657,16 @@ pub async fn run(
       provider: req.provider.clone(),
       args: launch.args,
       stdin: Some(launch.stdin),
-      keep_stdin: false,
+      keep_stdin: steer.is_some(),
       env: launch.env,
       timeout_ms: None,
     },
     &req.cwd,
     sink,
   )?;
+  let mut stdin_open = steer.is_some();
+  let mut poll = tokio::time::interval(STEER_POLL);
+  poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
   let mut parser = Parser::new(&req.provider);
   let mut stderr: VecDeque<String> = VecDeque::new();
@@ -652,11 +677,23 @@ pub async fn run(
         procs.kill(&id);
         return Err(CoreError::Cancelled);
       }
+      _ = poll.tick(), if stdin_open => {
+        for text in steer.map(|f| f()).unwrap_or_default() {
+          let _ = procs.write(&id, &claude_user_line(&text, &[])).await;
+        }
+      }
       event = rx.recv() => match event {
         Some(ProcEvent::Stdout { line }) => {
+          let results = parser.results;
           parser.feed_line(&line, on_text, on_thinking);
           if let Some(s) = parser.take_status() {
             on_status(&s);
+          }
+          // The answer is in: end the input so the CLI exits. Anything it already
+          // took still gets answered first; later messages wait for the next turn.
+          if stdin_open && parser.results > results {
+            stdin_open = false;
+            procs.close_stdin(&id).await;
           }
         }
         Some(ProcEvent::Stderr { line }) => {
@@ -965,6 +1002,18 @@ mod tests {
   }
 
   #[test]
+  fn claude_joins_late_steer_results() {
+    let (p, _) = parse("claude", &[
+      r#"{"type":"result","subtype":"success","is_error":false,"result":"First.","session_id":"s"}"#,
+      r#"{"type":"result","subtype":"success","is_error":false,"result":"Second.","session_id":"s"}"#,
+    ]);
+    assert_eq!(p.results, 2);
+    assert_eq!(p.finish(Some(0), "").unwrap().text, "First.
+
+Second.");
+  }
+
+  #[test]
   fn claude_argv() {
     let mut r = req("claude");
     r.resume = Some("sess-1".into());
@@ -979,7 +1028,9 @@ mod tests {
     assert!(a.iter().any(|x| x.starts_with("--disallowedTools=Bash,")));
     assert_eq!(a[at("--model") + 1], "m1");
     assert_eq!(a[at("--resume") + 1], "sess-1");
-    assert_eq!(l.stdin, "hello");
+    assert_eq!(a[at("--input-format") + 1], "stream-json");
+    let line: Value = serde_json::from_str(l.stdin.trim()).unwrap();
+    assert_eq!(line["message"]["content"][0]["text"], "hello");
     assert!(!a.iter().any(|x| x.contains("tok")), "token must not be on the command line");
     let json: Value = serde_json::from_str(&mcp_config_json(&r, false)).unwrap();
     assert_eq!(json["mcpServers"]["singl"]["headers"]["Authorization"], "Bearer tok");
@@ -1205,10 +1256,28 @@ mod tests {
     r.model = "haiku".into();
     r.prompt = "Reply with the single word pong.".into();
     r.mcp_url = "http://127.0.0.1:1/mcp".into();
-    let reply = run(&procs, r, &|_| {}, &|_| {}, &|_| {}, &CancellationToken::new()).await.unwrap();
+    let reply = run(&procs, r, &|_| {}, &|_| {}, &|_| {}, None, &CancellationToken::new()).await.unwrap();
     assert!(reply.text.to_lowercase().contains("pong"));
     assert!(reply.session_id.is_some());
     assert!(models(&procs, "claude").await.unwrap().len() >= 4);
+  }
+
+  /// A steered message reaches the running turn, and the run still ends:
+  /// `cargo test -p singl-core real_cli_claude_steer -- --ignored`.
+  #[tokio::test(flavor = "multi_thread")]
+  #[ignore]
+  async fn real_cli_claude_steer() {
+    let procs = ProcRegistry::default();
+    let mut r = req("claude");
+    r.model = "haiku".into();
+    r.prompt = "Reply with the single word pong.".into();
+    r.mcp_url = "http://127.0.0.1:1/mcp".into();
+    let pending = std::sync::Mutex::new(vec!["Also end your reply with the word BANANA.".to_string()]);
+    let steer = move || std::mem::take(&mut *pending.lock().unwrap());
+    let (none, cancel) = (|_: &str| {}, CancellationToken::new());
+    let run = run(&procs, r, &none, &none, &none, Some(&steer), &cancel);
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(120), run).await.expect("stdin was never closed").unwrap();
+    assert!(reply.text.to_lowercase().contains("banana"), "{}", reply.text);
   }
 
   #[test]

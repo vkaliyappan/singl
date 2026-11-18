@@ -112,6 +112,7 @@ export function useComposerEditor({
 }: Handlers & { placeholder: string }) {
   // Handlers change every render; the editor is built once and reads the latest.
   const latest = useRef(handlers);
+  const placeholderRef = useRef(placeholder);
   useEffect(() => {
     latest.current = handlers;
   });
@@ -127,7 +128,9 @@ export function useComposerEditor({
       }),
       Markdown,
       MentionChip,
-      Placeholder.configure({ placeholder }),
+      // A function, read on every redraw: the options object the plugin saw is fixed at creation.
+      // eslint-disable-next-line react-hooks/refs -- ProseMirror calls this when drawing, not React's render
+      Placeholder.configure({ placeholder: () => placeholderRef.current }),
     ],
     editorProps: {
       attributes: {
@@ -155,13 +158,11 @@ export function useComposerEditor({
     selector: ({ editor }) => !editor || !editor.getText().trim(),
   });
 
-  // Placeholder text is read on each redraw; swap it and nudge one.
+  // New text shows on the next redraw; nudge one.
   useEffect(() => {
-    if (!editor || editor.isDestroyed) return;
-    const ext = editor.extensionManager.extensions.find((x) => x.name === "placeholder");
-    if (!ext || ext.options.placeholder === placeholder) return;
-    ext.options.placeholder = placeholder;
-    editor.view.dispatch(editor.state.tr);
+    if (placeholderRef.current === placeholder) return;
+    placeholderRef.current = placeholder;
+    if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr);
   }, [editor, placeholder]);
 
   return { editor, empty: empty ?? true };

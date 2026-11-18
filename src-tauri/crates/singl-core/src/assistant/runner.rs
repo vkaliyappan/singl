@@ -366,8 +366,11 @@ impl Assistant {
 
   /// Runs the turn, then always unmarks the chat and reports how it ended.
   async fn finish(self: &Arc<Self>, mut chat: Chat, req: SendRequest, cancel: CancellationToken) -> Result<String> {
-    let result = if providers::is_api(&req.provider) {
+    // API loops and Claude Code read steered messages; other CLIs take no input mid-run.
+    if providers::is_api(&req.provider) || req.provider == "claude" {
       self.steer_inbox(&chat.id, true);
+    }
+    let result = if providers::is_api(&req.provider) {
       self.api_turn(&mut chat, &req, &cancel).await
     } else {
       self.cli_turn(&mut chat, &req, &cancel).await
@@ -575,6 +578,19 @@ impl Assistant {
     let on_thinking = move |t: &str| this.emit(AssistantEvent::Thinking { chat_id: chat_id.clone(), text: t.to_string() });
     let (chat_id, this) = (chat.id.clone(), self.clone());
     let on_status = move |t: &str| this.emit(AssistantEvent::Status { chat_id: chat_id.clone(), text: t.to_string() });
+    // Steered messages show at once; they are stored with the turn's calls when it ends.
+    let steered: Arc<std::sync::Mutex<Vec<Message>>> = Arc::default();
+    let (chat_id, this, kept) = (chat.id.clone(), self.clone(), steered.clone());
+    let take_steered = move || {
+      let texts = this.take_steered(&chat_id);
+      for text in &texts {
+        let mut msg = Message::new(Role::User, vec![Block::Text { text: text.clone() }]);
+        msg.context = serde_json::to_value(this.context.get()).ok();
+        this.emit(AssistantEvent::MessageSaved { chat_id: chat_id.clone(), message: msg.clone() });
+        kept.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
+      }
+      texts
+    };
     let cwd = crate::agents::agent_root(self.workspace_root().as_deref());
     // Only Claude Code takes sub-agent settings: models as `--agents`, off as a denied tool.
     let claude_sub_agents =
@@ -605,6 +621,7 @@ impl Assistant {
       &on_text,
       &on_thinking,
       &on_status,
+      Some(&take_steered),
       cancel,
     )
     .await;
@@ -620,6 +637,10 @@ impl Assistant {
     for (use_block, result_block) in calls {
       self.push(chat, tag(Message::new(Role::Assistant, vec![use_block]))).await?;
       self.push(chat, Message::new(Role::User, vec![result_block])).await?;
+    }
+    let steered = std::mem::take(&mut *steered.lock().unwrap_or_else(|e| e.into_inner()));
+    for msg in steered {
+      self.push(chat, msg).await?;
     }
     let reply = result?;
     let mut blocks: Vec<Block> = providers::shown_thinking(reply.thinking).into_iter().collect();

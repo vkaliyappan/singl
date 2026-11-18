@@ -204,7 +204,9 @@ impl ProcRegistry {
 
   /// Closes stdin: end of input is most CLIs' cue to finish.
   pub async fn close_stdin(&self, id: &str) {
-    if let Some(entry) = self.lock().get(id).cloned() {
+    // The registry lock must be gone before the await (it is not Send).
+    let entry = self.lock().get(id).cloned();
+    if let Some(entry) = entry {
       *entry.stdin.lock().await = None;
     }
   }
