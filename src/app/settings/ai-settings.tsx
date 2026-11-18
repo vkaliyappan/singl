@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PathInput } from "@/components/path-input";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -401,6 +402,7 @@ export function AiSettings() {
   const [editingIndex, setEditingIndex] = useState(-1);
   const [model, setModel] = useState("");
   const [port, setPort] = useState("");
+  const [mcpRoot, setMcpRoot] = useState("");
 
   const refreshMcp = useCallback(() => {
     assistantMcpInfo()
@@ -415,6 +417,7 @@ export function AiSettings() {
     setS(view);
     setModel(view.defaultModel);
     setPort(String(view.mcpPort));
+    setMcpRoot(view.projectMcpRoot);
   }, []);
 
   useEffect(() => {
@@ -453,6 +456,7 @@ export function AiSettings() {
           "regenerateMcpToken" in patch ||
           "mcpServers" in patch ||
           "useProjectMcp" in patch ||
+          "projectMcpRoot" in patch ||
           "disabledProjectServers" in patch
         )
           refreshMcp();
@@ -795,10 +799,36 @@ export function AiSettings() {
           <Switch
             checked={s.useProjectMcp}
             onCheckedChange={(on) => void save({ useProjectMcp: on })}
-            aria-label="Use workspace .mcp.json"
+            aria-label="Use project MCP files"
           />
-          Use workspace <code className="font-mono">.mcp.json</code>
+          Use project MCP files (
+          <code className="font-mono">.mcp.json</code>,{" "}
+          <code className="font-mono">.codex/config.toml</code>,{" "}
+          <code className="font-mono">.vscode/mcp.json</code>)
         </label>
+        {s.useProjectMcp && (
+          <div className="space-y-1">
+            <PathInput
+              directory
+              dialogTitle="Folder with the project MCP files"
+              placeholder="Workspace root"
+              value={mcpRoot}
+              onChange={(e) => setMcpRoot(e.target.value)}
+              onBlur={() => {
+                if (mcpRoot.trim() !== s.projectMcpRoot)
+                  void save({ projectMcpRoot: mcpRoot });
+              }}
+              onPick={(path) => {
+                setMcpRoot(path);
+                void save({ projectMcpRoot: path });
+              }}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Leave empty to use the workspace root. On a name clash the first
+              file listed wins.
+            </p>
+          </div>
+        )}
         {servers.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">
             No servers configured.

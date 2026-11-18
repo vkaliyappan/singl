@@ -121,7 +121,7 @@ pub async fn assistant_settings_get(state: State<'_, AppState>) -> IpcResult<Ass
 #[tauri::command]
 pub async fn assistant_settings_set(state: State<'_, AppState>, patch: AssistantSettingsPatch) -> IpcResult<AssistantSettingsView> {
   let touches_mcp = patch.mcp_enabled.is_some() || patch.mcp_port.is_some() || patch.regenerate_mcp_token == Some(true);
-  let touches_servers = patch.mcp_servers.is_some() || patch.use_project_mcp.is_some() || patch.disabled_project_servers.is_some();
+  let touches_servers = patch.mcp_servers.is_some() || patch.use_project_mcp.is_some() || patch.project_mcp_root.is_some() || patch.disabled_project_servers.is_some();
   let saved = settings::update(&state.db().await, patch).await?;
   if touches_mcp {
     state.assistant.start_mcp(&discovery_path(&state.db_path)).await?;

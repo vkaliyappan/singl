@@ -19,6 +19,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["sync", "macros", "rt-multi-thread", "fs", "process", "io-util", "io-std", "time", "net"] }
 tokio-util = "0.7.20"
+toml = "1.1.8"
 uuid = { version = "1.29.0", features = ["v4"] }
 walkdir = "2.5.0"
 zip = { version = "9.3.0", default-features = false, features = ["deflate"] }

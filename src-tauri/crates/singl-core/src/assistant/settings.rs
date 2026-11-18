@@ -33,8 +33,10 @@ pub struct AssistantSettings {
   pub external_mcp_server_mode: Option<super::ApprovalMode>,
   /// Servers added on the Settings page.
   pub mcp_servers: Vec<McpServerConfig>,
-  /// Also load the workspace root's `.mcp.json`.
+  /// Also load the project MCP files (`.mcp.json`, `.codex/config.toml`, `.vscode/mcp.json`).
   pub use_project_mcp: bool,
+  /// Folder those files are read from; empty means the workspace root.
+  pub project_mcp_root: String,
   /// Names of project (`.mcp.json`) servers switched off.
   pub disabled_project_servers: Vec<String>,
 }
@@ -54,6 +56,7 @@ impl Default for AssistantSettings {
       external_mcp_server_mode: None,
       mcp_servers: Vec::new(),
       use_project_mcp: true,
+      project_mcp_root: String::new(),
       disabled_project_servers: Vec::new(),
     }
   }
@@ -95,6 +98,7 @@ pub struct AssistantSettingsView {
   pub external_mcp_server_mode: super::ApprovalMode,
   pub mcp_servers: Vec<McpServerConfig>,
   pub use_project_mcp: bool,
+  pub project_mcp_root: String,
   pub disabled_project_servers: Vec<String>,
 }
 
@@ -113,6 +117,7 @@ pub struct AssistantSettingsPatch {
   pub external_mcp_server_mode: Option<super::ApprovalMode>,
   pub mcp_servers: Option<Vec<McpServerConfig>>,
   pub use_project_mcp: Option<bool>,
+  pub project_mcp_root: Option<String>,
   pub disabled_project_servers: Option<Vec<String>>,
   /// Makes a new MCP token, cutting off every client that holds the old one.
   pub regenerate_mcp_token: Option<bool>,
@@ -135,6 +140,7 @@ impl AssistantSettings {
         s
       }).collect(),
       use_project_mcp: self.use_project_mcp,
+      project_mcp_root: self.project_mcp_root.clone(),
       disabled_project_servers: self.disabled_project_servers.clone(),
     }
   }
@@ -200,6 +206,9 @@ impl AssistantSettings {
     if let Some(v) = patch.use_project_mcp {
       self.use_project_mcp = v;
     }
+    if let Some(v) = patch.project_mcp_root {
+      self.project_mcp_root = trim(v);
+    }
     if let Some(v) = patch.disabled_project_servers {
       self.disabled_project_servers = v;
     }
@@ -256,38 +265,66 @@ async fn store(pool: &SqlitePool, settings: &AssistantSettings) -> Result<()> {
   Ok(())
 }
 
-/// Servers from `<root>/.mcp.json` (`{"mcpServers": {name: {command,args,env} | {type,url,headers}}}`).
+/// The project MCP files read from a folder, first one wins on a name clash:
+/// Claude Code's `.mcp.json` (`mcpServers`), Codex's `.codex/config.toml`
+/// (`[mcp_servers.<name>]`) and VS Code / Copilot's `.vscode/mcp.json` (`servers`).
 pub fn project_servers(root: &Path) -> Vec<McpServerConfig> {
-  let Some(file) = crate::agents::project_mcp_config(root) else { return Vec::new() };
-  let Ok(text) = std::fs::read_to_string(file) else { return Vec::new() };
-  let Ok(json) = serde_json::from_str::<Value>(&text) else { return Vec::new() };
-  let Some(servers) = json.get("mcpServers").and_then(Value::as_object) else { return Vec::new() };
-  let strings = |v: Option<&Value>| -> HashMap<String, String> {
-    v.and_then(Value::as_object)
-      .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+  let read = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
+  let sources = [
+    read(".mcp.json").and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("mcpServers").cloned()),
+    read(".codex/config.toml").and_then(|t| toml::from_str::<Value>(&t).ok()).and_then(|v| v.get("mcp_servers").cloned()),
+    read(".vscode/mcp.json").and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("servers").cloned()),
+  ];
+  let mut out: Vec<McpServerConfig> = Vec::new();
+  for servers in sources.iter().flatten().filter_map(Value::as_object) {
+    for (name, def) in servers {
+      let s = server_from(name, def, root);
+      // The app's own server is never loaded back into itself.
+      if s.name != "singl" && !out.iter().any(|o| o.name == s.name) {
+        out.push(s);
+      }
+    }
+  }
+  out
+}
+
+/// One project server entry; the field names of all three files are accepted.
+fn server_from(name: &str, def: &Value, root: &Path) -> McpServerConfig {
+  let root_str = root.to_string_lossy().into_owned();
+  // VS Code's `${workspaceFolder}`; other `${...}` variables are left as they are.
+  let expand = |s: &str| s.replace("${workspaceFolder}", &root_str);
+  let text = |key: &str| def.get(key).and_then(Value::as_str).map(expand).unwrap_or_default();
+  let strings = |key: &str| -> HashMap<String, String> {
+    def
+      .get(key)
+      .and_then(Value::as_object)
+      .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), expand(s)))).collect())
       .unwrap_or_default()
   };
-  servers
-    .iter()
-    .map(|(name, def)| McpServerConfig {
-      name: sanitize_name(name),
-      enabled: !def.get("disabled").and_then(Value::as_bool).unwrap_or(false),
-      command: def.get("command").and_then(Value::as_str).unwrap_or_default().to_string(),
-      args: def
-        .get("args")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_default(),
-      env: strings(def.get("env")),
-      url: def.get("url").and_then(Value::as_str).unwrap_or_default().to_string(),
-      headers: strings(def.get("headers")),
-      cwd: root.to_string_lossy().into_owned(),
-      read_only: false,
-      source: "project".into(),
-    })
-    // The app's own server is never loaded back into itself.
-    .filter(|s| s.name != "singl")
-    .collect()
+  let mut headers = strings("headers");
+  headers.extend(strings("http_headers"));
+  // Codex: a bearer token named by an environment variable.
+  if let Some(token) = def.get("bearer_token_env_var").and_then(Value::as_str).and_then(|v| std::env::var(v).ok()) {
+    headers.insert("Authorization".into(), format!("Bearer {token}"));
+  }
+  let cwd = text("cwd");
+  McpServerConfig {
+    name: sanitize_name(name),
+    enabled: !def.get("disabled").and_then(Value::as_bool).unwrap_or(false)
+      && def.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+    command: text("command"),
+    args: def
+      .get("args")
+      .and_then(Value::as_array)
+      .map(|a| a.iter().filter_map(|v| v.as_str().map(expand)).collect())
+      .unwrap_or_default(),
+    env: strings("env"),
+    url: text("url"),
+    headers,
+    cwd: if cwd.is_empty() { root_str.clone() } else { root.join(cwd).to_string_lossy().into_owned() },
+    read_only: false,
+    source: "project".into(),
+  }
 }
 
 #[cfg(test)]
@@ -321,5 +358,30 @@ mod tests {
     assert_eq!(servers.len(), 2);
     assert!(servers.iter().any(|s| s.name == "a_b" && s.command == "node"));
     assert!(servers.iter().any(|s| s.name == "web" && s.url == "http://h/mcp"));
+  }
+
+  #[test]
+  fn codex_and_vscode_project_files_are_read() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{"ado":{"command":"npx"}}}"#).unwrap();
+    std::fs::create_dir(dir.path().join(".codex")).unwrap();
+    std::fs::write(
+      dir.path().join(".codex/config.toml"),
+      "[mcp_servers.ado]\ncommand = \"other\"\n\n[mcp_servers.docs]\nurl = \"http://d/mcp\"\nenabled = false\n\n[mcp_servers.docs.http_headers]\nX-Key = \"k\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir(dir.path().join(".vscode")).unwrap();
+    std::fs::write(
+      dir.path().join(".vscode/mcp.json"),
+      r#"{"servers":{"fs":{"type":"stdio","command":"node","args":["${workspaceFolder}/s.js"]}}}"#,
+    )
+    .unwrap();
+    let servers = project_servers(dir.path());
+    let get = |n: &str| servers.iter().find(|s| s.name == n).unwrap();
+    assert_eq!(servers.len(), 3);
+    assert_eq!(get("ado").command, "npx", ".mcp.json wins a name clash");
+    assert!(!get("docs").enabled);
+    assert_eq!(get("docs").headers["X-Key"], "k");
+    assert!(get("fs").args[0].ends_with("/s.js") && !get("fs").args[0].contains("${"));
   }
 }

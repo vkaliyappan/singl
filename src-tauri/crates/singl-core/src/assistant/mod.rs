@@ -313,7 +313,7 @@ impl Assistant {
   // ---- tools ----------------------------------------------------------------
 
   /// MCP servers the assistant connects to: Settings-page ones, then the
-  /// workspace's `.mcp.json` (a Settings-page server of the same name wins).
+  /// project MCP files (a Settings-page server of the same name wins).
   pub async fn mcp_servers(&self) -> Result<Vec<McpServerConfig>> {
     let settings = self.settings().await?;
     let mut servers: Vec<McpServerConfig> = settings
@@ -326,7 +326,11 @@ impl Assistant {
       })
       .collect();
     if settings.use_project_mcp {
-      if let Some(root) = self.workspace_root() {
+      let root = match settings.project_mcp_root.as_str() {
+        "" => self.workspace_root(),
+        dir => Some(std::path::PathBuf::from(dir)),
+      };
+      if let Some(root) = root {
         for mut s in settings::project_servers(&root) {
           if servers.iter().any(|o| o.name == s.name) {
             continue;

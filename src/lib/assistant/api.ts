@@ -149,6 +149,8 @@ export type AssistantSettingsView = {
   externalMcpServerMode: ApprovalMode;
   mcpServers: McpServerConfig[];
   useProjectMcp: boolean;
+  /** Folder the project MCP files are read from; empty means the workspace root. */
+  projectMcpRoot: string;
   disabledProjectServers: string[];
 };
 
@@ -164,6 +166,7 @@ export type AssistantSettingsPatch = Partial<{
   externalMcpServerMode: ApprovalMode;
   mcpServers: McpServerConfig[];
   useProjectMcp: boolean;
+  projectMcpRoot: string;
   disabledProjectServers: string[];
   regenerateMcpToken: boolean;
 }>;
