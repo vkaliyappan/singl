@@ -13,6 +13,7 @@ import {
   IconEye,
   IconEyeOff,
   IconPlus,
+  IconLoader2,
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
@@ -403,6 +404,8 @@ export function AiSettings() {
   const [model, setModel] = useState("");
   const [port, setPort] = useState("");
   const [mcpRoot, setMcpRoot] = useState("");
+  /** Servers a Restart is (re)starting; it waits for every enabled one. */
+  const [connecting, setConnecting] = useState<Set<string>>(new Set());
 
   const refreshMcp = useCallback(() => {
     assistantMcpInfo()
@@ -476,19 +479,37 @@ export function AiSettings() {
       <p className="text-xs text-muted-foreground">{error || "Loading…"}</p>
     );
 
+  /** Restarts `name` and starts every other enabled server that is not running. */
+  const connect = (name: string) => {
+    const names = new Set(
+      servers
+        .filter((x) => x.enabled && x.state !== "running")
+        .map((x) => x.name),
+    );
+    names.add(name);
+    setConnecting(names);
+    void assistantMcpRestart(name)
+      .then(setServers)
+      .catch((e) => toast.error(errorMessage(e)))
+      .finally(() => setConnecting(new Set()));
+  };
+
   const setServerEnabled = (st: McpServerStatus, on: boolean) => {
-    if (st.source === "project") {
-      const off = new Set(s.disabledProjectServers);
-      if (on) off.delete(st.name);
-      else off.add(st.name);
-      void save({ disabledProjectServers: [...off] });
-    } else {
-      void save({
-        mcpServers: s.mcpServers.map((m) =>
-          m.name === st.name ? { ...m, enabled: on } : m,
-        ),
-      });
-    }
+    const saved =
+      st.source === "project"
+        ? (() => {
+            const off = new Set(s.disabledProjectServers);
+            if (on) off.delete(st.name);
+            else off.add(st.name);
+            return save({ disabledProjectServers: [...off] });
+          })()
+        : save({
+            mcpServers: s.mcpServers.map((m) =>
+              m.name === st.name ? { ...m, enabled: on } : m,
+            ),
+          });
+    // Turning a server on connects it right away instead of on the next chat.
+    if (on) void saved.then(() => connect(st.name));
   };
 
   const saveServer = (server: McpServerConfig) => {
@@ -838,6 +859,8 @@ export function AiSettings() {
             {servers.map((st) => {
               const idx = s.mcpServers.findIndex((m) => m.name === st.name);
               const isApp = st.source === "app" && idx >= 0;
+              const busy = connecting.has(st.name);
+              const state = busy ? "starting" : st.state;
               return (
                 <li
                   key={`${st.source}:${st.name}`}
@@ -854,15 +877,16 @@ export function AiSettings() {
                       </Badge>
                       <Badge
                         variant="secondary"
-                        className={`h-4 py-0 text-[9px] font-normal ${STATE_CLS[st.state] ?? ""}`}
+                        className={`h-4 gap-1 py-0 text-[9px] font-normal ${STATE_CLS[state] ?? ""}`}
                       >
-                        {st.state}
+                        {busy && <IconLoader2 className="size-2.5 animate-spin" />}
+                        {busy ? "connecting…" : state}
                       </Badge>
                       <span className="text-[10px] text-muted-foreground">
                         {st.toolCount} tools
                       </span>
                     </div>
-                    {st.error && (
+                    {st.error && !busy && (
                       <p className="mt-0.5 text-[10px] break-words text-destructive">
                         {st.error}
                       </p>
@@ -873,13 +897,10 @@ export function AiSettings() {
                     size="icon-xs"
                     aria-label={`Restart ${st.name}`}
                     title="Restart"
-                    onClick={() =>
-                      void assistantMcpRestart(st.name)
-                        .then(setServers)
-                        .catch((e) => toast.error(errorMessage(e)))
-                    }
+                    disabled={connecting.size > 0}
+                    onClick={() => connect(st.name)}
                   >
-                    <IconRefresh />
+                    <IconRefresh className={busy ? "animate-spin" : ""} />
                   </Button>
                   {isApp && (
                     <>
