@@ -10,6 +10,12 @@ import {
   IconArrowsExchange,
   IconSitemap,
   IconSparkles,
+  IconFileText,
+  IconServer,
+  IconUpload,
+  IconShieldLock,
+  IconBinaryTree,
+  IconClockPlay,
 } from "@tabler/icons-react"
 
 export interface NavItem {
@@ -42,6 +48,11 @@ export const navSections: NavSection[] = [
       { title: "Services", href: "/twx-services", icon: IconBolt },
       { title: "Flows", href: "/twx-flow", icon: IconSitemap },
       { title: "Migrate", href: "/twx-migrate", icon: IconArrowsExchange },
+      { title: "Logs", href: "/twx-logs", icon: IconFileText },
+      { title: "Server", href: "/twx-server", icon: IconServer },
+      { title: "Import", href: "/twx-import", icon: IconUpload },
+      { title: "Access & Mashups", href: "/twx-access", icon: IconShieldLock },
+      { title: "Dependencies", href: "/twx-deps", icon: IconBinaryTree },
     ],
   },
   {
@@ -50,6 +61,7 @@ export const navSections: NavSection[] = [
       { title: "JSON to Table", href: "/json-table", icon: IconTable },
       { title: "Compare", href: "/compare", icon: IconGitCompare },
       { title: "Deploy", href: "/deploy", icon: IconRocket },
+      { title: "Automation", href: "/automation", icon: IconClockPlay },
     ],
   },
   {

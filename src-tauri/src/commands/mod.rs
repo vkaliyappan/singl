@@ -14,3 +14,8 @@ pub mod settings;
 pub mod twx;
 pub mod updater;
 pub mod workspace;
+pub mod twx_logs;
+pub mod twx_admin;
+pub mod twx_import;
+pub mod deps;
+pub mod automation;

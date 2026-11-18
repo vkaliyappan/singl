@@ -15,3 +15,8 @@ pub mod run_times;
 pub mod stamp;
 pub mod xml;
 pub mod xmlformat;
+pub mod logs;
+pub mod admin;
+pub mod import;
+pub mod permissions;
+pub mod deps;

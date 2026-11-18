@@ -4,6 +4,7 @@
 
 pub mod compare;
 pub mod agents;
+pub mod automation;
 pub mod assistant;
 pub mod db;
 pub mod error;
