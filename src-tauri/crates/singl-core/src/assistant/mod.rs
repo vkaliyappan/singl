@@ -154,6 +154,9 @@ pub struct Assistant {
   turn_tools: Mutex<HashMap<String, Vec<String>>>,
   /// Sub-agent settings and budget of a chat's running turn, when it may start them.
   turn_sub_agents: Mutex<HashMap<String, Arc<subagents::Turn>>>,
+  /// Messages the user sent into a running API turn, not yet read by it. An
+  /// entry exists only while the turn can take them.
+  steered: Mutex<HashMap<String, Vec<String>>>,
   /// Chats (or `"mcp"`) where the user said "don't ask again".
   allow_all: Mutex<HashSet<String>>,
   mcp_endpoint: RwLock<Option<McpEndpoint>>,
@@ -177,6 +180,7 @@ impl Assistant {
       turn_tools: Mutex::new(HashMap::new()),
       turn_modes: Mutex::new(HashMap::new()),
       turn_sub_agents: Mutex::new(HashMap::new()),
+      steered: Mutex::new(HashMap::new()),
       allow_all: Mutex::new(HashSet::new()),
       mcp_endpoint: RwLock::new(None),
     })
@@ -587,6 +591,38 @@ impl Assistant {
     true
   }
 
+  /// Adds a message to a chat's running turn; the model reads it before its
+  /// next step. False when no turn can take it (none running, or an agent CLI).
+  pub fn steer(&self, chat_id: &str, text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() {
+      return false;
+    }
+    match self.steered.lock().unwrap_or_else(|e| e.into_inner()).get_mut(chat_id) {
+      Some(inbox) => {
+        inbox.push(text.to_string());
+        true
+      }
+      None => false,
+    }
+  }
+
+  /// Opens (`true`) or closes a chat's steer inbox; closing returns what was never read.
+  pub(crate) fn steer_inbox(&self, chat_id: &str, open: bool) -> Vec<String> {
+    let mut map = self.steered.lock().unwrap_or_else(|e| e.into_inner());
+    if open {
+      map.insert(chat_id.to_string(), Vec::new());
+      Vec::new()
+    } else {
+      map.remove(chat_id).unwrap_or_default()
+    }
+  }
+
+  /// Takes the messages steered into a chat's turn so far.
+  pub(crate) fn take_steered(&self, chat_id: &str) -> Vec<String> {
+    self.steered.lock().unwrap_or_else(|e| e.into_inner()).get_mut(chat_id).map(std::mem::take).unwrap_or_default()
+  }
+
   /// Ids of the chats with a turn in progress.
   pub fn running_chats(&self) -> Vec<String> {
     self.running.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect()
@@ -677,5 +713,20 @@ mod tests {
     .unwrap();
     assert!(a.permit("x", &input, Risk::Write, &ext).await.is_err());
     assert!(a.tool_specs(true).await.iter().all(|t| t.risk == Risk::Read));
+  }
+
+  #[tokio::test]
+  async fn steering_inbox() {
+    let (_dir, a) = assistant().await;
+    assert!(!a.steer("c1", "a"));
+    assert!(a.steer_inbox("c1", true).is_empty());
+    assert!(a.steer("c1", "a"));
+    assert!(!a.steer("c1", "  "));
+    assert!(a.steer("c1", " b "));
+    assert_eq!(a.take_steered("c1"), ["a", "b"]);
+    assert!(a.take_steered("c1").is_empty());
+    assert!(a.steer("c1", "c"));
+    assert_eq!(a.steer_inbox("c1", false), ["c"]);
+    assert!(!a.steer("c1", "d"));
   }
 }

@@ -66,6 +66,14 @@ export type SendExtras = {
 
 export type ChatChoice = { provider: string; model: string; effort?: string };
 
+/** A message held back while a turn runs, sent when it ends. */
+export type QueuedMessage = {
+  id: string;
+  text: string;
+  extras: SendExtras;
+  choice: ChatChoice;
+};
+
 const EXTERNAL_LIMIT = 25;
 
 /** What a running turn has shown so far, kept for every chat, on screen or not. */
@@ -110,6 +118,17 @@ export function useAssistantChat(opts: {
     null,
   );
 
+  // Follow-ups waiting for their chat's turn to end, per chat. `ready` marks a
+  // chat whose turn just ended cleanly while open: only then does the queue
+  // send itself. Anything else (cancel, error, a chat opened later) waits for
+  // the "Send next" button, so nothing goes out as a surprise.
+  const [queues, setQueues] = useState<Record<string, QueuedMessage[]>>({});
+  const [ready, setReady] = useState<Record<string, boolean>>({});
+  const lastChoice = useRef<ChatChoice | null>(null);
+  const queuesRef = useRef(queues);
+  useEffect(() => {
+    queuesRef.current = queues;
+  });
   const chatIdRef = useRef<string | null>(null);
   const adoptNext = useRef(false);
   // Opening a chat mid-turn restores its live state from here instead of
@@ -271,8 +290,23 @@ export function useAssistantChat(opts: {
             setThinking("");
           }
           break;
-        case "turnEnded":
+        case "turnEnded": {
           markRunning(e.chatId, false);
+          const unread = e.unread ?? [];
+          if (unread.length) {
+            const choice = live.current.get(e.chatId)?.provider ?? lastChoice.current;
+            if (choice) {
+              const items = unread.map((text, i): QueuedMessage => ({
+                id: `unread-${Date.now()}-${i}`,
+                text,
+                extras: { attachments: [], tools: null, skills: [], skillNames: [] },
+                choice,
+              }));
+              setQueues((q) => ({ ...q, [e.chatId]: [...items, ...(q[e.chatId] ?? [])] }));
+            }
+          }
+          if (e.chatId === chatIdRef.current && !e.cancelled && !e.error)
+            setReady((r) => ({ ...r, [e.chatId]: true }));
           live.current.delete(e.chatId);
           if (e.chatId !== chatIdRef.current) break;
           setRunning(false);
@@ -284,6 +318,7 @@ export function useAssistantChat(opts: {
           if (e.error) setError(e.error);
           sync(e.chatId).catch(() => {});
           break;
+        }
         case "approvalRequest": {
           const a: Approval = {
             requestId: e.requestId,
@@ -346,7 +381,7 @@ export function useAssistantChat(opts: {
     };
   }, [setChat, sync, markRunning]);
 
-  const newChat = useCallback(() => {
+  const resetView = useCallback(() => {
     setChat(null);
     setTitle("");
     setMessages([]);
@@ -359,9 +394,24 @@ export function useAssistantChat(opts: {
     setError("");
   }, [setChat]);
 
+  const dropQueue = useCallback((id: string) => {
+    const without = <T,>(r: Record<string, T>) => {
+      const rest = { ...r };
+      delete rest[id];
+      return rest;
+    };
+    setQueues(without);
+    setReady(without);
+  }, []);
+
+  const newChat = useCallback(() => {
+    if (chatIdRef.current) dropQueue(chatIdRef.current);
+    resetView();
+  }, [dropQueue, resetView]);
+
   const openChat = useCallback(
     async (id: string) => {
-      newChat();
+      resetView();
       setChat(id);
       try {
         const [chat, isRunning] = await Promise.all([
@@ -386,7 +436,7 @@ export function useAssistantChat(opts: {
         setError(errorMessage(e));
       }
     },
-    [newChat, setChat],
+    [resetView, setChat],
   );
 
   const send = useCallback(
@@ -397,6 +447,7 @@ export function useAssistantChat(opts: {
     ): Promise<boolean> => {
       const body = text.trim();
       if (!body && !extras?.images?.length) return false;
+      lastChoice.current = choice;
       setError("");
       setStreaming("");
       setThinking("");
@@ -480,6 +531,41 @@ export function useAssistantChat(opts: {
     [setChat],
   );
 
+  const enqueue = useCallback(
+    (item: Omit<QueuedMessage, "id">) => {
+      const id = chatIdRef.current;
+      if (!id) return;
+      const queued = { ...item, id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+      setQueues((q) => ({ ...q, [id]: [...(q[id] ?? []), queued] }));
+    },
+    [],
+  );
+
+  const removeQueued = useCallback((itemId: string) => {
+    const id = chatIdRef.current;
+    if (!id) return;
+    setQueues((q) => ({ ...q, [id]: (q[id] ?? []).filter((x) => x.id !== itemId) }));
+  }, []);
+
+  // Takes the next queued message and sends it. A failed send puts it back at
+  // the front and leaves the queue waiting for the button.
+  const sendNext = useCallback(async () => {
+    const id = chatIdRef.current;
+    const next = id ? queuesRef.current[id]?.[0] : undefined;
+    if (!id || !next) return;
+    setQueues((q) => ({ ...q, [id]: (q[id] ?? []).filter((x) => x.id !== next.id) }));
+    const ok = await send(next.text, next.choice, next.extras);
+    if (!ok) setQueues((q) => ({ ...q, [id]: [next, ...(q[id] ?? [])] }));
+  }, [send]);
+
+  // Sent from an effect, not the event handler, so it sees the settled state.
+  useEffect(() => {
+    if (!chatId || running || !ready[chatId]) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consume the one-shot flag so the queue sends once
+    setReady((r) => ({ ...r, [chatId]: false }));
+    if (queuesRef.current[chatId]?.length) void sendNext();
+  }, [chatId, running, ready, sendNext]);
+
   const stop = useCallback(async () => {
     const id = chatIdRef.current;
     if (id) await assistantCancel(id).catch(() => {});
@@ -504,9 +590,14 @@ export function useAssistantChat(opts: {
     chatsVersion,
     runningIds,
     newChat,
+    dropQueue,
     openChat,
     send,
     stop,
+    queue: chatId ? (queues[chatId] ?? []) : [],
+    enqueue,
+    removeQueued,
+    sendNext,
   };
 }
 

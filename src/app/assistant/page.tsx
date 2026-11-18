@@ -337,6 +337,7 @@ export default function AssistantPage() {
       try {
         await assistantChatDelete(id);
         if (id === chat.chatId) chat.newChat();
+        else chat.dropQueue(id);
       } catch (e) {
         failed.push(errorMessage(e));
       }

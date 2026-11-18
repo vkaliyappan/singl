@@ -135,6 +135,7 @@ pub fn run() {
       commands::agents::agent_anthropic_models,
       commands::assistant::assistant_send,
       commands::assistant::assistant_cancel,
+      commands::assistant::assistant_steer,
       commands::assistant::assistant_chat_running,
       commands::assistant::assistant_chats,
       commands::assistant::assistant_chats_search,

@@ -367,10 +367,13 @@ impl Assistant {
   /// Runs the turn, then always unmarks the chat and reports how it ended.
   async fn finish(self: &Arc<Self>, mut chat: Chat, req: SendRequest, cancel: CancellationToken) -> Result<String> {
     let result = if providers::is_api(&req.provider) {
+      self.steer_inbox(&chat.id, true);
       self.api_turn(&mut chat, &req, &cancel).await
     } else {
       self.cli_turn(&mut chat, &req, &cancel).await
     };
+    // Closed before the chat stops running, so a later steer fails and is sent as its own message.
+    let unread = self.steer_inbox(&chat.id, false);
     self.running.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat.id);
     self.set_turn_tools(&chat.id, None);
     self.set_turn_mode(&chat.id, None);
@@ -380,7 +383,7 @@ impl Assistant {
       Err(CoreError::Cancelled) | Ok(_) => None,
       Err(e) => Some(e.to_string()),
     };
-    self.emit(AssistantEvent::TurnEnded { chat_id: chat.id.clone(), error, cancelled });
+    self.emit(AssistantEvent::TurnEnded { chat_id: chat.id.clone(), error, cancelled, unread });
     self.emit(AssistantEvent::ChatsChanged);
     result
   }
@@ -493,6 +496,10 @@ impl Assistant {
       }
       self.record(history, msg).await?;
       if calls.is_empty() {
+        // Something the user sent meanwhile gets an answer too.
+        if self.read_steered(job, history).await? {
+          continue;
+        }
         return Ok(last_text);
       }
       // Sub-agents start at once and run side by side; other calls run in order meanwhile.
@@ -517,8 +524,25 @@ impl Assistant {
         results.push(Block::ToolResult { tool_use_id: id, content, is_error });
       }
       self.record(history, Message::new(Role::User, results)).await?;
+      self.read_steered(job, history).await?;
     }
     Err(CoreError::Invalid(format!("Stopped after {} steps without a final answer.", job.max_steps)))
+  }
+
+  /// Records what the user steered into a turn (not a sub-agent's loop) as
+  /// their message, for the next model call. True when there was any.
+  async fn read_steered(&self, job: &Job, history: &mut History<'_>) -> Result<bool> {
+    if job.source != "assistant" || !matches!(history, History::Chat(_)) {
+      return Ok(false);
+    }
+    let texts = self.take_steered(&job.chat_id);
+    if texts.is_empty() {
+      return Ok(false);
+    }
+    let mut msg = Message::new(Role::User, texts.into_iter().map(|text| Block::Text { text }).collect());
+    msg.context = serde_json::to_value(self.context.get()).ok();
+    self.record(history, msg).await?;
+    Ok(true)
   }
 
   async fn cli_turn(self: &Arc<Self>, chat: &mut Chat, req: &SendRequest, cancel: &CancellationToken) -> Result<String> {

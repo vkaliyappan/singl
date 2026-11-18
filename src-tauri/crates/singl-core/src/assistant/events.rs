@@ -31,7 +31,14 @@ pub enum AssistantEvent {
   #[serde(rename_all = "camelCase")]
   MessageSaved { chat_id: String, message: Message },
   #[serde(rename_all = "camelCase")]
-  TurnEnded { chat_id: String, error: Option<String>, cancelled: bool },
+  TurnEnded {
+    chat_id: String,
+    error: Option<String>,
+    cancelled: bool,
+    /// Messages steered into the turn that it ended before reading.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unread: Vec<String>,
+  },
   #[serde(rename_all = "camelCase")]
   ApprovalRequest {
     request_id: String,

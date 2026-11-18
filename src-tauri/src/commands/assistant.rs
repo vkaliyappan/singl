@@ -29,6 +29,13 @@ pub fn assistant_cancel(state: State<'_, AppState>, chat_id: String) -> bool {
   state.assistant.cancel(&chat_id)
 }
 
+/// Adds a message to a chat's running turn. False when it cannot take one:
+/// the page then queues it as the next message.
+#[tauri::command]
+pub fn assistant_steer(state: State<'_, AppState>, chat_id: String, text: String) -> bool {
+  state.assistant.steer(&chat_id, &text)
+}
+
 /// Changes the approval mode of a chat's running turn (the composer's picker).
 #[tauri::command]
 pub fn assistant_turn_mode(

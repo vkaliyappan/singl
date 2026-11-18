@@ -46,6 +46,7 @@ function hasFiles(e: React.DragEvent) {
 }
 import {
   assistantChatDelete,
+  assistantSteer,
   assistantChatRename,
   assistantChats,
   assistantSuggestions,
@@ -79,6 +80,8 @@ import {
 } from "./composer-editor";
 import { ApprovalModePicker, useApprovalMode, type ApprovalModes } from "./approval-mode";
 import { ModelPicker, useModelChoice } from "./model-picker";
+import { FollowUpToggle, useFollowUp } from "./follow-up";
+import { QueueList } from "./queue-list";
 import { SubAgentPicker, subAgentsFor, useSubAgents } from "./sub-agents";
 import type {
   AssistantChat,
@@ -135,6 +138,7 @@ function History({ chat }: { chat: AssistantChat }) {
     try {
       await assistantChatDelete(id);
       if (id === chat.chatId) chat.newChat();
+      else chat.dropQueue(id);
       load();
     } catch (e) {
       toast.error(errorMessage(e));
@@ -426,6 +430,7 @@ function Composer({
   const [modelOpen, setModelOpen] = useState(false);
   const { modes: approval, setModes: saveApproval } = useApprovalMode();
   const { prefs: subAgents, setPrefs: setSubAgents } = useSubAgents();
+  const { mode: followUp, setMode: setFollowUp } = useFollowUp();
   // New modes also apply to the turn already running, and settle what it is
   // waiting on, per scope: Auto approves the open cards, Read-only denies them.
   const setApproval = (m: ApprovalModes) => {
@@ -439,7 +444,11 @@ function Composer({
     }
   };
   const { editor, empty } = useComposerEditor({
-    placeholder: chat.messages.length
+    placeholder: chat.running
+      ? followUp === "steer"
+        ? "Steer the answer…"
+        : "Queue a follow-up…"
+      : chat.messages.length
       ? "Ask a follow-up…"
       : "Ask about this screen, or tell me what to do…",
     onKeyDown: (e) => {
@@ -543,12 +552,8 @@ function Composer({
 
   const submit = async () => {
     const sent = editorMarkdown(editor);
-    if ((!sent && !extras.images.length) || chat.running || !canSend) return;
-    // Clearing the box must not take the chips with it: they are sent below.
-    sending.current = true;
-    editor?.commands.clearContent(true);
-    sending.current = false;
-    const ok = await onSend(sent, {
+    if ((!sent && !extras.images.length) || !canSend) return;
+    const sendExtras: SendExtras = {
       attachments: extras.attachments,
       dirs: extras.dirs,
       dropped: extras.dropped,
@@ -569,7 +574,32 @@ function Composer({
         screen: p.screen,
         content: p.content,
       })),
-    });
+    };
+    // Clearing the box must not take the chips with it: they are sent below.
+    sending.current = true;
+    editor?.commands.clearContent(true);
+    sending.current = false;
+    if (chat.running && chat.chatId && choice) {
+      // Steering carries text only: anything attached waits in the queue.
+      const textOnly =
+        !sendExtras.attachments.length &&
+        !sendExtras.dropped?.length &&
+        !sendExtras.images?.length &&
+        !sendExtras.references?.length;
+      let steered = false;
+      if (followUp === "steer" && textOnly) {
+        steered = await assistantSteer(chat.chatId, sent).catch(() => false);
+        if (!steered)
+          toast("This model can't take messages mid-answer — queued for when it finishes.");
+      }
+      if (!steered) {
+        chat.enqueue({ text: sent, extras: sendExtras, choice });
+        extras.reset();
+        clearPins();
+      }
+      return;
+    }
+    const ok = await onSend(sent, sendExtras);
     if (ok) {
       extras.reset();
       clearPins();
@@ -600,6 +630,13 @@ function Composer({
           ))}
         </div>
       )}
+      <QueueList
+        chat={chat}
+        onEdit={(text) => {
+          if (editor?.isEmpty) setEditorMarkdown(editor, text);
+        }}
+        editorEmpty={empty}
+      />
       <div className="relative">
         <MentionPopup m={mentions} />
         <div
@@ -627,6 +664,7 @@ function Composer({
               choice={choice}
               providers={providers}
             />
+            <FollowUpToggle mode={followUp} onChange={setFollowUp} />
             <ApprovalModePicker modes={approval} onChange={setApproval} />
             <ModelPicker
               providers={providers}
@@ -635,6 +673,17 @@ function Composer({
               open={modelOpen}
               onOpenChange={setModelOpen}
             />
+            {chat.running && (!empty || extras.images.length > 0) && canSend && (
+              <button
+                type="button"
+                aria-label={followUp === "steer" ? "Steer" : "Queue"}
+                title={followUp === "steer" ? "Steer the answer (Enter)" : "Queue a follow-up (Enter)"}
+                onClick={() => void submit()}
+                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <IconArrowUp className="size-4" />
+              </button>
+            )}
             {chat.running ? (
               <button
                 type="button"

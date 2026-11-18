@@ -203,6 +203,8 @@ export type AssistantEvent =
       chatId: string;
       error: string | null;
       cancelled: boolean;
+      /** Steered messages the turn ended before reading; they become queued. */
+      unread?: string[];
     }
   | {
       type: "approvalRequest";
@@ -294,6 +296,9 @@ export const assistantTurnMode = (chatId: string, mode: ApprovalMode, serverMode
   invoke<boolean>("assistant_turn_mode", { chatId, mode, serverMode });
 export const assistantCancel = (chatId: string) =>
   invoke<boolean>("assistant_cancel", { chatId });
+/** True = the running turn took the message; false = queue it instead. */
+export const assistantSteer = (chatId: string, text: string) =>
+  invoke<boolean>("assistant_steer", { chatId, text });
 export const assistantChats = (limit = 200) =>
   invoke<ChatSummary[]>("assistant_chats", { limit });
 export const assistantChatsSearch = (query: string, limit = 200) =>
