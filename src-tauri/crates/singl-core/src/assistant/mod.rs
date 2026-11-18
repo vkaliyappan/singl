@@ -557,7 +557,8 @@ impl Assistant {
       if !self.permit(name, &args, risk, meta).await? {
         return Err(CoreError::Invalid("The user declined this action.".into()));
       }
-      return self.mcp_clients.call(&servers, name, args).await;
+      let timeout = self.settings().await?.tool_timeout();
+      return self.mcp_clients.call(&servers, name, args, timeout).await;
     }
     Err(CoreError::Invalid(format!("Unknown tool \"{name}\".")))
   }

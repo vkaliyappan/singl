@@ -565,6 +565,7 @@ impl Assistant {
         resume,
         mcp_url: endpoint.url,
         mcp_token: token.clone(),
+        tool_timeout_secs: self.settings().await.map(|s| s.tool_timeout()).unwrap_or_default().as_secs(),
         cwd,
         effort: req.effort.clone(),
         read_only: req.approval == super::ApprovalMode::ReadOnly,

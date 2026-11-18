@@ -155,6 +155,8 @@ export type AssistantSettingsView = {
   /** Folder the project MCP files are read from; empty means the workspace root. */
   projectMcpRoot: string;
   disabledProjectServers: string[];
+  /** How long one MCP tool call may take, approval wait included. */
+  toolTimeoutMinutes: number;
 };
 
 export type AssistantSettingsPatch = Partial<{
@@ -171,6 +173,7 @@ export type AssistantSettingsPatch = Partial<{
   useProjectMcp: boolean;
   projectMcpRoot: string;
   disabledProjectServers: string[];
+  toolTimeoutMinutes: number;
   regenerateMcpToken: boolean;
 }>;
 

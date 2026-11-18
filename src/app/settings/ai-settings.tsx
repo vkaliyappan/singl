@@ -419,6 +419,7 @@ export function AiSettings() {
   } | null>(null);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [toolTimeout, setToolTimeout] = useState("");
 
   const refreshMcp = useCallback(() => {
     assistantMcpInfo()
@@ -433,6 +434,7 @@ export function AiSettings() {
     setS(view);
     setModel(view.defaultModel);
     setPort(String(view.mcpPort));
+    setToolTimeout(String(view.toolTimeoutMinutes));
     setMcpRoot(view.projectMcpRoot);
   }, []);
 
@@ -650,6 +652,32 @@ export function AiSettings() {
           In Ask mode, run write actions (changes that can be undone) without
           asking
         </label>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Label htmlFor="ai-tool-timeout" className="w-32 text-xs font-normal">
+            Tool call timeout
+          </Label>
+          <Input
+            id="ai-tool-timeout"
+            inputMode="numeric"
+            value={toolTimeout}
+            onChange={(e) => setToolTimeout(e.target.value.replace(/\D/g, ""))}
+            className="w-20 font-mono"
+          />
+          <span className="text-muted-foreground">minutes</span>
+          <Button
+            size="sm"
+            disabled={!toolTimeout || Number(toolTimeout) === s.toolTimeoutMinutes}
+            onClick={() => void save({ toolTimeoutMinutes: Number(toolTimeout) })}
+          >
+            Apply
+          </Button>
+          <p className="w-full text-muted-foreground">
+            How long one tool call (for example a ThingWorx service) may run,
+            including the time it waits for your approval. Applies to Claude
+            Code, Codex and the MCP servers singl connects to, from the next
+            message.
+          </p>
+        </div>
         <div className="mt-3 space-y-2 text-xs">
           <p className="font-medium">
             Outside MCP clients (Claude Desktop, other agents)

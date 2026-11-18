@@ -25,7 +25,6 @@ use crate::{CoreError, Result};
 
 const PROTOCOL: &str = "2025-06-18";
 const START_TIMEOUT: Duration = Duration::from_secs(30);
-const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const RETRY_AFTER: Duration = Duration::from_secs(60);
 const STDERR_LINES: usize = 50;
@@ -924,7 +923,7 @@ impl McpClients {
     risk_from(name, false, None)
   }
 
-  pub async fn call(&self, servers: &[McpServerConfig], name: &str, args: Value) -> Result<String> {
+  pub async fn call(&self, servers: &[McpServerConfig], name: &str, args: Value, timeout: Duration) -> Result<String> {
     let unknown = || invalid(format!("Unknown tool \"{name}\"."));
     let (slot, tool, conn, cfg) = self.find(name).ok_or_else(unknown)?;
     if !servers.iter().any(|s| s.name == cfg.name && s.enabled) {
@@ -932,7 +931,7 @@ impl McpClients {
     }
     let conn = conn.ok_or_else(|| invalid(format!("MCP server \"{}\" is not running.", cfg.name)))?;
     let args = if args.is_null() { json!({}) } else { args };
-    let result = conn.request("tools/call", json!({ "name": tool.original, "arguments": args }), CALL_TIMEOUT).await;
+    let result = conn.request("tools/call", json!({ "name": tool.original, "arguments": args }), timeout).await;
     match result {
       Ok(v) => flatten_result(&v),
       Err(e) => {
@@ -1097,7 +1096,7 @@ mod tests {
     let servers = vec![cfg("secret")];
     let tools = clients.tools(&servers).await;
     assert!(tools.iter().any(|t| t.name == "self__get_screen_context"), "{:?}", tools.iter().map(|t| &t.name).collect::<Vec<_>>());
-    let out = clients.call(&servers, "self__list_screens", json!({})).await.unwrap();
+    let out = clients.call(&servers, "self__list_screens", json!({}), Duration::from_secs(30)).await.unwrap();
     assert!(out.contains("twx-entities"), "{out}");
     let status = clients.status(&servers).await;
     assert_eq!(status[0].state, "running");
@@ -1110,7 +1109,7 @@ mod tests {
     let status = bad.status(&servers).await;
     assert_eq!(status[0].state, "error");
     assert!(status[0].error.as_deref().unwrap_or_default().contains("401"), "{:?}", status[0].error);
-    assert!(bad.call(&servers, "self__list_screens", json!({})).await.is_err());
+    assert!(bad.call(&servers, "self__list_screens", json!({}), Duration::from_secs(30)).await.is_err());
 
     clients.shutdown_all().await;
     cancel.cancel();
@@ -1143,7 +1142,7 @@ mod tests {
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "n__echo_it");
     assert_eq!(tools[0].risk, Risk::Read);
-    assert_eq!(clients.call(&servers, "n__echo_it", json!({ "a": 1 })).await.unwrap(), "echo:{\"a\":1}");
+    assert_eq!(clients.call(&servers, "n__echo_it", json!({ "a": 1 }), Duration::from_secs(30)).await.unwrap(), "echo:{\"a\":1}");
     clients.shutdown_all().await;
     assert!(clients.status(&servers).await[0].state == "stopped");
   }

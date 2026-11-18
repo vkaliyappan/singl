@@ -151,6 +151,8 @@ pub struct CliRequest {
   /// The app's MCP server for this turn (token scoped to the chat).
   pub mcp_url: String,
   pub mcp_token: String,
+  /// How long the CLI may wait on one call to the app's MCP server.
+  pub tool_timeout_secs: u64,
   pub cwd: PathBuf,
   /// Reasoning effort, already checked against [`efforts`]; empty = the CLI's default.
   pub effort: String,

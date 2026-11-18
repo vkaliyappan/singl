@@ -13,6 +13,8 @@ use crate::Result;
 use crate::db::now;
 
 pub const DEFAULT_MCP_PORT: u16 = 47821;
+pub const DEFAULT_TOOL_TIMEOUT_MINUTES: u32 = 30;
+const MAX_TOOL_TIMEOUT_MINUTES: u32 = 24 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -39,6 +41,8 @@ pub struct AssistantSettings {
   pub project_mcp_root: String,
   /// Names of project (`.mcp.json`) servers switched off.
   pub disabled_project_servers: Vec<String>,
+  /// How long one MCP tool call may take, approval wait included, in minutes.
+  pub tool_timeout_minutes: u32,
   /// OAuth sign-ins by server URL. Never in the view.
   pub mcp_oauth: HashMap<String, super::mcp::oauth::OAuthToken>,
 }
@@ -60,6 +64,7 @@ impl Default for AssistantSettings {
       use_project_mcp: true,
       project_mcp_root: String::new(),
       disabled_project_servers: Vec::new(),
+      tool_timeout_minutes: DEFAULT_TOOL_TIMEOUT_MINUTES,
       mcp_oauth: HashMap::new(),
     }
   }
@@ -106,6 +111,7 @@ pub struct AssistantSettingsView {
   pub use_project_mcp: bool,
   pub project_mcp_root: String,
   pub disabled_project_servers: Vec<String>,
+  pub tool_timeout_minutes: u32,
 }
 
 /// A partial update; `None` leaves a field alone. An empty key clears it.
@@ -125,6 +131,7 @@ pub struct AssistantSettingsPatch {
   pub use_project_mcp: Option<bool>,
   pub project_mcp_root: Option<String>,
   pub disabled_project_servers: Option<Vec<String>>,
+  pub tool_timeout_minutes: Option<u32>,
   /// Makes a new MCP token, cutting off every client that holds the old one.
   pub regenerate_mcp_token: Option<bool>,
 }
@@ -148,7 +155,17 @@ impl AssistantSettings {
       use_project_mcp: self.use_project_mcp,
       project_mcp_root: self.project_mcp_root.clone(),
       disabled_project_servers: self.disabled_project_servers.clone(),
+      tool_timeout_minutes: self.tool_timeout().as_secs() as u32 / 60,
     }
+  }
+
+  /// How long one MCP tool call may take (stored minutes, clamped; 0 = the default).
+  pub fn tool_timeout(&self) -> std::time::Duration {
+    let m = match self.tool_timeout_minutes {
+      0 => DEFAULT_TOOL_TIMEOUT_MINUTES,
+      m => m.min(MAX_TOOL_TIMEOUT_MINUTES),
+    };
+    std::time::Duration::from_secs(u64::from(m) * 60)
   }
 
   /// Approval modes for outside MCP clients.
@@ -217,6 +234,9 @@ impl AssistantSettings {
     }
     if let Some(v) = patch.disabled_project_servers {
       self.disabled_project_servers = v;
+    }
+    if let Some(v) = patch.tool_timeout_minutes {
+      self.tool_timeout_minutes = if v == 0 { DEFAULT_TOOL_TIMEOUT_MINUTES } else { v.min(MAX_TOOL_TIMEOUT_MINUTES) };
     }
     if patch.regenerate_mcp_token == Some(true) || self.mcp_token.is_empty() {
       self.mcp_token = new_token();

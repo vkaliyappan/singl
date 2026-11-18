@@ -81,6 +81,9 @@ fn mcp_config_json(req: &CliRequest, copilot: bool) -> String {
   let mut server = json!({"type": "http", "url": req.mcp_url, "headers": {"Authorization": format!("Bearer {}", req.mcp_token)}});
   if copilot {
     server["tools"] = json!(["*"]);
+  } else {
+    // Claude Code otherwise gives an HTTP MCP call 60s ("The operation timed out.").
+    server["timeout"] = json!(req.tool_timeout_secs.max(1) * 1000);
   }
   json!({"mcpServers": {SERVER: server}}).to_string()
 }
@@ -155,6 +158,7 @@ pub fn build_launch(req: &CliRequest, mcp_file: Option<&Path>, system_file: Opti
         format!("mcp_servers.{SERVER}.url={}", q(&req.mcp_url)),
         format!("mcp_servers.{SERVER}.bearer_token_env_var=\"SINGL_MCP_TOKEN\""),
         format!("mcp_servers.{SERVER}.default_tools_approval_mode=\"approve\""),
+        format!("mcp_servers.{SERVER}.tool_timeout_sec={}", req.tool_timeout_secs.max(1)),
       ] {
         l.args.extend(["-c".into(), kv]);
       }
@@ -885,6 +889,7 @@ mod tests {
       resume: None,
       mcp_url: "http://127.0.0.1:9/mcp".into(),
       mcp_token: "tok".into(),
+      tool_timeout_secs: 1800,
       cwd: std::env::temp_dir(),
       effort: String::new(),
       read_only: false,
@@ -979,6 +984,7 @@ mod tests {
     let json: Value = serde_json::from_str(&mcp_config_json(&r, false)).unwrap();
     assert_eq!(json["mcpServers"]["singl"]["headers"]["Authorization"], "Bearer tok");
     assert_eq!(json["mcpServers"]["singl"]["type"], "http");
+    assert_eq!(json["mcpServers"]["singl"]["timeout"], 1_800_000);
     assert!(!a.contains(&"--agents".to_string()));
   }
 
@@ -1009,6 +1015,7 @@ mod tests {
     assert_eq!(&l.args[..2], ["exec", "--json"]);
     assert!(l.args.contains(&"mcp_servers.singl.url=\"http://127.0.0.1:9/mcp\"".to_string()));
     assert!(l.args.contains(&"mcp_servers.singl.bearer_token_env_var=\"SINGL_MCP_TOKEN\"".to_string()));
+    assert!(l.args.contains(&"mcp_servers.singl.tool_timeout_sec=1800".to_string()));
     let rs = l.args.iter().position(|x| x == "resume").unwrap();
     assert_eq!(l.args[rs + 1], "th-1");
     assert_eq!(l.args.last().unwrap(), "-");
