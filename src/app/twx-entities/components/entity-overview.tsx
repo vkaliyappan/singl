@@ -919,6 +919,7 @@ export function EntityOverview({
                     <div className="flex-1 min-h-0">
                       {selectedService.script ? (
                         <MonacoEditor
+                          className="min-w-0"
                           height="100%"
                           language="javascript"
                           value={selectedService.script}

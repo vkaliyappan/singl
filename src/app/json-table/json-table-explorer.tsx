@@ -498,6 +498,7 @@ export function JsonTableExplorer() {
             }}
           >
             <MonacoEditor
+              className="min-w-0"
               height="100%"
               language="json"
               value={text}

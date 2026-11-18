@@ -1238,6 +1238,7 @@ export function RepoExplorer({
                                   </div>
                                 ) : (
                                   <MonacoEditor
+                                    className="min-w-0"
                                     key={activeTab}
                                     height="100%"
                                     language={activeLang}

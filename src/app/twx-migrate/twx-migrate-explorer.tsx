@@ -1377,6 +1377,7 @@ export function TwxMigrateExplorer() {
                 </TabsList>
                 <TabsContent value="target" className="m-0 border rounded-xl overflow-hidden flex-1 min-h-[300px]">
                   <DiffEditor
+                    className="min-w-0"
                     height="100%"
                     language="xml"
                     theme={diffTheme}
@@ -1395,6 +1396,7 @@ export function TwxMigrateExplorer() {
                 {mode === "move" && (
                   <TabsContent value="source" className="m-0 border rounded-xl overflow-hidden flex-1 min-h-[300px]">
                     <DiffEditor
+                      className="min-w-0"
                       height="100%"
                       language="xml"
                       theme={diffTheme}
@@ -1475,6 +1477,7 @@ export function TwxMigrateExplorer() {
             {deletePreview && (
               <div className="border rounded-xl overflow-hidden flex-1 min-h-[320px]">
                 <DiffEditor
+                  className="min-w-0"
                   height="100%"
                   language="xml"
                   theme={diffTheme}

@@ -436,6 +436,7 @@ function ServiceInputField({
 
     const monacoNode = (
       <MonacoEditor
+        className="min-w-0"
         height="100%"
         language="json"
         value={prettyValue}
@@ -2280,6 +2281,7 @@ export function TwxServicesExplorer({
                   {inputMode === "raw" ? (
                     <div className="flex-1 flex flex-col min-h-0 border rounded-lg overflow-hidden bg-background">
                       <MonacoEditor
+                        className="min-w-0"
                         height="100%"
                         language="json"
                         value={JSON.stringify(currentPayloadObj, null, 2)}
@@ -2507,6 +2509,7 @@ export function TwxServicesExplorer({
 
                       <TabsContent value="json" className="flex-1 min-h-0 m-0 p-0 overflow-hidden bg-background">
                         <MonacoEditor
+                          className="min-w-0"
                           height="100%"
                           language="json"
                           value={rawOutput}

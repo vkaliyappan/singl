@@ -79,6 +79,7 @@ export function CodeEditor({
         }}
       >
         <MonacoEditor
+          className="min-w-0"
           height="100%"
           language="javascript"
           value={code}

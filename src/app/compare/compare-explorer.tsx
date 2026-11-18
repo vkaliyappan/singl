@@ -1224,6 +1224,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                       <div className="flex-1 min-h-0 relative">
                         {activeTabData.node.status === "identical" ? (
                           <MonacoEditor
+                            className="min-w-0"
                             key={activeTab}
                             height="100%"
                             language={language}

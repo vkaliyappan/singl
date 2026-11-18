@@ -166,6 +166,7 @@ let result = ${entityType}["${entityName}"].${serviceName}(params);`;
           <div className="flex-1 min-h-0 mt-3 border rounded-lg overflow-hidden bg-background">
             <TabsContent value="curl" className="h-full m-0 p-0">
               <MonacoEditor
+                className="min-w-0"
                 height="100%"
                 language="shell"
                 value={snippets.curl.code}
@@ -182,6 +183,7 @@ let result = ${entityType}["${entityName}"].${serviceName}(params);`;
             </TabsContent>
             <TabsContent value="fetch" className="h-full m-0 p-0">
               <MonacoEditor
+                className="min-w-0"
                 height="100%"
                 language="typescript"
                 value={snippets.fetch.code}
@@ -198,6 +200,7 @@ let result = ${entityType}["${entityName}"].${serviceName}(params);`;
             </TabsContent>
             <TabsContent value="twx-js" className="h-full m-0 p-0">
               <MonacoEditor
+                className="min-w-0"
                 height="100%"
                 language="javascript"
                 value={snippets["twx-js"].code}
@@ -214,6 +217,7 @@ let result = ${entityType}["${entityName}"].${serviceName}(params);`;
             </TabsContent>
             <TabsContent value="cli" className="h-full m-0 p-0">
               <MonacoEditor
+                className="min-w-0"
                 height="100%"
                 language="shell"
                 value={snippets.cli.code}

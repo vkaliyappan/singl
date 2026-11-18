@@ -1852,6 +1852,7 @@ export function TwxExplorer({
                                 </div>
                                 <div className="w-1/2 min-w-0 overflow-hidden">
                                   <MonacoEditor
+                                    className="min-w-0"
                                     key={`split-${activeTab}`}
                                     height="100%"
                                     language={getLanguage(activeTab)}
@@ -1878,6 +1879,7 @@ export function TwxExplorer({
                               /* CODE MODE (Full Monaco Editor) */
                               <div className="flex-1 min-h-0 min-w-0">
                                 <MonacoEditor
+                                  className="min-w-0"
                                   key={activeTab}
                                   height="100%"
                                   language={getLanguage(activeTab)}
