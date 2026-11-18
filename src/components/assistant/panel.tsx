@@ -444,6 +444,22 @@ function Composer({
       : "Ask about this screen, or tell me what to do…",
     onKeyDown: (e) => {
       if (mentions.onKeyDown(e)) return true;
+      // Shift+Enter starts a new paragraph, not a hard break inside this one,
+      // so markdown shortcuts (`- `, `1. `, `# `, `> `) work on the new line.
+      // Lists and code blocks keep their own Shift+Enter.
+      if (
+        e.key === "Enter" &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.isComposing &&
+        editor &&
+        !editor.isActive("codeBlock") &&
+        !editor.isActive("listItem")
+      ) {
+        e.preventDefault();
+        return editor.commands.splitBlock();
+      }
       if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229)
         return false;
       // Ctrl+Enter always sends; plain Enter is a new line in lists and code.
