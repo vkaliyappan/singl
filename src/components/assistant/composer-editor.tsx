@@ -29,7 +29,8 @@ const MentionChip = Node.create({
   group: "inline",
   inline: true,
   atom: true,
-  selectable: false,
+  // Drag a badge to move it anywhere in the text.
+  draggable: true,
   addAttributes() {
     return {
       ref: {
@@ -53,7 +54,9 @@ const MentionChip = Node.create({
       mergeAttributes(HTMLAttributes, {
         "data-mention-chip": "",
         class:
-          "mx-px inline-block max-w-56 truncate rounded-md bg-primary/10 px-1.5 align-bottom text-[12px] font-medium text-primary",
+          // Not truncate/overflow-hidden: that moves an inline-block's baseline to
+          // its bottom edge. `!` beats ProseMirror's white-space:normal on atoms.
+          "mx-px inline-block cursor-grab rounded-md bg-primary/10 px-1.5 leading-normal font-medium whitespace-nowrap! text-primary active:cursor-grabbing",
       }),
       `@${node.attrs.label}`,
     ];
