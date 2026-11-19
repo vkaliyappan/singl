@@ -10,11 +10,14 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isTauri } from "@/lib/clock-widget"
 import { errorMessage, listEnvironments } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
 import { DataTablesTab } from "./datatables-tab"
 import { HealthTab } from "./health-tab"
 import { SchedulersTab } from "./schedulers-tab"
 import { StreamsTab } from "./streams-tab"
 import { SubscriptionsTab } from "./subscriptions-tab"
+
+const TABS = ["health", "subscriptions", "schedulers", "streams", "datatables"]
 
 function TwxServer() {
   const router = useRouter()
@@ -34,6 +37,36 @@ function TwxServer() {
       .catch((err) => setError(errorMessage(err)))
   }, [])
 
+  const env = envs ? (wanted && envs.includes(wanted) ? wanted : envs[0]) : ""
+  useAssistantContext({
+    screen: "twx-server",
+    title: "ThingWorx server",
+    summary: `${tab} on ${env || "no environment"}`,
+    data: { env, tab, environments: envs ?? [], error },
+  })
+  useAssistantAction(
+    "open_server_tab",
+    {
+      description: "Open a tab of the ThingWorx server page: health, subscriptions, schedulers, streams or datatables. Optionally switch env.",
+      inputSchema: {
+        type: "object",
+        properties: { tab: { type: "string", enum: TABS }, env: { type: "string" } },
+        required: ["tab"],
+      },
+    },
+    async (args) => {
+      const a = args as { tab?: string; env?: string }
+      if (!a.tab || !TABS.includes(a.tab)) throw new Error(`tab must be one of ${TABS.join(", ")}.`)
+      if (a.env && a.env !== env) {
+        if (!envs?.includes(a.env)) throw new Error(`Unknown environment "${a.env}".`)
+        router.replace(`/twx-server?env=${encodeURIComponent(a.env)}`)
+      }
+      setTab(a.tab)
+      await new Promise((r) => setTimeout(r, 300)) // let the tab mount and register its actions
+      return { tab: a.tab, env: a.env ?? env }
+    },
+  )
+
   if (error) {
     return (
       <div className="p-8">
@@ -51,8 +84,6 @@ function TwxServer() {
       </div>
     )
   }
-
-  const env = wanted && envs.includes(wanted) ? wanted : envs[0]
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6 lg:p-8">

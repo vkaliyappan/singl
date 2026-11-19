@@ -8,6 +8,7 @@ import { asInfoTable, InfoTableView } from "./infotable";
 import { asProperties, isVtq, PropertyPanel } from "./property-panel";
 import { RunTimesView } from "./run-times";
 import { asServiceDefs, ServiceSignatures } from "./service-signature";
+import * as sv from "./server-views";
 
 class Guard extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -57,6 +58,74 @@ function pick(name: string, input: unknown, value: unknown): ReactNode | null {
       const side = (s: Record<string, unknown>) => (typeof s.content === "string" ? s.content : "");
       const path = typeof inp.path === "string" ? `${inp.path} (repository → export)` : undefined;
       return <DiffView original={side(value.left)} modified={side(value.right)} path={path} />;
+    }
+    case "twx_query_logs": {
+      const rows = sv.asLogRows(value);
+      return rows ? <sv.LogsView rows={rows} /> : null;
+    }
+    case "twx_query_datatable":
+    case "twx_query_stream": {
+      const r = sv.asQueryResult(value);
+      return r ? <sv.QueryResultView value={r} id={name} /> : null;
+    }
+    case "twx_list_streams":
+      return isRecord(value) && Array.isArray(value.streams) ? <sv.StreamListView value={value} /> : null;
+    case "twx_list_datatables":
+      return Array.isArray(value) && value.length && value.every(isRecord) ? <sv.NamedListView rows={value} id={name} /> : null;
+    case "twx_list_connectors":
+      return Array.isArray(value) && value.length && value.every(isRecord) ? <sv.ConnectorsView rows={value} /> : null;
+    case "twx_list_subscriptions":
+      return Array.isArray(value) && value.length && value.every(isRecord) ? <sv.SubscriptionsView rows={value} /> : null;
+    case "twx_list_schedulers":
+      return Array.isArray(value) && value.length && value.every(isRecord) ? <sv.SchedulersView rows={value} /> : null;
+    case "twx_server_health": {
+      const h = sv.asHealth(value);
+      return h ? <sv.HealthView ping={h.ping} health={h.health} /> : null;
+    }
+    case "twx_entity_permissions": {
+      const p = sv.asPermissions(value);
+      return p ? <sv.PermissionsView value={p} /> : null;
+    }
+    case "twx_check_permission": {
+      const d = sv.asDecision(value);
+      return d ? <sv.VerdictView value={d} /> : null;
+    }
+    case "twx_import_preview": {
+      const items = sv.asImportItems(value);
+      return items ? <sv.ImportItemsView items={items} /> : null;
+    }
+    case "twx_import_entities": {
+      if (!isRecord(value)) return null;
+      const env = typeof value.environment === "string" ? value.environment : "";
+      if (value.dryRun === true) {
+        const items = sv.asImportItems(value.files);
+        return items ? <sv.ImportItemsView items={items} note={`Dry run on ${env}`} /> : null;
+      }
+      return isRecord(value.result) && Array.isArray(value.result.results) ? <sv.ImportResultView env={env} result={value.result} /> : null;
+    }
+    case "entity_dependencies": {
+      const g = sv.asDepGraph(value);
+      return g ? <sv.DepGraphView graph={g} /> : null;
+    }
+    case "entity_service_callers": {
+      const c = sv.asCallers(value);
+      return c ? <sv.CallersView value={c} /> : null;
+    }
+    case "entity_unused": {
+      const u = sv.asDepNodes(value);
+      return u ? <sv.UnusedView value={u} /> : null;
+    }
+    case "automation_run_suite": {
+      const r = sv.asSuiteRun(value);
+      return r ? <sv.SuiteRunView value={r} /> : null;
+    }
+    case "automation_drift_report": {
+      const d = sv.asDrift(value);
+      return d ? <sv.DriftView value={d} /> : null;
+    }
+    case "entity_undo_list": {
+      const rows = sv.asUndoList(value);
+      return rows ? <sv.UndoListView rows={rows} /> : null;
     }
     default: {
       if (isRecord(value) && isRecord(value.dataShape)) {

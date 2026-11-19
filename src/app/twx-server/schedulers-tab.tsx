@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Switch } from "@/components/ui/switch"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantContext } from "@/lib/assistant/context"
 import {
   describeCron,
   describeInterval,
@@ -61,6 +62,19 @@ export function SchedulersTab({ env }: { env: string }) {
   const loading = !current
   const items = current ? loaded.items : null
   const loadError = current ? loaded.error : null
+
+  useAssistantContext({
+    screen: "twx-server",
+    data: {
+      schedulers: {
+        loading,
+        error: loadError,
+        count: items?.length ?? null,
+        enabled: items?.filter((t) => t.enabled).length ?? null,
+        items: items?.slice(0, 20).map((t) => ({ name: t.name, template: t.template, enabled: t.enabled, schedule: t.schedule ?? t.intervalMs })),
+      },
+    },
+  })
 
   async function confirm() {
     if (!pending) return

@@ -5,6 +5,8 @@ import { IconPlugConnected, IconRefresh } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { DataGrid, type GridColumn } from "@/components/data-grid"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import {
   formatBytes,
   formatDuration,
@@ -219,6 +221,38 @@ export function HealthTab({ env }: { env: string }) {
   const mem = p?.memoryUsed != null && p.memoryTotal ? p.memoryUsed / p.memoryTotal : null
   const queue = Math.max(p?.eventQueue ?? 0, p?.streamQueue ?? 0, p?.valueStreamQueue ?? 0)
   const down = data?.health.subsystems?.filter((s) => !s.running) ?? []
+  useAssistantContext({
+    screen: "twx-server",
+    data: {
+      health: {
+        loading,
+        error,
+        up: ping?.ok ?? null,
+        latencyMs: ping?.latencyMs ?? null,
+        pingError: ping?.error ?? null,
+        version: p?.softwareVersion ?? null,
+        memoryUsedMb: p?.memoryUsed != null ? Math.round(p.memoryUsed / 1048576) : null,
+        memoryTotalMb: p?.memoryTotal != null ? Math.round(p.memoryTotal / 1048576) : null,
+        queues: { event: p?.eventQueue ?? null, stream: p?.streamQueue ?? null, valueStream: p?.valueStreamQueue ?? null },
+        counts: c ?? null,
+        subsystemsDown: down.map((s) => `${s.name}: ${s.state}`).slice(0, 20),
+        errors: data?.health.errors.slice(0, 5),
+      },
+    },
+  })
+  usePinnables(
+    data
+      ? [
+          {
+            kind: "server-health",
+            label: `Server health · ${env}`,
+            detail: ping?.ok ? "up" : "down",
+            content: () =>
+              JSON.stringify({ ping: data.ping, platform: p, counts: c, subsystemsDown: down, errors: data.health.errors }).slice(0, 6000),
+          },
+        ]
+      : [],
+  )
 
   return (
     <div className="flex flex-col gap-4">

@@ -80,6 +80,14 @@ const SERVER_TOOLS: &[&str] = &[
   "flow_run",
   "deploy_backup_deployment_files",
   "deploy_upload_deployment_files",
+  "twx_set_property_values",
+  "twx_set_subscription_enabled",
+  "twx_fire_event",
+  "twx_set_thing_enabled",
+  "twx_import_entities",
+  "automation_run_suite",
+  // Saves locally, but the schedule later runs services or flows unattended.
+  "automation_schedule_upsert",
 ];
 
 pub fn scope_of(tool: &str) -> ToolScope {
@@ -669,7 +677,16 @@ mod tests {
   use super::*;
   use crate::workspace::Workspace;
 
-  async fn assistant() -> (tempfile::TempDir, Arc<Assistant>) {
+  #[test]
+  fn server_tools_exist_and_are_not_read_only() {
+    let tools = tools::builtin();
+    for name in SERVER_TOOLS {
+      let t = tools.iter().find(|t| t.spec.name == *name).unwrap_or_else(|| panic!("{name} is not a tool"));
+      assert_ne!(t.spec.risk, Risk::Read, "{name}");
+    }
+  }
+
+  async fn assistant()-> (tempfile::TempDir, Arc<Assistant>) {
     let dir = tempfile::tempdir().unwrap();
     let pool = crate::db::open(&dir.path().join("singl.db")).await.unwrap();
     let a = Assistant::new(

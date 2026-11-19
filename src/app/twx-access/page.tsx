@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isTauri } from "@/lib/clock-widget"
 import { errorMessage, listEnvironments } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
 import { NativeSelect } from "@/components/ui/native-select"
 import { MashupsTab } from "./mashups-tab"
 import { PermissionsTab } from "./permissions-tab"
@@ -31,6 +32,35 @@ export default function TwxAccessPage() {
   }, [])
 
   const current = envs.find((e) => e.environment === env)
+  const [tab, setTab] = useState("permissions")
+  useAssistantContext({
+    screen: "twx-access",
+    title: "Access & Mashups",
+    summary: `${tab} on ${env || "no environment"}`,
+    data: { env, tab, environments: envs.map((e) => e.environment), error },
+  })
+  useAssistantAction(
+    "open_access_tab",
+    {
+      description: "Open the Permissions or Mashups tab (optionally switching env).",
+      inputSchema: {
+        type: "object",
+        properties: { tab: { type: "string", enum: ["permissions", "mashups"] }, env: { type: "string" } },
+        required: ["tab"],
+      },
+    },
+    async (args) => {
+      const a = args as { tab?: string; env?: string }
+      if (a.tab !== "permissions" && a.tab !== "mashups") throw new Error("tab must be permissions or mashups.")
+      if (a.env) {
+        if (!envs.some((e) => e.environment === a.env)) throw new Error(`Unknown environment "${a.env}".`)
+        setEnv(a.env)
+      }
+      setTab(a.tab)
+      await new Promise((r) => setTimeout(r, 300))
+      return { tab: a.tab, env: a.env ?? env }
+    },
+  )
 
   return (
     <div className="flex flex-col gap-5 p-8">
@@ -52,7 +82,7 @@ export default function TwxAccessPage() {
       ) : !current ? (
         <p className="text-xs text-muted-foreground">No ThingWorx environment is enabled. Add one in Settings.</p>
       ) : (
-        <Tabs defaultValue="permissions">
+        <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
           <TabsList>
             <TabsTrigger value="permissions">Permissions</TabsTrigger>
             <TabsTrigger value="mashups">Mashups</TabsTrigger>

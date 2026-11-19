@@ -22,6 +22,8 @@ pub fn group_of(tool: &str) -> &'static str {
   match tool {
     "get_screen_context" | "get_selection" | "list_screens" | "navigate" | "run_ui_action" | "app_overview" => "app",
     "tool_output_query" => "outputs",
+    "entity_dependencies" | "entity_service_callers" | "entity_unused" => "deps",
+    "entity_undo_list" | "entity_undo" => "undo",
     _ => match tool.split('_').next().unwrap_or_default() {
       "assistant" => "app",
       "fs" => "fs",

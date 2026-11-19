@@ -29,6 +29,8 @@ import {
   type DepUnused,
 } from "@/lib/deps"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import { DataGrid, type GridColumn } from "@/components/data-grid"
 
 type Center = { name: string; type?: string }
@@ -301,6 +303,107 @@ export function DepsExplorer({ envs }: { envs: string[] }) {
       .then((value) => setCallers({ key, value }))
       .catch((err) => setCallers({ key, error: errorMessage(err) }))
   }
+
+  const gv = current?.value
+  useAssistantContext({
+    screen: "twx-deps",
+    title: "Dependencies",
+    summary: center ? `${center.type ?? ""}${center.type ? ":" : ""}${center.name} (${direction}, depth ${depth}) on ${env}` : `Dependencies on ${env}`,
+    data: {
+      env,
+      tab,
+      indexed: summary?.key === env ? { entities: summary.value?.entities, edges: summary.value?.edges } : null,
+      center,
+      direction,
+      depth,
+      kinds,
+      graph: gv && {
+        nodes: gv.nodes.length,
+        edges: gv.edges.length,
+        truncated: gv.truncated,
+        nodeList: gv.nodes.slice(0, 20).map((n) => `${n.type}:${n.name}${n.external ? " (external)" : ""}`),
+        edgeList: gv.edges.slice(0, 20).map((e) => `${e.from} -${e.kind}${e.member ? `(${e.member})` : ""}-> ${e.to}`),
+      },
+      graphError: current?.error,
+      callers: callers?.value && {
+        service: callers.value.service,
+        count: callers.value.callers.length,
+        list: callers.value.callers.slice(0, 15).map((c) => `${c.caller.type}:${c.caller.name}`),
+      },
+      unused: tab === "unused" && unused?.value ? { type: unusedType, total: unused.value.total, list: unused.value.nodes.slice(0, 20).map((n) => `${n.type}:${n.name}`) } : undefined,
+    },
+    selection: center ? { entity: [`${center.type ?? "Entity"}:${center.name}`] } : {},
+  })
+  usePinnables(
+    gv && center
+      ? [
+          {
+            kind: "dependencies",
+            label: `Dependencies · ${center.name}`,
+            detail: `${gv.nodes.length} entities, ${gv.edges.length} references`,
+            content: () =>
+              JSON.stringify({
+                center,
+                direction,
+                depth,
+                nodes: gv.nodes.slice(0, 60).map((n) => `${n.type}:${n.name}`),
+                edges: gv.edges.slice(0, 100).map((e) => ({ from: e.from, to: e.to, kind: e.kind, member: e.member })),
+              }).slice(0, 8000),
+          },
+        ]
+      : [],
+  )
+  useAssistantAction(
+    "show_dependencies",
+    {
+      description:
+        "Centre the dependency graph on an entity (name, or Type:Name) and show it. direction: in (what uses it), out (what it uses) or both; depth 1-4; kinds optionally limits to " +
+        DEP_KINDS.join("|") +
+        ". Reads the local XML export only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          entity: { type: "string" },
+          direction: { type: "string", enum: ["in", "out", "both"] },
+          depth: { type: "number" },
+          kinds: { type: "array", items: { type: "string", enum: [...DEP_KINDS] } },
+        },
+        required: ["entity"],
+      },
+    },
+    async (args) => {
+      const a = args as { entity?: string; direction?: string; depth?: number; kinds?: string[] }
+      const raw = String(a.entity ?? "").trim()
+      if (!raw) throw new Error("entity is required")
+      const colon = raw.indexOf(":")
+      const wantType = colon > 0 ? raw.slice(0, colon) : undefined
+      const wantName = colon > 0 ? raw.slice(colon + 1) : raw
+      const found = await depsSearch(env, wantName, 20)
+      const hit =
+        found.find((n) => n.name.toLowerCase() === wantName.toLowerCase() && (!wantType || n.type.toLowerCase() === wantType.toLowerCase())) ??
+        (wantType ? undefined : found[0])
+      if (!hit) throw new Error(`No exported entity matches "${raw}" in ${env}.`)
+      const dir = a.direction === "in" || a.direction === "out" || a.direction === "both" ? a.direction : "both"
+      const d = Math.min(4, Math.max(1, Math.round(a.depth ?? 1)))
+      const ks = (a.kinds ?? []).filter((k): k is DepKind => (DEP_KINDS as readonly string[]).includes(k))
+      setCenter({ name: hit.name, type: hit.type })
+      setDirection(dir)
+      setDepth(d)
+      setKinds(ks)
+      setQuery("")
+      setHits([])
+      setCallers(null)
+      setTab("graph")
+      const g = await depsGraph({ env, entity: hit.name, entityType: hit.type, direction: dir, depth: d, kinds: ks, limit: 500 })
+      return {
+        center: `${hit.type}:${hit.name}`,
+        nodes: g.nodes.length,
+        edges: g.edges.length,
+        truncated: g.truncated,
+        entities: g.nodes.slice(1, 25).map((n) => `${n.type}:${n.name}`),
+      }
+    },
+  )
 
   return (
     <div className="flex flex-col gap-5 p-8">

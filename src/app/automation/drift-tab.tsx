@@ -15,6 +15,8 @@ import {
 } from "@/lib/automation"
 import { searchEntities } from "@/lib/services"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import { ErrorNote, Field, RunHistory, seconds } from "./shared"
 import { DataGrid, type GridColumn } from "@/components/data-grid"
 
@@ -162,6 +164,49 @@ export function DriftTab({ envs }: { envs: string[] }) {
       toast.error(errorMessage(e))
     }
   }
+
+  useAssistantContext({
+    screen: "automation",
+    data: {
+      env: envA,
+      drift: {
+        envA,
+        envB,
+        projects,
+        compareXml,
+        running,
+        error,
+        report: report && {
+          envA: report.envA,
+          envB: report.envB,
+          onlyA: report.onlyA.length,
+          onlyB: report.onlyB.length,
+          different: report.different.length,
+          same: report.same.length,
+          unchecked: report.unchecked.length,
+          warnings: report.warnings.length,
+          differentList: report.different.slice(0, 15).map((e) => `${e.entityType}:${e.name}`),
+          onlyAList: report.onlyA.slice(0, 10).map((e) => `${e.entityType}:${e.name}`),
+          onlyBList: report.onlyB.slice(0, 10).map((e) => `${e.entityType}:${e.name}`),
+        },
+      },
+    },
+  })
+  usePinnables(
+    report
+      ? [
+          {
+            kind: "drift-report",
+            label: `Drift · ${report.envA} vs ${report.envB}`,
+            detail: `${report.different.length} different`,
+            content: () => {
+              const f = (l: DriftEntity[]) => l.slice(0, 60).map((e) => `${e.entityType}:${e.name}`)
+              return JSON.stringify({ envA: report.envA, envB: report.envB, onlyA: f(report.onlyA), onlyB: f(report.onlyB), different: f(report.different), same: report.same.length }).slice(0, 8000)
+            },
+          },
+        ]
+      : [],
+  )
 
   const shown = available.filter((p) => p.toLowerCase().includes(filter.toLowerCase()))
   const envSelect = (value: string, set: (v: string) => void) => (

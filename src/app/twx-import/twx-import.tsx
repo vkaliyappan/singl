@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { listEntityFiles } from "@/lib/entities"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import {
   listImportBackups,
   openImportBackup,
@@ -128,21 +130,125 @@ export function TwxImport({ envs, workspaceRoot }: { envs: string[]; workspaceRo
     }
   }
 
-  const runPreview = async () => {
+  const runPreview = async (paths: string[] = [...picked]) => {
     setBusy("preview")
     setError("")
     setResult(null)
     try {
-      const items = await previewImport(env, [...picked])
+      const items = await previewImport(env, paths)
       setPreview(items)
       setChosen(new Set(items.filter((i) => !i.error && (i.changed || !i.existsOnServer)).map((i) => i.path)))
       setExpanded(new Set())
+      return items
     } catch (err) {
       setError(errorMessage(err))
+      throw err
     } finally {
       setBusy("")
     }
   }
+
+  // Accepts "env/File.xml" or just "File.xml"; only known files count.
+  const resolvePaths = (raw: unknown) => {
+    const list = Array.isArray(raw) ? raw.map(String) : []
+    const known = new Set(available)
+    const ok: string[] = []
+    const unknown: string[] = []
+    for (const r of list) {
+      const norm = r.replace(/\\/g, "/")
+      const full = norm.startsWith(`${env}/`) ? norm : `${env}/${norm}`
+      if (known.has(full)) ok.push(full)
+      else unknown.push(r)
+    }
+    return { ok, unknown }
+  }
+  const counts = preview && {
+    new: preview.filter((i) => !i.error && !i.existsOnServer).length,
+    changed: preview.filter((i) => !i.error && i.existsOnServer && i.changed).length,
+    unchanged: preview.filter((i) => !i.error && i.existsOnServer && !i.changed).length,
+    errors: preview.filter((i) => i.error).length,
+  }
+  useAssistantContext({
+    screen: "twx-import",
+    title: "TWX Import",
+    summary: `${picked.size} file(s) selected for ${env}${preview ? ` · preview ${counts?.changed} changed, ${counts?.new} new` : ""}`,
+    data: {
+      env,
+      environments: envs,
+      filter,
+      availableCount: available.length,
+      selected: [...picked].slice(0, 20),
+      selectedCount: picked.size,
+      preview: preview && {
+        ...counts,
+        items: preview.slice(0, 20).map((i) => ({ path: i.path, name: i.name, type: i.type, status: status(i).label, error: i.error?.slice(0, 120) })),
+      },
+      importing: busy === "import",
+      result: result && {
+        imported: result.results.filter((r) => r.ok).length,
+        failed: result.results.filter((r) => !r.ok).length,
+        failures: result.results.filter((r) => !r.ok).slice(0, 5).map((r) => ({ path: r.path, error: r.error?.slice(0, 120) })),
+        backupDir: result.backupDir,
+      },
+      error,
+    },
+    selection: { files: [...picked].slice(0, 20) },
+  })
+  usePinnables(
+    preview
+      ? [
+          {
+            kind: "import-preview",
+            label: `Import preview · ${env}`,
+            detail: `${counts?.changed} changed, ${counts?.new} new`,
+            content: () =>
+              JSON.stringify(preview.map((i) => ({ path: i.path, type: i.type, status: status(i).label, error: i.error }))).slice(0, 6000),
+          },
+        ]
+      : [],
+  )
+  useAssistantAction(
+    "select_import_files",
+    {
+      description:
+        "Select the entity XML files to import (paths relative to twx-entities, with or without the leading <env>/). Replaces the current selection; does not import.",
+      inputSchema: { type: "object", properties: { paths: { type: "array", items: { type: "string" } } }, required: ["paths"] },
+      risk: "write",
+    },
+    (args) => {
+      const { ok, unknown } = resolvePaths((args as { paths?: unknown }).paths)
+      setPicked(new Set(ok))
+      setPreview(null)
+      setResult(null)
+      return { selected: ok.length, unknown }
+    },
+  )
+  useAssistantAction(
+    "preview_import",
+    {
+      description:
+        "Preview importing the selected files (or `paths` if given) against the server: shows New/Changed/Unchanged with diffs. Read-only; does not import.",
+      inputSchema: { type: "object", properties: { paths: { type: "array", items: { type: "string" } } } },
+    },
+    async (args) => {
+      const raw = (args as { paths?: unknown }).paths
+      let files = [...picked]
+      if (Array.isArray(raw) && raw.length) {
+        const { ok, unknown } = resolvePaths(raw)
+        if (unknown.length) throw new Error(`Unknown file(s): ${unknown.slice(0, 5).join(", ")}`)
+        setPicked(new Set(ok))
+        files = ok
+      }
+      if (!files.length) throw new Error("No files selected.")
+      const items = await runPreview(files)
+      return {
+        new: items.filter((i) => !i.error && !i.existsOnServer).length,
+        changed: items.filter((i) => !i.error && i.existsOnServer && i.changed).length,
+        unchanged: items.filter((i) => !i.error && i.existsOnServer && !i.changed).length,
+        errors: items.filter((i) => i.error).length,
+      }
+    },
+  )
 
   const finish = async (run: Promise<ImportResult>) => {
     setBusy("import")
@@ -220,7 +326,7 @@ export function TwxImport({ envs, workspaceRoot }: { envs: string[]; workspaceRo
         </div>
         {rows.more && <p className="text-[0.7rem] text-muted-foreground">Showing the first {MAX_LISTED} matches. Filter to narrow down.</p>}
         <div>
-          <Button size="sm" onClick={runPreview} disabled={picked.size === 0 || busy !== ""}>
+          <Button size="sm" onClick={() => void runPreview().catch(() => {})} disabled={picked.size === 0 || busy !== ""}>
             {busy === "preview" ? <Spinner /> : null}
             Preview
           </Button>

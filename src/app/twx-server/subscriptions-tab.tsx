@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
 import { searchEntities } from "@/lib/services"
 import type { EntitySearchResult } from "@/lib/twx/types"
 import { fireEvent, getThingSubscriptions, setSubscriptionEnabled, type Subscription } from "@/lib/twx-events"
@@ -90,6 +91,34 @@ export function SubscriptionsTab({ env }: { env: string }) {
   async function reload() {
     if (shownLoaded) await openThing(shownLoaded.thing)
   }
+
+  useAssistantContext({
+    screen: "twx-server",
+    data: {
+      subscriptions: {
+        query,
+        thing: shownLoaded?.thing ?? null,
+        count: shownLoaded?.items.length ?? null,
+        loadError,
+        matches: shownMatches?.slice(0, 15).map((m) => m.name),
+        items: shownLoaded?.items.slice(0, 15).map((i) => ({ name: i.name, enabled: i.enabled, owner: i.owner })),
+      },
+    },
+  })
+  useAssistantAction(
+    "select_thing_subscriptions",
+    {
+      description: "On the Subscriptions tab, load the subscriptions of a Thing so the user sees them.",
+      inputSchema: { type: "object", properties: { thing: { type: "string" } }, required: ["thing"] },
+    },
+    async (args) => {
+      const thing = String((args as { thing?: string }).thing ?? "")
+      if (!thing) throw new Error("thing is required")
+      setQuery(thing)
+      await openThing(thing)
+      return { thing }
+    },
+  )
 
   async function confirm() {
     if (!pending || !shownLoaded) return

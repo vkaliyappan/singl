@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DataGrid, type GridColumn } from "@/components/data-grid"
 import { Spinner } from "@/components/ui/spinner"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
 import { listMashups, mashupRuntimeUrl, previewMashup, type MashupInfo } from "@/lib/twx-access"
 
 function modified(v: MashupInfo["lastModified"]): string {
@@ -41,6 +42,30 @@ export function MashupsTab({ env, baseUrl }: { env: string; baseUrl: string }) {
       toast.error(errorMessage(err))
     }
   }
+
+  useAssistantContext({
+    screen: "twx-access",
+    data: {
+      mashups: {
+        count: rows?.length ?? null,
+        names: rows?.slice(0, 20).map((m) => m.name),
+        error,
+      },
+    },
+  })
+  useAssistantAction(
+    "open_mashup_preview",
+    {
+      description: "Open a mashup in its own window (runtime preview; the user signs in there). Read-only.",
+      inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    },
+    async (args) => {
+      const name = String((args as { name?: string }).name ?? "")
+      if (rows && !rows.some((m) => m.name === name)) throw new Error(`No mashup "${name}" on ${env}.`)
+      await previewMashup(baseUrl, name)
+      return { opened: name }
+    },
+  )
 
   if (error) return <p className="pt-2 text-xs text-red-700 dark:text-red-400">{error}</p>
   if (!rows)

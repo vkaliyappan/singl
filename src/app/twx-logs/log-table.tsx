@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { IconCopy } from "@tabler/icons-react"
+import { IconCopy, IconMessagePlus } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { DataGrid, type GridColumn } from "@/components/data-grid"
 import type { LogRow } from "@/lib/twx-logs"
+import { addPins } from "@/lib/assistant/pins"
 
 const LEVEL_STYLE: Record<string, string> = {
   ERROR: "bg-red-500/15 text-red-600 dark:text-red-400",
@@ -76,6 +77,26 @@ function Detail({ r }: { r: LogRow }) {
       >
         {r.message}
       </pre>
+      <button
+        type="button"
+        aria-label="Add to chat"
+        title="Add to chat"
+        onClick={() =>
+          addPins([
+            {
+              kind: "log",
+              label: `${r.level} · ${r.origin || "log"} · ${time(r.timestamp)}`,
+              screen: "twx-logs",
+              detail: r.message.slice(0, 40),
+              content: `${[time(r.timestamp), r.level, r.origin, r.thread, r.user].filter(Boolean).join(" | ")}
+${r.message.slice(0, 4000)}`,
+            },
+          ])
+        }
+        className="shrink-0 text-muted-foreground hover:text-foreground"
+      >
+        <IconMessagePlus className="size-3.5" />
+      </button>
       <button
         type="button"
         aria-label="Copy entry"

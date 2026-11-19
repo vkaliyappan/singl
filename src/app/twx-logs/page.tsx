@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import { isTauri } from "@/lib/clock-widget"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import { errorMessage, listEnvironments } from "@/lib/settings"
 import { LEVELS, LOGS, queryLogs, type LogName, type LogQuery, type LogRow } from "@/lib/twx-logs"
 import { LogTable, rowKey } from "./log-table"
@@ -139,6 +141,113 @@ export default function TwxLogsPage() {
     const id = setInterval(tick, POLL_MS)
     return () => clearInterval(id)
   }, [live])
+
+  const trimmed = (r: LogRow) => ({
+    time: new Date(r.timestamp).toISOString(),
+    level: r.level,
+    origin: r.origin,
+    user: r.user,
+    message: r.message.slice(0, 160),
+  })
+  const levelCounts: Record<string, number> = {}
+  for (const r of rows) levelCounts[r.level] = (levelCounts[r.level] ?? 0) + 1
+  useAssistantContext({
+    screen: "twx-logs",
+    title: "ThingWorx logs",
+    summary: `${f.log} on ${f.env || "no environment"} · ${rows.length} entries${live ? " · live" : ""}`,
+    data: {
+      env: f.env,
+      log: f.log,
+      level: f.level,
+      search: f.search,
+      origin: f.origin,
+      user: f.user,
+      range: f.preset === "custom" ? { from: f.from, to: f.to } : f.preset,
+      live,
+      loading,
+      error,
+      count: rows.length,
+      levelCounts,
+      rows: rows.slice(0, 12).map(trimmed),
+    },
+  })
+  usePinnables(
+    rows.length
+      ? [
+          {
+            kind: "log",
+            label: `${f.log} · ${f.env}`,
+            detail: `${rows.length} entries`,
+            content: () => JSON.stringify(rows.slice(0, 40).map(trimmed), null, 1).slice(0, 6000),
+          },
+        ]
+      : [],
+  )
+  useAssistantAction(
+    "set_log_filters",
+    {
+      description:
+        "Set the log filters and run the search. Fields are all optional: env, log (ApplicationLog|ScriptLog|ErrorLog|SecurityLog|CommunicationLog|ConfigurationLog), level (minimum: TRACE|DEBUG|INFO|WARN|ERROR or empty), search, origin, user, range (15m|1h|24h).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          env: { type: "string" },
+          log: { type: "string", enum: [...LOGS] },
+          level: { type: "string" },
+          search: { type: "string" },
+          origin: { type: "string" },
+          user: { type: "string" },
+          range: { type: "string", enum: ["15m", "1h", "24h"] },
+        },
+      },
+    },
+    async (args) => {
+      const a = args as Record<string, string | undefined>
+      const patch: Partial<Filters> = {}
+      if (a.env !== undefined) {
+        if (!envs.includes(a.env)) throw new Error(`Unknown environment "${a.env}".`)
+        patch.env = a.env
+      }
+      if (a.log !== undefined) {
+        if (!(LOGS as readonly string[]).includes(a.log)) throw new Error(`Unknown log "${a.log}".`)
+        patch.log = a.log as LogName
+      }
+      if (a.level !== undefined) patch.level = a.level.toUpperCase()
+      if (a.search !== undefined) patch.search = a.search
+      if (a.origin !== undefined) patch.origin = a.origin
+      if (a.user !== undefined) patch.user = a.user
+      if (a.range !== undefined) {
+        if (!(a.range in PRESETS)) throw new Error("range must be 15m, 1h or 24h.")
+        patch.preset = a.range as Preset
+      }
+      const next = { ...f, ...patch }
+      setF(next)
+      if (!next.env) throw new Error("No environment selected.")
+      setLoading(true)
+      setError("")
+      try {
+        const got = await queryLogs(next.env, toQuery(next))
+        setRows(got)
+        setSearched(true)
+        return { count: got.length, filters: { log: next.log, level: next.level, search: next.search, range: next.preset } }
+      } finally {
+        setLoading(false)
+      }
+    },
+  )
+  useAssistantAction(
+    "toggle_live_tail",
+    {
+      description: "Turn live tail on or off (omit `on` to toggle).",
+      inputSchema: { type: "object", properties: { on: { type: "boolean" } } },
+    },
+    (args) => {
+      const on = (args as { on?: boolean }).on
+      const next = typeof on === "boolean" ? on : !live
+      setLive(next)
+      return { live: next }
+    },
+  )
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault()

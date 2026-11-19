@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect } from "@/components/ui/native-select"
 import { Spinner } from "@/components/ui/spinner"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import {
   RUNTIME_ACTIONS,
   checkPermission,
@@ -149,43 +151,132 @@ export function PermissionsTab({ env }: { env: string }) {
   const entityNames = useEntityNames(env, type, name)
   const userNames = useEntityNames(env, "User", user)
 
-  async function load() {
-    if (!name.trim()) return
+  async function load(over?: { type: string; name: string }) {
+    const t = over?.type ?? type
+    const n = (over?.name ?? name).trim()
+    if (!n) return
     setLoading(true)
     setError("")
     setDecision(null)
     try {
-      setPerms(await getEntityPermissions(env, type, name.trim()))
+      const got = await getEntityPermissions(env, t, n)
+      setPerms(got)
+      return got
     } catch (err) {
       setPerms(null)
       setError(errorMessage(err))
+      throw err
     } finally {
       setLoading(false)
     }
   }
 
-  async function check() {
-    if (!perms || !user.trim()) return
+  async function check(over?: { entityType: string; entityName: string; user: string; action: string; member?: string }) {
+    const o = over ?? (perms && user.trim() ? { entityType: type, entityName: perms.name, user: user.trim(), action, member: member.trim() || undefined } : null)
+    if (!o) return
     setChecking(true)
     setCheckError("")
     try {
-      setDecision(
-        await checkPermission({
-          env,
-          entityType: type,
-          entityName: perms.name,
-          user: user.trim(),
-          action,
-          member: member.trim() || undefined,
-        }),
-      )
+      const d = await checkPermission({ env, ...o })
+      setDecision(d)
+      return d
     } catch (err) {
       setDecision(null)
       setCheckError(errorMessage(err))
+      throw err
     } finally {
       setChecking(false)
     }
   }
+
+  useAssistantContext({
+    screen: "twx-access",
+    data: {
+      permissions: {
+        type,
+        name,
+        loaded: perms ? { entityType: perms.entityType, name: perms.name } : null,
+        counts: perms && { runTime: perms.runTime.length, designTime: perms.designTime.length, visibility: perms.visibility.length },
+        runTime: perms?.runTime.slice(0, 20),
+        designTime: perms?.designTime.slice(0, 10),
+        visibility: perms?.visibility.slice(0, 10),
+        check: { user, action, member },
+        verdict: decision && {
+          allowed: decision.allowed,
+          user: decision.user,
+          action: decision.action,
+          member: decision.member,
+          level: decision.level,
+          explanation: decision.explanation.slice(0, 300),
+        },
+        error: error || checkError,
+      },
+    },
+    selection: perms ? { entity: [`${perms.entityType}:${perms.name}`] } : {},
+  })
+  usePinnables([
+    ...(perms
+      ? [
+          {
+            kind: "permissions",
+            label: `Permissions · ${perms.entityType}:${perms.name}`,
+            detail: `${perms.runTime.length} run-time rules`,
+            content: () => JSON.stringify(perms).slice(0, 8000),
+          },
+        ]
+      : []),
+    ...(decision
+      ? [
+          {
+            kind: "permission-verdict",
+            label: `${decision.allowed ? "Allowed" : "Denied"} · ${decision.user} ${decision.action}`,
+            detail: perms?.name,
+            content: () => JSON.stringify({ entity: perms && `${perms.entityType}:${perms.name}`, ...decision }).slice(0, 4000),
+          },
+        ]
+      : []),
+  ])
+  useAssistantAction(
+    "load_permissions",
+    {
+      description: "On the Permissions tab, load an entity's run-time, design-time and visibility permissions and show them.",
+      inputSchema: {
+        type: "object",
+        properties: { type: { type: "string", enum: TYPES }, name: { type: "string" } },
+        required: ["type", "name"],
+      },
+    },
+    async (args) => {
+      const a = args as { type?: string; name?: string }
+      if (!a.type || !a.name) throw new Error("type and name are required")
+      setType(a.type)
+      setName(a.name)
+      const got = await load({ type: a.type, name: a.name })
+      return got && { entity: `${got.entityType}:${got.name}`, runTime: got.runTime.length, designTime: got.designTime.length, visibility: got.visibility.length }
+    },
+  )
+  useAssistantAction(
+    "check_permission",
+    {
+      description:
+        "Answer 'can this user do this?' for the entity loaded on the Permissions tab (load it first with load_permissions). action is e.g. ServiceExecute, PropertyRead; member optionally names a service/property/event. Read-only.",
+      inputSchema: {
+        type: "object",
+        properties: { user: { type: "string" }, action: { type: "string" }, member: { type: "string" } },
+        required: ["user", "action"],
+      },
+    },
+    async (args) => {
+      const a = args as { user?: string; action?: string; member?: string }
+      if (!perms) throw new Error("Load an entity's permissions first (load_permissions).")
+      if (!a.user || !a.action) throw new Error("user and action are required")
+      setUser(a.user)
+      setAction(a.action)
+      setMember(a.member ?? "")
+      const d = await check({ entityType: type, entityName: perms.name, user: a.user, action: a.action, member: a.member || undefined })
+      return d && { allowed: d.allowed, level: d.level, explanation: d.explanation, userGroups: d.userGroups }
+    },
+  )
 
   return (
     <div className="flex flex-col gap-5 pt-2">
@@ -193,7 +284,7 @@ export function PermissionsTab({ env }: { env: string }) {
         className="flex flex-wrap items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault()
-          void load()
+          void load().catch(() => {})
         }}
       >
         <NativeSelect
@@ -239,7 +330,7 @@ export function PermissionsTab({ env }: { env: string }) {
               className="flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
                 e.preventDefault()
-                void check()
+                void check().catch(() => {})
               }}
             >
               <Input

@@ -18,6 +18,7 @@ import {
   type FlowRef, type Repeat, type Schedule, type Suite, type Target,
 } from "@/lib/automation"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantContext } from "@/lib/assistant/context"
 import { ErrorNote, Field, StatusPill } from "./shared"
 
 type Draft = { id: string | null; name: string; enabled: boolean; repeat: Repeat; target: Target }
@@ -215,6 +216,18 @@ export function SchedulesTab({ envs }: { envs: string[] }) {
     listSuites().then(setSuites).catch(() => {})
     listFlows().then(setFlows).catch(() => {})
   }, [])
+
+  useAssistantContext({
+    screen: "automation",
+    data: {
+      env: envs[0] ?? "",
+      schedules: {
+        count: schedules?.length ?? null,
+        error,
+        items: schedules?.slice(0, 15).map((x) => ({ name: x.name, enabled: x.enabled, repeat: describeRepeat(x.repeat), lastStatus: x.lastStatus, lastRunAt: x.lastRunAt, nextRunAt: x.nextRunAt })),
+      },
+    },
+  })
 
   const save = async () => {
     if (!draft) return

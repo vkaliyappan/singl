@@ -1,12 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { IconPlayerPlay } from "@tabler/icons-react"
 import { InfoTableView } from "@/components/assistant/rich/tool-views/infotable"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import {
   getDataTableInfo,
   listDataTables,
@@ -65,22 +67,90 @@ export function DataTablesTab({ env }: { env: string }) {
     }
   }, [env, table])
 
-  function run() {
+  function run(over?: { table?: string; search?: string; query?: string; maxItems?: number }) {
+    const t = over?.table ?? table
+    const q = over?.query ?? (advanced ? query : "")
     setLoading(true)
     setError("")
-    queryDataTable(env, {
-      table,
-      search: search.trim() || undefined,
-      query: advanced && query.trim() ? query : undefined,
-      maxItems: Math.min(5000, Math.max(1, Number(maxItems) || 100)),
+    return queryDataTable(env, {
+      table: t,
+      search: (over?.search ?? search).trim() || undefined,
+      query: q.trim() ? q : undefined,
+      maxItems: Math.min(5000, Math.max(1, over?.maxItems ?? (Number(maxItems) || 100))),
     })
-      .then(setResult)
+      .then((r) => {
+        setResult(r)
+        return r
+      })
       .catch((err) => {
         setResult(null)
         setError(errorMessage(err))
+        throw err
       })
       .finally(() => setLoading(false))
   }
+
+  const tablesRef = useRef(tables)
+  useEffect(() => {
+    tablesRef.current = tables
+  })
+
+  const rowsPreview = result?.rows.slice(0, 10).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" ? v.slice(0, 80) : v]))) ?? []
+  useAssistantContext({
+    screen: "twx-server",
+    data: {
+      datatables: {
+        table,
+        search,
+        query: advanced ? query.slice(0, 500) : "",
+        maxItems,
+        entryCount: info?.entryCount ?? null,
+        fields: info?.fields.map((f) => f.name).slice(0, 40),
+        error,
+        resultRows: result?.rows.length ?? null,
+        columns: result?.columns.map((c) => c.name).slice(0, 40),
+        rows: rowsPreview,
+      },
+    },
+  })
+  usePinnables(
+    result && table
+      ? [
+          {
+            kind: "datatable",
+            label: `Data table · ${table}`,
+            detail: `${result.rows.length} rows`,
+            content: () => JSON.stringify({ table, search, columns: result.columns.map((c) => c.name), rows: result.rows.slice(0, 50) }).slice(0, 8000),
+          },
+        ]
+      : [],
+  )
+  useAssistantAction(
+    "select_datatable",
+    {
+      description:
+        "On the Data tables tab, pick a data table and run a query. `search` is text or a name:val* expression; `query` an optional JSON query filter; maxItems defaults to 100. Shows the result on screen and returns a row summary.",
+      inputSchema: {
+        type: "object",
+        properties: { table: { type: "string" }, search: { type: "string" }, query: { type: "string" }, maxItems: { type: "number" } },
+        required: ["table"],
+      },
+    },
+    async (args) => {
+      const a = args as { table?: string; search?: string; query?: string; maxItems?: number }
+      const name = String(a.table ?? "")
+      for (let i = 0; i < 30 && !tablesRef.current; i++) await new Promise((r) => setTimeout(r, 100))
+      if (!tablesRef.current?.some((t) => t.name === name)) throw new Error(`No data table "${name}" on ${env}.`)
+      setTable(name)
+      setSearch(a.search ?? "")
+      if (a.query) {
+        setQuery(a.query)
+        setAdvanced(true)
+      }
+      const r = await run({ table: name, search: a.search ?? "", query: a.query ?? "", maxItems: a.maxItems })
+      return { table: name, rows: r.rows.length, maybeMore: r.maybeMore, columns: r.columns.map((c) => c.name), sample: r.rows.slice(0, 5) }
+    },
+  )
 
   const value = useMemo(() => (result ? asInfoTable(result) : null), [result])
   const userTables = tables?.filter((t) => !t.system) ?? []
@@ -120,7 +190,7 @@ export function DataTablesTab({ env }: { env: string }) {
             placeholder="Text, or name:val* expression"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && table && !loading && run()}
+            onKeyDown={(e) => e.key === "Enter" && table && !loading && void run().catch(() => {})}
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -130,7 +200,7 @@ export function DataTablesTab({ env }: { env: string }) {
         <label className="flex items-center gap-1.5 pb-1.5 text-xs">
           <input type="checkbox" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} /> Query filter (JSON)
         </label>
-        <Button size="sm" onClick={run} disabled={!table || loading}>
+        <Button size="sm" onClick={() => void run().catch(() => {})} disabled={!table || loading}>
           <IconPlayerPlay /> {loading ? "Querying..." : "Query"}
         </Button>
         {advanced && (

@@ -171,6 +171,39 @@ function FlowSave({ id, graph }: { id: string; graph: unknown }) {
   return <DiffView original={pretty(s.value.graph)} modified={modified} path={`flow ${id}`} />;
 }
 
+function SetPropertyValues({ input }: { input: Record<string, unknown> }) {
+  const values = isRecord(input.values) ? input.values : {};
+  return (
+    <div className="my-2 flex flex-col gap-1.5">
+      <div className="text-xs">
+        Write to Thing <span className="font-medium">{String(input.thing ?? "")}</span>
+        {typeof input.env === "string" && <span className="text-muted-foreground"> on {input.env}</span>}
+      </div>
+      <KeyValueInput input={values} />
+    </div>
+  );
+}
+
+function ImportFiles({ input }: { input: Record<string, unknown> }) {
+  const files = Array.isArray(input.files) ? input.files.map(String) : [];
+  return (
+    <div className="my-2 flex flex-col gap-1.5">
+      <div className="text-xs">
+        {input.dryRun === true ? "Preview" : "Import"} {files.length} {files.length === 1 ? "file" : "files"}
+        {typeof input.env === "string" && <span className="text-muted-foreground"> into {input.env}</span>}
+      </div>
+      <ul className="max-h-48 overflow-auto rounded-md border bg-card p-1.5 font-mono text-[11px]">
+        {files.slice(0, 100).map((f) => (
+          <li key={f} className="truncate" title={f}>
+            {f}
+          </li>
+        ))}
+        {files.length > 100 && <li className="text-muted-foreground">… and {files.length - 100} more</li>}
+      </ul>
+    </div>
+  );
+}
+
 export function ApprovalPreview({ tool, input }: { tool: string; input: unknown }): ReactNode | null {
   if (isRecord(input)) {
     if (tool === "entity_write" && typeof input.path === "string" && typeof input.content === "string")
@@ -189,6 +222,8 @@ export function ApprovalPreview({ tool, input }: { tool: string; input: unknown 
           all={input.replace_all === true}
         />
       );
+    if (tool === "twx_set_property_values" && isRecord(input.values)) return <SetPropertyValues input={input} />;
+    if (tool === "twx_import_entities" && Array.isArray(input.files)) return <ImportFiles input={input} />;
     if (tool === "flow_save" && typeof input.id === "string" && input.graph !== undefined)
       return <FlowSave id={input.id} graph={input.graph} />;
   }

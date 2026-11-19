@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { IconPlayerPlay } from "@tabler/icons-react"
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { DataGrid, columnsFromFields } from "@/components/data-grid"
 import { searchEntities } from "@/lib/services"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import { errorMessage } from "@/lib/settings"
 import {
   listLoggedProperties,
@@ -137,24 +139,102 @@ export function StreamsTab({ env }: { env: string }) {
       .catch((err) => setError(errorMessage(err)))
   }
 
-  function run() {
+  function run(over?: { mode: Mode; stream?: string; thing?: string; property?: string; range?: string; maxItems?: number }) {
     setLoading(true)
     setError("")
-    const custom = range === "custom"
-    queryStream(env, {
-      ...(mode === "stream" ? { stream } : { thing, property }),
-      since: custom ? toIso(from) : range || undefined,
+    const m = over?.mode ?? mode
+    const r = over?.range ?? range
+    const custom = r === "custom"
+    return queryStream(env, {
+      ...(m === "stream" ? { stream: over?.stream ?? stream } : { thing: over?.thing ?? thing, property: over?.property ?? property }),
+      since: custom ? toIso(from) : r || undefined,
       until: custom ? toIso(to) : undefined,
-      maxItems: Math.max(1, Number(maxItems) || 200),
+      maxItems: Math.max(1, over?.maxItems ?? (Number(maxItems) || 200)),
       oldestFirst,
     })
-      .then(setResult)
+      .then((res) => {
+        setResult(res)
+        return res
+      })
       .catch((err) => {
         setResult(null)
         setError(errorMessage(err))
+        throw err
       })
       .finally(() => setLoading(false))
   }
+
+  const streamsRef = useRef(streams)
+  useEffect(() => {
+    streamsRef.current = streams
+  })
+  useAssistantContext({
+    screen: "twx-server",
+    data: {
+      streams: {
+        mode,
+        stream,
+        thing,
+        property,
+        range,
+        maxItems,
+        streamCount: streams?.streams.length ?? null,
+        error,
+        resultRows: result?.rows.length ?? null,
+        columns: result?.columns.map((c) => c.name).slice(0, 30),
+        rows: result?.rows.slice(0, 10).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" ? v.slice(0, 80) : v]))) ?? [],
+      },
+    },
+  })
+  usePinnables(
+    result
+      ? [
+          {
+            kind: "stream",
+            label: `Stream · ${mode === "stream" ? stream : `${thing}.${property}`}`,
+            detail: `${result.rows.length} rows`,
+            content: () => JSON.stringify({ source: result.source, columns: result.columns.map((c) => c.name), rows: result.rows.slice(0, 50) }).slice(0, 8000),
+          },
+        ]
+      : [],
+  )
+  useAssistantAction(
+    "select_stream",
+    {
+      description:
+        "On the Streams tab, query a stream's entries (`stream`) or a logged property's value-stream history (`thing` + `property`) and show the result. range: 1h|24h|7d|30d or empty for any time (default 24h).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          stream: { type: "string" },
+          thing: { type: "string" },
+          property: { type: "string" },
+          range: { type: "string" },
+          maxItems: { type: "number" },
+        },
+      },
+    },
+    async (args) => {
+      const a = args as { stream?: string; thing?: string; property?: string; range?: string; maxItems?: number }
+      const r = a.range ?? "24h"
+      setRange(r)
+      if (a.maxItems) setMaxItems(String(a.maxItems))
+      let res: QueryResult
+      if (a.stream) {
+        for (let i = 0; i < 30 && !streamsRef.current; i++) await new Promise((x) => setTimeout(x, 100))
+        if (!streamsRef.current?.streams.some((s) => s.name === a.stream)) throw new Error(`No stream "${a.stream}" on ${env}.`)
+        setMode("stream")
+        setStream(a.stream)
+        res = await run({ mode: "stream", stream: a.stream, range: r, maxItems: a.maxItems })
+      } else if (a.thing && a.property) {
+        setMode("history")
+        pickThing(a.thing)
+        setProperty(a.property)
+        res = await run({ mode: "history", thing: a.thing, property: a.property, range: r, maxItems: a.maxItems })
+      } else throw new Error("Give a stream, or a thing and property.")
+      return { source: res.source, rows: res.rows.length, maybeMore: res.maybeMore, columns: res.columns.map((c) => c.name), sample: res.rows.slice(0, 5) }
+    },
+  )
 
   const ready = mode === "stream" ? !!stream : !!thing && !!property
   const userStreams = streams?.streams.filter((s) => !s.system) ?? []
@@ -250,7 +330,7 @@ export function StreamsTab({ env }: { env: string }) {
         <label className="flex items-center gap-1.5 pb-1.5 text-xs">
           <input type="checkbox" checked={oldestFirst} onChange={(e) => setOldestFirst(e.target.checked)} /> Oldest first
         </label>
-        <Button size="sm" onClick={run} disabled={!ready || loading}>
+        <Button size="sm" onClick={() => void run().catch(() => {})} disabled={!ready || loading}>
           <IconPlayerPlay /> {loading ? "Querying..." : "Query"}
         </Button>
       </div>

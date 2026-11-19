@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { IconLoader2, IconPlayerPlay, IconPlus, IconTrash } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,8 @@ import {
 } from "@/lib/automation"
 import { listServicePresets, type ServicePreset } from "@/lib/services"
 import { errorMessage } from "@/lib/settings"
+import { useAssistantAction, useAssistantContext } from "@/lib/assistant/context"
+import { usePinnables } from "@/lib/assistant/pins"
 import { cn } from "@/lib/utils"
 import { CaseEditor } from "./case-editor"
 import { EnvPicker, ErrorNote, Field, PassIcon, RunHistory, seconds } from "./shared"
@@ -95,6 +97,11 @@ export function TestsTab({ envs }: { envs: string[] }) {
   const [history, setHistory] = useState<RunRow[]>([])
   const [error, setError] = useState("")
 
+  const suitesRef = useRef(suites)
+  useEffect(() => {
+    suitesRef.current = suites
+  })
+
   const loadHistory = useCallback((id: string) => {
     if (!id) return setHistory([])
     listRuns("suite", id).then(setHistory).catch((e) => setError(errorMessage(e)))
@@ -169,6 +176,60 @@ export function TestsTab({ envs }: { envs: string[] }) {
       toast.error(errorMessage(e))
     }
   }
+
+  useAssistantContext({
+    screen: "automation",
+    data: {
+      env: runEnvs[0] ?? envs[0] ?? "",
+      tests: {
+        suites: suites?.slice(0, 20).map((x) => ({ id: x.id, name: x.name, cases: x.cases.length })),
+        suite: draft && { id: draft.id, name: draft.name, cases: draft.cases.slice(0, 15).map((k) => k.name), dirty },
+        runEnvs,
+        running,
+        error,
+        run: run && {
+          total: run.total,
+          passed: run.passed,
+          failed: run.failed,
+          envs: run.envs,
+          failures: run.results
+            .filter((r) => !r.passed)
+            .slice(0, 8)
+            .map((r) => ({ case: r.caseName, env: r.env, error: r.error?.slice(0, 150), checks: r.checks.filter((k) => !k.passed).slice(0, 3) })),
+        },
+      },
+    },
+    selection: draft?.id ? { suite: [draft.name] } : {},
+  })
+  usePinnables(
+    run
+      ? [
+          {
+            kind: "test-run",
+            label: `Test run · ${run.suiteName}`,
+            detail: `${run.passed}/${run.total} passed`,
+            content: () =>
+              JSON.stringify({ suite: run.suiteName, envs: run.envs, total: run.total, passed: run.passed, results: run.results.map((r) => ({ case: r.caseName, env: r.env, passed: r.passed, error: r.error, checks: r.checks.filter((k) => !k.passed) })) }).slice(0, 8000),
+          },
+        ]
+      : [],
+  )
+  useAssistantAction(
+    "select_suite",
+    {
+      description: "On the Tests tab, open a saved test suite (by id or name) so the user sees its cases. Does not run it.",
+      inputSchema: { type: "object", properties: { suite: { type: "string", description: "Suite id or name" } }, required: ["suite"] },
+    },
+    async (args) => {
+      const want = String((args as { suite?: string }).suite ?? "").trim().toLowerCase()
+      for (let i = 0; i < 30 && !suitesRef.current; i++) await new Promise((r) => setTimeout(r, 100))
+      const list = suitesRef.current ?? []
+      const hit = list.find((x) => x.id.toLowerCase() === want) ?? list.find((x) => x.name.toLowerCase() === want) ?? list.find((x) => x.name.toLowerCase().includes(want))
+      if (!hit) throw new Error(`No suite "${want}". Suites: ${list.map((x) => x.name).join(", ") || "none"}.`)
+      open(hit)
+      return { id: hit.id, name: hit.name, cases: hit.cases.length, envs: hit.envs }
+    },
+  )
 
   if (!suites) return error ? <ErrorNote message={error} /> : <Spinner />
 
