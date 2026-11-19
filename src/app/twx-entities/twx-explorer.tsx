@@ -145,6 +145,10 @@ interface TabState {
 
 const isDirty = (tab: TabState | undefined) => !!tab && tab.content !== tab.saved;
 
+// Open tabs outlive a remount: the page remounts the explorer for every file
+// link (e.g. one clicked in the assistant chat), which would close them all.
+let tabsCache: { tabs: Map<string, TabState>; active: string | null } = { tabs: new Map(), active: null };
+
 type TreeTarget = { path: string; type: "file" | "dir" };
 
 type TreeDecoration = { text: string; title?: string; parts?: { text: string; color?: string }[] };
@@ -326,12 +330,15 @@ export function TwxExplorer({
   const [entityFilter, setEntityFilter] = useState<string>("all");
 
   // ── Multi-tab editor state ────────────────────────────────────────────────
-  const [openTabs, setOpenTabs] = useState<Map<string, TabState>>(new Map());
-  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<Map<string, TabState>>(() => tabsCache.tabs);
+  const [activeTab, setActiveTab] = useState<string | null>(() => tabsCache.active);
   const openTabsRef = useRef(openTabs);
   openTabsRef.current = openTabs;
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
+  useEffect(() => {
+    tabsCache = { tabs: openTabs, active: activeTab };
+  }, [openTabs, activeTab]);
 
   // ── Tree (@pierre/trees) ──────────────────────────────────────────────────
   // Tree paths are relative to the export folder, `treeRoot`.
@@ -543,11 +550,13 @@ export function TwxExplorer({
   }, [selectedEnv]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const resetFileTree = useCallback(() => {
+  /** Empties the tree and closes the tabs, except those under `keepDir`. */
+  const resetFileTree = useCallback((keepDir?: string) => {
+    const keep = (p: string | null) => !!keepDir && !!p && p.startsWith(`${keepDir}/`);
     setTreePaths([]);
     setTreeRoot(null);
-    setOpenTabs(new Map());
-    setActiveTab(null);
+    setOpenTabs((prev) => (keepDir ? new Map(Array.from(prev).filter(([k]) => keep(k))) : new Map()));
+    setActiveTab((prev) => (keep(prev) ? prev : null));
   }, []);
 
   const confirmDiscard = useCallback((paths: string[]) => {
@@ -683,7 +692,8 @@ export function TwxExplorer({
   const loadLocalDirectory = useCallback(async (envName: string) => {
     if (!envName) return;
     const safeEnv = envName.replace(/[^a-zA-Z0-9_\-]/g, "_");
-    resetFileTree();
+    // Same environment after a remount: its tabs stay open.
+    resetFileTree(safeEnv);
     setLastExportDir(null);
     setTreeLoading(true);
 
@@ -877,24 +887,31 @@ export function TwxExplorer({
 
   // The assistant edits, creates and exports these files too: re-list the
   // tree and reload open tabs without unsaved edits, so the screen shows disk.
+  const reloadCleanTabs = useCallback((includeLoading = false) => {
+    for (const [path, tab] of openTabsRef.current) {
+      if ((tab.loading && !includeLoading) || tab.saving || isDirty(tab)) continue;
+      readEntityFile(path)
+        .then((content) => {
+          setOpenTabs((prev) => {
+            const now = prev.get(path);
+            // Typed into while reading, or already current: leave it.
+            if (!now || isDirty(now) || (now.saved === content && !now.loading)) return prev;
+            return new Map(prev).set(path, { ...now, content, saved: content, error: null, loading: false });
+          });
+        })
+        .catch(() => {});
+    }
+  }, []);
+  // Tabs kept from before a remount may be stale, or still marked loading.
+  useEffect(() => {
+    reloadCleanTabs(true);
+  }, [reloadCleanTabs]);
   useEffect(() => {
     return onAssistantChange("entities", () => {
       if (treeRoot) void loadTree(treeRoot, true);
-      for (const [path, tab] of openTabsRef.current) {
-        if (tab.loading || tab.saving || isDirty(tab)) continue;
-        readEntityFile(path)
-          .then((content) => {
-            setOpenTabs((prev) => {
-              const now = prev.get(path);
-              // Typed into while reading, or already current: leave it.
-              if (!now || isDirty(now) || now.saved === content) return prev;
-              return new Map(prev).set(path, { ...now, content, saved: content, error: null });
-            });
-          })
-          .catch(() => {});
-      }
+      reloadCleanTabs();
     });
-  }, [treeRoot, loadTree]);
+  }, [treeRoot, loadTree, reloadCleanTabs]);
 
   const openNameDialog = (state: NameDialogState) => {
     setNameDialog(state);
