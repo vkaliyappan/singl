@@ -94,11 +94,18 @@ const CLASS_NAMES = {
 // Stateless factories, so one module-level array — a fresh one per render
 // would rebuild the table's feature host on every keystroke.
 const TABLE_FEATURES = [
-  headerFilters<Record<string, unknown>>(),
-  columnMenu<Record<string, unknown>>(),
-  resizableColumns<Record<string, unknown>>(),
-  multiSort<Record<string, unknown>>(),
+  headerFilters<GridRow>(),
+  columnMenu<GridRow>(),
+  resizableColumns<GridRow>(),
+  multiSort<GridRow>(),
 ];
+
+// The table caches each row's search text under `row.id` and never sees our
+// rowKey, so parsed rows (no id, or duplicate ids) all shared one row's text
+// and search missed. Each row goes in wrapped: a hidden unique `id`, the
+// original under a symbol, and one enumerable `search` string.
+const ROW = Symbol("row");
+type GridRow = { readonly id: string; readonly [ROW]: Record<string, unknown>; search: string };
 
 const SAMPLE = JSON.stringify(
   {
@@ -187,25 +194,30 @@ export function JsonTableExplorer() {
   // Parsed JSON carries no ids, so a row's position is its identity. Flattening
   // rebuilds every row object, which makes identity a safe map key and gives
   // the "#" column a number that survives sorting.
-  const ordinals = useMemo(() => {
-    const map = new Map<Record<string, unknown>, number>();
-    rows.forEach((row, index) => map.set(row, index + 1));
-    return map;
-  }, [rows]);
+  const gridRows = useMemo(
+    () =>
+      rows.map((row, index) => {
+        const w = { search: Object.values(row).map(cellText).join(" ") } as GridRow;
+        Object.defineProperty(w, "id", { value: String(index + 1), enumerable: false });
+        Object.defineProperty(w, ROW, { value: row, enumerable: false });
+        return w;
+      }),
+    [rows]
+  );
 
-  const columns = useMemo<ColumnDef<Record<string, unknown>>[]>(
+  const columns = useMemo<ColumnDef<GridRow>[]>(
     () => [
       {
         key: "__index__",
         header: "#",
-        accessor: (row) => <span className="text-muted-foreground">{ordinals.get(row)}</span>,
-        formatValue: (row) => String(ordinals.get(row) ?? ""),
+        accessor: (row) => <span className="text-muted-foreground">{row.id}</span>,
+        formatValue: (row) => row.id,
         width: 52,
         align: "end",
         lockPosition: true,
         lockVisibility: true,
       },
-      ...tableColumns.map<ColumnDef<Record<string, unknown>>>((col) => ({
+      ...tableColumns.map<ColumnDef<GridRow>>((col) => ({
         key: col.name,
         header: (
           <span className="flex items-center gap-1.5">
@@ -220,21 +232,21 @@ export function JsonTableExplorer() {
         // names, which the table would otherwise read as a path into the row —
         // every reader here goes through the flat key instead.
         accessor: (row) => {
-          const value = cellText(row[col.name]);
+          const value = cellText(row[ROW][col.name]);
           return (
             <span title={value} className="block max-w-96 truncate">
               {value}
             </span>
           );
         },
-        formatValue: (row) => cellText(row[col.name]),
-        sortValue: (row) => cellText(row[col.name]),
+        formatValue: (row) => cellText(row[ROW][col.name]),
+        sortValue: (row) => cellText(row[ROW][col.name]),
         sortable: true,
-        filter: { type: "checklist", options: "auto", getValue: (row) => cellText(row[col.name]) },
+        filter: { type: "checklist", options: "auto", getValue: (row) => cellText(row[ROW][col.name]) },
         minWidth: 96,
       })),
     ],
-    [tableColumns, ordinals]
+    [tableColumns]
   );
 
   const format = useCallback(() => {
@@ -563,8 +575,8 @@ export function JsonTableExplorer() {
               // new source or a flatten toggle starts the grid over.
               key={`${source.path}:${flatten}`}
               columns={columns}
-              data={rows}
-              rowKey={(row) => String(ordinals.get(row))}
+              data={gridRows}
+              rowKey={(row) => row.id}
               searchPlaceholder="Search all columns…"
               defaults={{ limit: 100 }}
               // The grid is scratch space for whatever was just pasted in, so

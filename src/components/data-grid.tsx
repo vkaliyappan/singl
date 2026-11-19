@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
   type CSSProperties,
   type ReactNode,
@@ -266,6 +268,10 @@ const noopSubscribe = () => () => {};
 
 const MAX_CHECKLIST = 50;
 
+const ROW = Symbol("row");
+/** What the library sees per row; see the `data` memo in GridInner. */
+type Wrapped<T> = { readonly id: string; readonly [ROW]: T; search: string };
+
 export function DataGrid<T>({
   id,
   columns,
@@ -338,24 +344,39 @@ function GridInner<T>({
     [id, initialSortKey]
   );
 
-  // Object identity is the fallback row identity; it holds as long as `rows`
-  // holds the same objects, and a rebuilt list simply remounts rows.
-  const ids = useMemo(() => {
-    const map = new Map<T, string>();
-    rows.forEach((row, i) => map.set(row, rowKey ? rowKey(row, i) : String(i)));
-    return map;
-  }, [rows, rowKey]);
+  // The library caches each row's search text under `row.id` (it never sees
+  // our rowKey), so rows without a unique `id` all shared the first row's
+  // text and search missed nearly everything. Each row goes in wrapped: a
+  // hidden unique `id`, the original under a symbol, and one enumerable
+  // `search` string — the row's own values plus every column's text (so
+  // hidden and computed columns are searchable too).
+  const data = useMemo<Wrapped<T>[]>(() => {
+    const texts = columns
+      .filter((c) => c.kind !== "none")
+      .map((c) => {
+        const read = c.value ?? ((row: T) => (row as Record<string, unknown>)[c.key]);
+        return (row: T) => (c.kind === "date" ? dateText(read(row)) : gridText(read(row)));
+      });
+    return rows.map((row, i) => {
+      const own = row && typeof row === "object" ? Object.values(row).map(gridText) : [gridText(row)];
+      const w = { search: [...own, ...texts.map((t) => t(row))].join(" ") } as Wrapped<T>;
+      Object.defineProperty(w, "id", { value: rowKey ? rowKey(row, i) : String(i), enumerable: false });
+      Object.defineProperty(w, ROW, { value: row, enumerable: false });
+      return w;
+    });
+  }, [rows, rowKey, columns]);
 
-  const defs = useMemo<ColumnDef<T>[]>(() => {
+  const defs = useMemo<ColumnDef<Wrapped<T>>[]>(() => {
     return columns.map((col) => {
       const kind = col.kind ?? "text";
-      const read = col.value ?? ((row: T) => (row as Record<string, unknown>)[col.key]);
+      const readRaw = col.value ?? ((row: T) => (row as Record<string, unknown>)[col.key]);
+      const read = (w: Wrapped<T>) => readRaw(w[ROW]);
       const label = col.label ?? col.key;
       const interactive = kind !== "none";
       const truncate = col.truncate ?? kind === "text";
 
-      let sortValue: ((row: T) => string | number | boolean | null) | undefined;
-      let filter: ColumnDef<T>["filter"];
+      let sortValue: ((row: Wrapped<T>) => string | number | boolean | null) | undefined;
+      let filter: ColumnDef<Wrapped<T>>["filter"];
       if (interactive) {
         if (kind === "number") {
           sortValue = (row) => {
@@ -377,7 +398,7 @@ function GridInner<T>({
           sortValue = (row) => gridText(read(row)).toLowerCase();
           const distinct = new Set<string>();
           for (const row of rows) {
-            distinct.add(gridText(read(row)));
+            distinct.add(gridText(readRaw(row)));
             if (distinct.size > MAX_CHECKLIST) break;
           }
           filter =
@@ -387,12 +408,12 @@ function GridInner<T>({
         }
       }
 
-      const text = (row: T) => (kind === "date" ? dateText(read(row)) : gridText(read(row)));
-      const def: ColumnDef<T> = {
+      const text = (row: Wrapped<T>) => (kind === "date" ? dateText(read(row)) : gridText(read(row)));
+      const def: ColumnDef<Wrapped<T>> = {
         key: col.key,
         header: col.header ?? label,
         accessor: (row) =>
-          col.render ? col.render(row) : <DefaultCell value={read(row)} kind={kind} truncate={truncate} />,
+          col.render ? col.render(row[ROW]) : <DefaultCell value={read(row)} kind={kind} truncate={truncate} />,
         formatValue: text,
         exportValue: (row) => (kind === "date" ? dateText(read(row)) : read(row)),
         sortable: interactive,
@@ -423,23 +444,44 @@ function GridInner<T>({
   // Stateless factories — a fresh array per render would rebuild the feature host.
   const features = useMemo(
     () => [
-      headerFilters<T>(),
-      columnMenu<T>(),
-      resizableColumns<T>(),
-      multiSort<T>(),
-      exportCsv<T>({ filename: `${csvName ?? id}.csv`, scope: "all", columns: "visible" }),
+      headerFilters<Wrapped<T>>(),
+      columnMenu<Wrapped<T>>(),
+      resizableColumns<Wrapped<T>>(),
+      multiSort<Wrapped<T>>(),
+      exportCsv<Wrapped<T>>({ filename: `${csvName ?? id}.csv`, scope: "all", columns: "visible" }),
     ],
     [csvName, id]
   );
 
   const defaults = useMemo(() => ({ limit: pageSize }), [pageSize]);
 
+  // The header filter popups are <details> elements the library leaves open on
+  // an outside click. Close them here on outside pointerdown or Escape; setting
+  // `open` fires `toggle`, which keeps the library's state in step.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const openPopups = () =>
+      Array.from(rootRef.current?.querySelectorAll<HTMLDetailsElement>("details[open]") ?? []);
+    const onDown = (e: PointerEvent) => {
+      for (const d of openPopups()) if (!d.contains(e.target as Node)) d.open = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") for (const d of openPopups()) d.open = false;
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
   return (
-    <div className={cn("min-w-0", className)} style={style}>
+    <div ref={rootRef} className={cn("min-w-0", className)} style={style}>
       <DataTable
         columns={defs}
-        data={rows}
-        rowKey={(row) => ids.get(row) ?? ""}
+        data={data}
+        rowKey={(row) => row.id}
         urlAdapter={adapter}
         urlSync
         defaults={defaults}
@@ -452,9 +494,9 @@ function GridInner<T>({
         searchable={searchable}
         searchPlaceholder={searchPlaceholder}
         toolbar={toolbarExtra}
-        renderRowDetail={renderRowDetail}
-        onRowClick={onRowClick}
-        rowClassName={rowClassName}
+        renderRowDetail={renderRowDetail && ((row) => renderRowDetail(row[ROW]))}
+        onRowClick={onRowClick && ((row) => onRowClick(row[ROW]))}
+        rowClassName={rowClassName && ((row, i) => rowClassName(row[ROW], i))}
         maxHeight={maxHeight}
         stickyHeader
         stickyToolbar={false}

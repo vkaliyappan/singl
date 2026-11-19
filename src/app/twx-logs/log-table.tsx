@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { IconCopy } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -103,18 +103,36 @@ export function LogTable({ rows }: { rows: LogRow[] }) {
     return out
   }, [rows])
 
+  // Fit the table to the window so it scrolls in its own box: the sideways
+  // scrollbar then sits on screen instead of below hundreds of rows.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [maxHeight, setMaxHeight] = useState<number>()
+  useEffect(() => {
+    const fit = () => {
+      const top = boxRef.current?.getBoundingClientRect().top ?? 0
+      // Leaves room for the toolbar, the pager and the page's bottom padding.
+      setMaxHeight(Math.max(320, Math.round(window.innerHeight - Math.max(top, 0) - 150)))
+    }
+    fit()
+    window.addEventListener("resize", fit)
+    return () => window.removeEventListener("resize", fit)
+  }, [])
+
   return (
-    <DataGrid
-      id="twx-logs"
-      columns={COLUMNS}
-      rows={rows}
-      rowKey={(r) => keys.get(r) ?? ""}
-      renderRowDetail={(r) => <Detail r={r} />}
-      initialSort={{ key: "timestamp", dir: "desc" }}
-      pageSize={100}
-      csvName="twx-logs"
-      searchPlaceholder="Search entries…"
-      emptyText="No log entries"
-    />
+    <div ref={boxRef}>
+      <DataGrid
+        id="twx-logs"
+        columns={COLUMNS}
+        rows={rows}
+        rowKey={(r) => keys.get(r) ?? ""}
+        renderRowDetail={(r) => <Detail r={r} />}
+        initialSort={{ key: "timestamp", dir: "desc" }}
+        pageSize={100}
+        csvName="twx-logs"
+        searchPlaceholder="Search entries…"
+        emptyText="No log entries"
+        maxHeight={maxHeight}
+      />
+    </div>
   )
 }
