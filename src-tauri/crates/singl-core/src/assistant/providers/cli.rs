@@ -13,7 +13,7 @@
 //!     global config, which a background chat must not do, so `agy` runs
 //!     without the app's tools and is told so in the prompt.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -132,8 +132,9 @@ pub fn build_launch(req: &CliRequest, mcp_file: Option<&Path>, system_file: Opti
       l.args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"].map(String::from).to_vec();
       l.args.extend(["--mcp-config".into(), path_str(mcp_file), "--strict-mcp-config".into()]);
       l.args.extend(["--append-system-prompt-file".into(), path_str(system_file)]);
-      // `=` keeps each variadic flag from swallowing what follows.
-      l.args.push(format!("--allowedTools=mcp__{SERVER}"));
+      // `=` keeps each variadic flag from swallowing what follows. Print mode has no
+      // approval prompt: a tool missing here is denied outright. Web tools only read.
+      l.args.push(format!("--allowedTools=mcp__{SERVER},WebSearch,WebFetch"));
       match &req.sub_agents {
         // Sub-agents off: deny the tool that starts them (`Agent`, `Task` in older releases).
         Some(s) if !s.enabled => l.args.push(format!("--disallowedTools={CLAUDE_DENIED},Agent,Task")),
@@ -236,6 +237,32 @@ Do not claim to have changed anything in the app; answer from your own knowledge
   Ok(l)
 }
 
+/// What a Claude Code sub-agent (its `Agent`/`Task` tool) is doing, for its card.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubEvent {
+  /// The main agent started a sub-agent; `id` is that tool call's id.
+  Started { id: String, description: String, prompt: String, agent: String },
+  /// A sub-agent called a tool.
+  Call { parent: String, id: String, name: String, input: Value },
+  /// A sub-agent's tool call, or a sub-agent itself, finished.
+  Done { id: String, content: String, is_error: bool },
+}
+
+pub type SubSink<'a> = &'a (dyn Fn(SubEvent) + Send + Sync);
+
+/// Text of a `tool_result` block: a string, or text parts.
+fn result_text(block: &Value) -> String {
+  match &block["content"] {
+    Value::String(s) => s.clone(),
+    Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("
+"),
+    _ => String::new(),
+  }
+}
+
+/// A sub-agent tool call's result shown on its card: a glimpse is enough.
+const SUB_RESULT_LIMIT: usize = 4_000;
+
 /// Reads one CLI's JSON-lines output into text and a session id.
 pub struct Parser {
   provider: String,
@@ -251,7 +278,7 @@ pub struct Parser {
   thinking: String,
   /// A new reasoning block began: its first text goes apart from the last.
   think_sep: bool,
-  /// Tokens and cost the CLI reported (claude `result`, codex `turn.completed`).
+  /// Tokens the CLI reported (claude `result`, codex `turn.completed`); cost is priced from them.
   usage: crate::assistant::usage::Usage,
   last_step: Option<i64>,
   final_text: Option<String>,
@@ -264,6 +291,10 @@ pub struct Parser {
   /// claude: `result` events seen; a steered message read too late for the
   /// turn gets a turn (and result) of its own.
   pub results: usize,
+  /// claude: sub-agents started and not finished (their tool call ids).
+  sub_agents: HashSet<String>,
+  /// claude: sub-agent activity not yet reported (see `take_sub_events`).
+  sub_events: Vec<SubEvent>,
 }
 
 impl Parser {
@@ -284,6 +315,60 @@ impl Parser {
       soft_error: None,
       status: None,
       results: 0,
+      sub_agents: HashSet::new(),
+      sub_events: Vec::new(),
+    }
+  }
+
+  /// Sub-agent activity since the last call.
+  pub fn take_sub_events(&mut self) -> Vec<SubEvent> {
+    std::mem::take(&mut self.sub_events)
+  }
+
+  /// Sub-agent starts, their tool calls, and the results of both (claude).
+  fn track_sub_agents(&mut self, ev: &Value) {
+    let parent = ev["parent_tool_use_id"].as_str().filter(|p| !p.is_empty());
+    let blocks = ev["message"]["content"].as_array().cloned().unwrap_or_default();
+    match ev["type"].as_str() {
+      Some("assistant") => {
+        for b in blocks.iter().filter(|b| b["type"] == "tool_use") {
+          let id = b["id"].as_str().unwrap_or("").to_string();
+          let name = b["name"].as_str().unwrap_or("").to_string();
+          if id.is_empty() {
+            continue;
+          }
+          match parent {
+            Some(parent) => {
+              let name = name.strip_prefix(&format!("mcp__{SERVER}__")).unwrap_or(&name).to_string();
+              self.sub_events.push(SubEvent::Call { parent: parent.into(), id, name, input: b["input"].clone() });
+            }
+            None if matches!(name.as_str(), "Agent" | "Task") => {
+              let arg = |k: &str| b["input"][k].as_str().unwrap_or("").to_string();
+              self.sub_agents.insert(id.clone());
+              self.sub_events.push(SubEvent::Started {
+                id,
+                description: arg("description"),
+                prompt: arg("prompt"),
+                agent: arg("subagent_type"),
+              });
+            }
+            None => {}
+          }
+        }
+      }
+      Some("user") => {
+        for b in blocks.iter().filter(|b| b["type"] == "tool_result") {
+          let id = b["tool_use_id"].as_str().unwrap_or("").to_string();
+          let is_error = b["is_error"].as_bool().unwrap_or(false);
+          if parent.is_some() {
+            let content = crate::assistant::context::clip(&result_text(b), SUB_RESULT_LIMIT);
+            self.sub_events.push(SubEvent::Done { id, content, is_error });
+          } else if self.sub_agents.remove(&id) {
+            self.sub_events.push(SubEvent::Done { id, content: result_text(b), is_error });
+          }
+        }
+      }
+      _ => {}
     }
   }
 
@@ -350,6 +435,7 @@ impl Parser {
   }
 
   fn claude(&mut self, ev: &Value, on_text: TextSink<'_>, on_thinking: TextSink<'_>) {
+    self.track_sub_agents(ev);
     // Sub-agents' own chatter is not the answer, but what they do is news.
     if !ev["parent_tool_use_id"].is_null() {
       if ev["type"] == "assistant" {
@@ -412,7 +498,8 @@ impl Parser {
         self.results += 1;
         let mut used = crate::assistant::usage::Usage::default();
         used.merge_anthropic(&ev["usage"]);
-        used.cost_usd = ev["total_cost_usd"].as_f64();
+        // `total_cost_usd` is a running total over the whole (resumed) session, not
+        // this run's cost, so it is left out: the cost is worked out from the tokens.
         self.usage.add(&used);
         self.set_session(ev["session_id"].as_str());
         let text = ev["result"].as_str().unwrap_or("").trim().to_string();
@@ -621,6 +708,7 @@ pub async fn run(
   on_text: TextSink<'_>,
   on_thinking: TextSink<'_>,
   on_status: TextSink<'_>,
+  on_sub: Option<SubSink<'_>>,
   steer: Option<SteerSource<'_>>,
   cancel: &CancellationToken,
 ) -> Result<CliReply> {
@@ -696,6 +784,11 @@ pub async fn run(
           parser.feed_line(&line, on_text, on_thinking);
           if let Some(s) = parser.take_status() {
             on_status(&s);
+          }
+          for e in parser.take_sub_events() {
+            if let Some(f) = on_sub {
+              f(e);
+            }
           }
           // The answer is in: end the input so the CLI exits. Anything it already
           // took still gets answered first; later messages wait for the next turn.
@@ -956,6 +1049,26 @@ mod tests {
   }
 
   #[test]
+  fn claude_sub_agents_are_tracked() {
+    let (mut p, text) = parse("claude", &[
+      r#"{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"description":"Find callers","prompt":"Find who calls GetBOM","subagent_type":"general-purpose"}}]}}"#,
+      r#"{"type":"assistant","parent_tool_use_id":"t1","message":{"content":[{"type":"tool_use","id":"c1","name":"mcp__singl__entity_search","input":{"query":"GetBOM"}}]}}"#,
+      r#"{"type":"user","parent_tool_use_id":"t1","message":{"content":[{"type":"tool_result","tool_use_id":"c1","content":[{"type":"text","text":"3 hits"}]}]}}"#,
+      r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"Called by A and B."}]}}"#,
+      r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"other","content":"x"}]}}"#,
+    ]);
+    assert!(text.is_empty());
+    let ev = p.take_sub_events();
+    assert_eq!(ev, vec![
+      SubEvent::Started { id: "t1".into(), description: "Find callers".into(), prompt: "Find who calls GetBOM".into(), agent: "general-purpose".into() },
+      SubEvent::Call { parent: "t1".into(), id: "c1".into(), name: "entity_search".into(), input: json!({"query": "GetBOM"}) },
+      SubEvent::Done { id: "c1".into(), content: "3 hits".into(), is_error: false },
+      SubEvent::Done { id: "t1".into(), content: "Called by A and B.".into(), is_error: false },
+    ]);
+    assert!(p.take_sub_events().is_empty());
+  }
+
+  #[test]
   fn claude_reports_activity_without_a_card() {
     let mut p = Parser::new("claude");
     let mut seen = Vec::new();
@@ -1032,7 +1145,7 @@ Second.");
     assert_eq!(a[at("--mcp-config") + 1], "c.json");
     assert!(a.contains(&"--strict-mcp-config".to_string()));
     assert_eq!(a[at("--append-system-prompt-file") + 1], "s.md");
-    assert!(a.contains(&"--allowedTools=mcp__singl".to_string()));
+    assert!(a.contains(&"--allowedTools=mcp__singl,WebSearch,WebFetch".to_string()));
     assert!(a.iter().any(|x| x.starts_with("--disallowedTools=Bash,")));
     assert_eq!(a[at("--model") + 1], "m1");
     assert_eq!(a[at("--resume") + 1], "sess-1");
@@ -1264,7 +1377,7 @@ Second.");
     r.model = "haiku".into();
     r.prompt = "Reply with the single word pong.".into();
     r.mcp_url = "http://127.0.0.1:1/mcp".into();
-    let reply = run(&procs, r, &|_| {}, &|_| {}, &|_| {}, None, &CancellationToken::new()).await.unwrap();
+    let reply = run(&procs, r, &|_| {}, &|_| {}, &|_| {}, None, None, &CancellationToken::new()).await.unwrap();
     assert!(reply.text.to_lowercase().contains("pong"));
     assert!(reply.session_id.is_some());
     assert!(models(&procs, "claude").await.unwrap().len() >= 4);
@@ -1283,7 +1396,7 @@ Second.");
     let pending = std::sync::Mutex::new(vec!["Also end your reply with the word BANANA.".to_string()]);
     let steer = move || std::mem::take(&mut *pending.lock().unwrap());
     let (none, cancel) = (|_: &str| {}, CancellationToken::new());
-    let run = run(&procs, r, &none, &none, &none, Some(&steer), &cancel);
+    let run = run(&procs, r, &none, &none, &none, None, Some(&steer), &cancel);
     let reply = tokio::time::timeout(std::time::Duration::from_secs(120), run).await.expect("stdin was never closed").unwrap();
     assert!(reply.text.to_lowercase().contains("banana"), "{}", reply.text);
   }

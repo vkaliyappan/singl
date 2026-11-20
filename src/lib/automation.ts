@@ -60,7 +60,7 @@ export type SuiteRun = {
 
 export type RunRow = {
   id: string
-  kind: "suite" | "drift"
+  kind: "suite" | "drift" | "uitest"
   refId: string
   name: string
   status: string
@@ -137,7 +137,7 @@ export const deleteSuite = (id: string) => invoke<void>("automation_suite_delete
 /** Runs the suite's services for real on each environment. */
 export const runSuite = (id: string, envs?: string[]) => invoke<SuiteRun>("automation_suite_run", { id, envs })
 
-export const listRuns = (kind: "suite" | "drift", refId?: string) =>
+export const listRuns = (kind: "suite" | "drift" | "uitest", refId?: string) =>
   invoke<RunRow[]>("automation_runs_list", { kind, refId })
 export const getRun = <T>(id: string) => invoke<RunDetail<T>>("automation_run_get", { id })
 export const deleteRun = (id: string) => invoke<void>("automation_run_delete", { id })

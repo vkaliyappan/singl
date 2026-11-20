@@ -20,4 +20,5 @@ pub mod twx_admin;
 pub mod twx_import;
 pub mod deps;
 pub mod automation;
+pub mod uitest;
 pub mod twx_events;

@@ -4,6 +4,7 @@ import {
   IconRocket,
   IconSettings,
   IconBoxMultiple,
+  IconBrowserCheck,
   IconGitCompare,
   IconBolt,
   IconTable,
@@ -62,6 +63,7 @@ export const navSections: NavSection[] = [
       { title: "Compare", href: "/compare", icon: IconGitCompare },
       { title: "Deploy", href: "/deploy", icon: IconRocket },
       { title: "Automation", href: "/automation", icon: IconClockPlay },
+      { title: "App Tests", href: "/app-tests", icon: IconBrowserCheck },
     ],
   },
   {

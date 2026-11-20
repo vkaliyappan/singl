@@ -375,6 +375,9 @@ impl Assistant {
     } else {
       self.cli_turn(&mut chat, &req, &cancel).await
     };
+    if result.is_ok() {
+      self.compact_if_due(&mut chat, &req, &cancel).await;
+    }
     // Closed before the chat stops running, so a later steer fails and is sent as its own message.
     let unread = self.steer_inbox(&chat.id, false);
     self.running.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat.id);
@@ -435,7 +438,7 @@ impl Assistant {
   }
 
   /// Stores a call's token usage (best effort: metering never fails a turn).
-  async fn record_usage(&self, chat_id: &str, message_id: &str, provider: &str, model: &str, usage: &super::usage::Usage) {
+  pub(crate) async fn record_usage(&self, chat_id: &str, message_id: &str, provider: &str, model: &str, usage: &super::usage::Usage) {
     if let Err(e) = super::usage::record(&self.pool().await, chat_id, message_id, provider, model, usage).await {
       super::log_warn(&format!("Could not record usage: {e}"));
     }
@@ -515,7 +518,7 @@ impl Assistant {
         return Ok(last_text);
       }
       // Sub-agents start at once and run side by side; other calls run in order meanwhile.
-      let spawned: Vec<Option<tokio::task::JoinHandle<(String, bool)>>> = calls
+      let spawned: Vec<Option<tokio::task::JoinHandle<super::ToolOutcome>>> = calls
         .iter()
         .map(|(id, name, input)| {
           (name == subagents::TOOL && !cancel.is_cancelled()).then(|| {
@@ -526,14 +529,14 @@ impl Assistant {
         .collect();
       let mut results = Vec::new();
       for ((id, name, input), handle) in calls.into_iter().zip(spawned) {
-        let (content, is_error) = if let Some(handle) = handle {
-          handle.await.unwrap_or_else(|_| ("The sub-agent stopped unexpectedly.".to_string(), true))
+        let outcome = if let Some(handle) = handle {
+          handle.await.unwrap_or_else(|_| super::ToolOutcome::error("The sub-agent stopped unexpectedly."))
         } else if cancel.is_cancelled() {
-          ("Cancelled by the user.".to_string(), true)
+          super::ToolOutcome::error("Cancelled by the user.")
         } else {
           self.call_tool(&name, input, job.meta(&id)).await
         };
-        results.push(Block::ToolResult { tool_use_id: id, content, is_error });
+        results.push(outcome.block(id));
       }
       self.record(history, Message::new(Role::User, results)).await?;
       self.read_steered(job, history).await?;
@@ -557,14 +560,47 @@ impl Assistant {
     Ok(true)
   }
 
+  /// An agent CLI run for this request: the system prompt, the app's MCP
+  /// server under `token`, the turn's approval and sub-agent settings.
+  pub(crate) async fn cli_request(
+    &self,
+    req: &SendRequest,
+    prompt: String,
+    resume: Option<String>,
+    token: &str,
+    images: Vec<providers::CliImage>,
+  ) -> Result<CliRequest> {
+    let endpoint = self.mcp_endpoint().ok_or_else(no_mcp)?;
+    // Only Claude Code takes sub-agent settings: models as `--agents`, off as a denied tool.
+    let claude_sub_agents =
+      req.sub_agents.clone().filter(|_| req.provider == "claude").map(|s| s.normalized(&req.provider, &req.model));
+    Ok(CliRequest {
+      provider: req.provider.clone(),
+      model: req.model.clone(),
+      system: self.system(req)? + &claude_sub_agents.as_ref().map(subagents::claude_prompt_section).unwrap_or_default(),
+      prompt,
+      resume,
+      mcp_url: endpoint.url,
+      mcp_token: token.to_string(),
+      tool_timeout_secs: self.settings().await.map(|s| s.tool_timeout()).unwrap_or_default().as_secs(),
+      cwd: crate::agents::agent_root(self.workspace_root().as_deref()),
+      effort: req.effort.clone(),
+      read_only: req.approval == super::ApprovalMode::ReadOnly,
+      foreign_mcp: Vec::new(),
+      sub_agents: claude_sub_agents,
+      agents_file: None,
+      images,
+    })
+  }
+
   async fn cli_turn(self: &Arc<Self>, chat: &mut Chat, req: &SendRequest, cancel: &CancellationToken) -> Result<String> {
     let disabled = crate::db::settings::disabled_agents(&self.pool().await).await?;
     if disabled.contains(&req.provider) {
       return Err(CoreError::Invalid(format!("{} is switched off in Settings → AI.", providers::title(&req.provider))));
     }
-    let endpoint = self
-      .mcp_endpoint()
-      .ok_or_else(|| CoreError::Invalid("CLI providers reach the app through its MCP server: turn it on in Settings → AI.".into()))?;
+    if self.mcp_endpoint().is_none() {
+      return Err(no_mcp());
+    }
     let pool = self.pool().await;
     let prior = chat.messages.len() as i64 - 1;
     let latest = chat.messages.last().map(Message::prompt_text).unwrap_or_default();
@@ -600,36 +636,58 @@ impl Assistant {
       }
       texts
     };
-    let cwd = crate::agents::agent_root(self.workspace_root().as_deref());
-    // Only Claude Code takes sub-agent settings: models as `--agents`, off as a denied tool.
-    let claude_sub_agents =
-      req.sub_agents.clone().filter(|_| req.provider == "claude").map(|s| s.normalized(&req.provider, &req.model));
+    let images = chat
+      .messages
+      .last()
+      .map(|m| m.images().map(|(n, t, d)| providers::CliImage { name: n.into(), media_type: t.into(), data: d.into() }).collect())
+      .unwrap_or_default();
+    let request = self.cli_request(req, prompt, resume, &token, images).await;
+    let request = match request {
+      Ok(r) => r,
+      Err(e) => {
+        self.drop_turn_token(&token);
+        self.collected.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat.id);
+        return Err(e);
+      }
+    };
+    // Claude Code's sub-agents get the same cards as `agent_task`: started and
+    // finished ones are stored with the turn's calls, their steps are shown live.
+    let started: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>> = Default::default();
+    let (chat_id, this) = (chat.id.clone(), self.clone());
+    let on_sub = move |e: providers::cli::SubEvent| {
+      use providers::cli::SubEvent;
+      let (call_id, name, input, source, done) = match e {
+        SubEvent::Started { id, description, prompt, agent } => {
+          let input = serde_json::json!({ "description": description, "prompt": prompt, "model": agent, "via": "claude" });
+          started.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), input.clone());
+          (id, subagents::TOOL.to_string(), input, "assistant".to_string(), None)
+        }
+        SubEvent::Call { parent, id, name, input } => (id, name, input, format!("{}{parent}", subagents::SOURCE_PREFIX), None),
+        SubEvent::Done { id, content, is_error } => {
+          if let Some(input) = started.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+            let use_block = Block::ToolUse { id: id.clone(), name: subagents::TOOL.into(), input };
+            let result = Block::ToolResult { tool_use_id: id.clone(), content: content.clone(), is_error, display: None };
+            if let Some(list) = this.collected.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&chat_id) {
+              list.push((use_block, result));
+            }
+          }
+          (id, String::new(), serde_json::Value::Null, String::new(), Some((content, is_error)))
+        }
+      };
+      match done {
+        None => this.emit(AssistantEvent::ToolCall { chat_id: Some(chat_id.clone()), call_id, name, input, source }),
+        Some((content, is_error)) => {
+          this.emit(AssistantEvent::ToolResult { chat_id: Some(chat_id.clone()), call_id, content, is_error })
+        }
+      }
+    };
     let result = providers::cli::run(
       &self.procs,
-      CliRequest {
-        provider: req.provider.clone(),
-        model: req.model.clone(),
-        system: self.system(req)? + &claude_sub_agents.as_ref().map(subagents::claude_prompt_section).unwrap_or_default(),
-        prompt,
-        resume,
-        mcp_url: endpoint.url,
-        mcp_token: token.clone(),
-        tool_timeout_secs: self.settings().await.map(|s| s.tool_timeout()).unwrap_or_default().as_secs(),
-        cwd,
-        effort: req.effort.clone(),
-        read_only: req.approval == super::ApprovalMode::ReadOnly,
-        foreign_mcp: Vec::new(),
-        sub_agents: claude_sub_agents.clone(),
-        agents_file: None,
-        images: chat
-          .messages
-          .last()
-          .map(|m| m.images().map(|(n, t, d)| providers::CliImage { name: n.into(), media_type: t.into(), data: d.into() }).collect())
-          .unwrap_or_default(),
-      },
+      request,
       &on_text,
       &on_thinking,
       &on_status,
+      Some(&on_sub),
       Some(&take_steered),
       cancel,
     )
@@ -664,10 +722,16 @@ impl Assistant {
   }
 }
 
+fn no_mcp() -> CoreError {
+  CoreError::Invalid("CLI providers reach the app through its MCP server: turn it on in Settings → AI.".into())
+}
+
 /// History an API accepts: every tool call answered by the next message and
 /// every result tied to a call; anything left dangling (a turn that crashed
 /// or was cancelled mid-way) is dropped.
 pub fn sanitize(messages: &[Message]) -> Vec<Message> {
+  // Nothing before the last summary reaches a model.
+  let messages = super::compact::visible(messages);
   let mut out: Vec<Message> = Vec::with_capacity(messages.len());
   for (i, msg) in messages.iter().enumerate() {
     let mut m = msg.clone();
@@ -736,6 +800,7 @@ pub fn sanitize(messages: &[Message]) -> Vec<Message> {
 
 /// The chat so far as plain text, for a CLI that cannot resume its session.
 pub fn transcript(messages: &[Message]) -> String {
+  let messages = super::compact::visible(messages);
   let mut out = String::from("Conversation so far (you may have answered some turns with another model):\n");
   for m in messages {
     for b in &m.blocks {
@@ -793,7 +858,7 @@ mod tests {
   #[test]
   fn sanitize_keeps_answered_calls() {
     let call = Message::new(Role::Assistant, vec![Block::ToolUse { id: "a".into(), name: "x".into(), input: json!({}) }]);
-    let res = Message::new(Role::User, vec![Block::ToolResult { tool_use_id: "a".into(), content: "ok".into(), is_error: false }]);
+    let res = Message::new(Role::User, vec![Block::ToolResult { tool_use_id: "a".into(), content: "ok".into(), is_error: false, display: None }]);
     let out = sanitize(&[text(Role::User, "hi"), call, res, text(Role::Assistant, "done")]);
     assert_eq!(out.len(), 4);
   }

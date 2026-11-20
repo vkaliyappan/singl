@@ -26,7 +26,7 @@ pub fn convert_messages(messages: &[Message]) -> Vec<Value> {
           Block::Text { text } if text.trim().is_empty() => None,
           Block::Text { text } => Some(json!({"type": "text", "text": text})),
           Block::ToolUse { id, name, input } => Some(json!({"type": "tool_use", "id": id, "name": name, "input": input})),
-          Block::ToolResult { tool_use_id, content, is_error } => {
+          Block::ToolResult { tool_use_id, content, is_error, .. } => {
             Some(json!({"type": "tool_result", "tool_use_id": tool_use_id, "content": content, "is_error": is_error}))
           }
           // Thinking blocks go back unchanged; the API drops, unbilled, any it cannot read.
@@ -275,7 +275,7 @@ mod tests {
         Role::Assistant,
         vec![Block::Text { text: String::new() }, Block::ToolUse { id: "t1".into(), name: "ls".into(), input: json!({"a": 1}) }],
       ),
-      msg(Role::User, vec![Block::ToolResult { tool_use_id: "t1".into(), content: "ok".into(), is_error: true }]),
+      msg(Role::User, vec![Block::ToolResult { tool_use_id: "t1".into(), content: "ok".into(), is_error: true, display: None }]),
       msg(Role::Assistant, vec![Block::Text { text: String::new() }]),
     ]);
     assert_eq!(out.len(), 3);

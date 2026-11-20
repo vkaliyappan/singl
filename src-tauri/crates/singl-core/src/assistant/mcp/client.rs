@@ -26,7 +26,7 @@ use crate::assistant::tools::{Risk, ToolSpec};
 use crate::{CoreError, Result};
 
 const PROTOCOL: &str = "2025-06-18";
-const START_TIMEOUT: Duration = Duration::from_secs(30);
+const START_TIMEOUT: Duration = Duration::from_secs(120);
 pub(super) const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const RETRY_AFTER: Duration = Duration::from_secs(60);
 const STDERR_LINES: usize = 50;

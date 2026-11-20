@@ -13,8 +13,11 @@ export type Block =
   | {
       type: "tool_result";
       tool_use_id: string;
+      /** What the model read (big results are a preview). */
       content: string;
       is_error?: boolean;
+      /** The fuller result to show, when it differs from `content`. */
+      display?: string;
     }
   /** Provider data kept for the next request (e.g. thinking); never shown. */
   | { type: "opaque"; provider: string; data: unknown }
@@ -47,6 +50,8 @@ export type Message = {
   context?: unknown;
   /** Names of the skills attached to a user message. */
   skills?: string[];
+  /** Set on a summary of the earlier conversation: how many messages it replaces. */
+  summaryOf?: number;
   createdAt: number;
 };
 
@@ -159,6 +164,10 @@ export type AssistantSettingsView = {
   disabledProjectServers: string[];
   /** How long one MCP tool call may take, approval wait included. */
   toolTimeoutMinutes: number;
+  /** Offer every tool on each model call instead of the screen's tools plus tools_find. */
+  loadAllTools: boolean;
+  /** Summarise a chat once its conversation passes this many KB; 0 = never. */
+  compactAfterKb: number;
 };
 
 export type AssistantSettingsPatch = Partial<{
@@ -176,6 +185,8 @@ export type AssistantSettingsPatch = Partial<{
   projectMcpRoot: string;
   disabledProjectServers: string[];
   toolTimeoutMinutes: number;
+  loadAllTools: boolean;
+  compactAfterKb: number;
   regenerateMcpToken: boolean;
 }>;
 
@@ -309,6 +320,9 @@ export const assistantTurnMode = (chatId: string, mode: ApprovalMode, serverMode
   invoke<boolean>("assistant_turn_mode", { chatId, mode, serverMode });
 export const assistantCancel = (chatId: string) =>
   invoke<boolean>("assistant_cancel", { chatId });
+/** Stops one running sub-agent (its `agent_task` call); the answer goes on. False when none runs. */
+export const assistantStopSubAgent = (callId: string) =>
+  invoke<boolean>("assistant_stop_sub_agent", { callId });
 /** True = the running turn took the message; false = queue it instead. */
 export const assistantSteer = (chatId: string, text: string) =>
   invoke<boolean>("assistant_steer", { chatId, text });
@@ -390,11 +404,36 @@ export type UsageTotals = {
 };
 export type ModelUsage = UsageTotals & { provider: string; model: string };
 export type DayUsage = UsageTotals & { day: string };
+export type ChatUsage = UsageTotals & {
+  chatId: string;
+  /** Null when the chat was deleted. */
+  title: string | null;
+  /** Unix seconds of its last recorded call. */
+  lastAt: number;
+};
 export type UsageSummary = {
   total: UsageTotals;
   byModel: ModelUsage[];
   byDay: DayUsage[];
+  /** Costliest chats first (top 50). */
+  byChat: ChatUsage[];
 };
+/** One recorded model call (API providers) or CLI turn. */
+export type CallUsage = {
+  id: number;
+  messageId: string | null;
+  provider: string;
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number | null;
+  /** Unix seconds. */
+  createdAt: number;
+};
+export const assistantUsageCalls = (chatId: string) =>
+  invoke<CallUsage[]>("assistant_usage_calls", { chatId });
 export const assistantUsageChat = (chatId: string) =>
   invoke<UsageTotals>("assistant_usage_chat", { chatId });
 export const assistantUsageSummary = (days = 30) =>

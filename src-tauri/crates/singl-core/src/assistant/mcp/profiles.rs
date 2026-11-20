@@ -9,7 +9,7 @@ use crate::assistant::tools::Risk;
 
 /// Every tool group, in the order the Settings page lists them.
 pub const GROUPS: &[&str] = &[
-  "app", "fs", "twx", "entities", "services", "flows", "repo", "compare", "deploy", "outputs", "deps", "automation",
+  "app", "fs", "twx", "entities", "services", "flows", "repo", "compare", "deploy", "outputs", "deps", "automation", "apptests",
   "undo", "mcp", "other",
 ];
 
@@ -36,6 +36,7 @@ pub fn group_of(tool: &str) -> &'static str {
       "deploy" => "deploy",
       "deps" => "deps",
       "automation" => "automation",
+      "apptests" => "apptests",
       "undo" => "undo",
       _ => "other",
     },

@@ -426,6 +426,7 @@ export function AiSettings() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [toolTimeout, setToolTimeout] = useState("");
+  const [compactKb, setCompactKb] = useState("");
 
   const refreshMcp = useCallback(() => {
     assistantMcpInfo()
@@ -441,6 +442,7 @@ export function AiSettings() {
     setModel(view.defaultModel);
     setPort(String(view.mcpPort));
     setToolTimeout(String(view.toolTimeoutMinutes));
+    setCompactKb(String(view.compactAfterKb));
     setMcpRoot(view.projectMcpRoot);
   }, []);
 
@@ -646,6 +648,48 @@ export function AiSettings() {
       <AgentSettings />
 
       <UsageSettings />
+
+      <SectionCard
+        title="Token saving"
+        description="Every model call re-sends the tool list and the whole chat so far. These keep both small."
+      >
+        <label className="flex items-center gap-3 text-xs">
+          <Switch
+            checked={!s.loadAllTools}
+            onCheckedChange={(on) => void save({ loadAllTools: !on })}
+            aria-label="Load only the current screen's tools"
+          />
+          Load only the current screen&apos;s tools; the assistant finds the
+          others (and MCP servers&apos; tools) with tools_find when it needs
+          them
+        </label>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Label htmlFor="ai-compact-kb" className="w-32 text-xs font-normal">
+            Summarise chats after
+          </Label>
+          <Input
+            id="ai-compact-kb"
+            inputMode="numeric"
+            value={compactKb}
+            onChange={(e) => setCompactKb(e.target.value.replace(/\D/g, ""))}
+            className="w-20 font-mono"
+          />
+          <span className="text-muted-foreground">KB (0 = never)</span>
+          <Button
+            size="sm"
+            disabled={compactKb === "" || Number(compactKb) === s.compactAfterKb}
+            onClick={() => void save({ compactAfterKb: Number(compactKb) })}
+          >
+            Apply
+          </Button>
+          <p className="w-full text-muted-foreground">
+            When a chat grows past this, the model writes a short summary of it
+            after its answer, and later messages read the summary instead of
+            everything before it. Between 20 and 4096 KB; 150 KB is roughly
+            40,000 tokens.
+          </p>
+        </div>
+      </SectionCard>
 
       <SectionCard
         title="Approvals"

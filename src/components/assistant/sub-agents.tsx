@@ -73,6 +73,11 @@ function read(): SubAgentPrefs {
 }
 
 /** Sub-agent settings, remembered across messages and restarts. */
+/** The saved sub-agent settings, for messages sent without the composer. */
+export function savedSubAgents(): SubAgentPrefs {
+  return read();
+}
+
 export function useSubAgents() {
   const [prefs, setPrefsState] = useState<SubAgentPrefs>(DEFAULTS);
   useEffect(() => {

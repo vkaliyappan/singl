@@ -82,6 +82,11 @@ function read(): ApprovalModes | null {
   return null;
 }
 
+/** The saved approval modes, for messages sent without the composer (choices, suggestions). */
+export function savedApprovalModes(): ApprovalModes {
+  return read() ?? { local: "ask", server: "ask" };
+}
+
 /** The chosen approval modes, remembered across messages and restarts. */
 export function useApprovalMode() {
   const [modes, setModesState] = useState<ApprovalModes>({ local: "ask", server: "ask" });

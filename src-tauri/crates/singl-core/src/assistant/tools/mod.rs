@@ -7,6 +7,7 @@
 //! submodules and listing it in [`builtin`].
 
 pub mod app;
+pub mod catalog;
 pub mod compare;
 pub mod deploy;
 pub mod entities;
@@ -22,6 +23,7 @@ pub mod twx_import;
 pub mod twx_logs;
 pub mod deps;
 pub mod automation;
+pub mod apptests;
 pub mod undo;
 pub mod twx_events;
 
@@ -83,6 +85,9 @@ pub type Handler = Arc<dyn Fn(Arc<Assistant>, Value, CallMeta) -> ToolFuture + S
 pub struct Tool {
   pub spec: ToolSpec,
   pub handler: Handler,
+  /// The group it is offered with (see [`catalog`]): `core` is always offered,
+  /// the others only on the screens that list them.
+  pub group: &'static str,
 }
 
 /// Builds a tool from an async closure.
@@ -100,6 +105,7 @@ where
       external_only: false,
     },
     handler: Arc::new(move |a, v, m| Box::pin(f(a, v, m))),
+    group: catalog::CORE,
   }
 }
 
@@ -117,26 +123,32 @@ pub fn schema(props: Value, required: &[&str]) -> Value {
 
 /// Every built-in tool.
 pub fn builtin() -> Vec<Tool> {
-  let mut tools = Vec::new();
-  tools.extend(app::tools());
-  tools.extend(fs::tools());
-  tools.extend(twx::tools());
-  tools.extend(entities::tools());
-  tools.extend(services::tools());
-  tools.extend(flows::tools());
-  tools.extend(repo::tools());
-  tools.extend(compare::tools());
-  tools.extend(deploy::tools());
-  tools.extend(outputs::tools());
-  tools.extend(twx_logs::tools());
-  tools.extend(twx_access::tools());
-  tools.extend(twx_admin::tools());
-  tools.extend(twx_import::tools());
-  tools.extend(deps::tools());
-  tools.extend(automation::tools());
-  tools.extend(undo::tools());
-  tools.extend(twx_events::tools());
-  tools
+  let groups: [(&'static str, Vec<Tool>); 20] = [
+    (catalog::CORE, app::tools()),
+    (catalog::CORE, catalog::tools()),
+    (catalog::CORE, outputs::tools()),
+    ("files", fs::tools()),
+    ("files", compare::tools()),
+    ("twx", twx::tools()),
+    ("entities", entities::tools()),
+    ("entities", deps::tools()),
+    ("entities", undo::tools()),
+    ("services", services::tools()),
+    ("flows", flows::tools()),
+    ("repo", repo::tools()),
+    ("deploy", deploy::tools()),
+    ("server", twx_logs::tools()),
+    ("server", twx_access::tools()),
+    ("server", twx_admin::tools()),
+    ("server", twx_import::tools()),
+    ("server", twx_events::tools()),
+    ("automation", automation::tools()),
+    ("apptests", apptests::tools()),
+  ];
+  groups
+    .into_iter()
+    .flat_map(|(group, tools)| tools.into_iter().map(move |t| Tool { group, ..t }))
+    .collect()
 }
 
 /// Reading tool arguments.
@@ -199,8 +211,14 @@ mod tests {
       assert!(name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'), "{name}");
       assert!(!name.contains("__"), "{name}: `__` is reserved for MCP server prefixes");
     }
-    for t in tools {
+    for t in &tools {
       assert_eq!(t.spec.input_schema["type"], "object", "{}", t.spec.name);
+      assert!(t.group == catalog::CORE || catalog::GROUPS.iter().any(|(g, _)| *g == t.group), "{}: group {}", t.spec.name, t.group);
+    }
+    for screen in crate::assistant::prompt::SCREENS {
+      for g in screen.tools {
+        assert!(catalog::GROUPS.iter().any(|(x, _)| x == g), "screen {}: unknown group {g}", screen.id);
+      }
     }
   }
 }

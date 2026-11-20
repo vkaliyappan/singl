@@ -11,6 +11,7 @@
 //! carry out UI actions ([`Assistant::ui_request`]).
 
 pub mod bridge;
+pub mod compact;
 pub mod context;
 pub mod events;
 pub mod files;
@@ -120,8 +121,43 @@ impl TurnModes {
   }
 }
 
-/// Tool output past this is cut before it reaches a model.
-const TOOL_OUTPUT_LIMIT: usize = 100_000;
+/// Tool output past this is cut before it reaches a model (bigger results are
+/// already previewed by `tools::outputs::spill`; this only catches failures).
+const TOOL_OUTPUT_LIMIT: usize = tools::outputs::SPILL_OVER + 4_000;
+/// How much of a big result the chat itself shows.
+const DISPLAY_LIMIT: usize = 100_000;
+
+/// Forgets a sub-agent's stop token when it ends.
+pub(crate) struct SubAgentGuard {
+  assistant: Arc<Assistant>,
+  call_id: String,
+}
+
+impl Drop for SubAgentGuard {
+  fn drop(&mut self) {
+    self.assistant.sub_agent_cancels.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.call_id);
+  }
+}
+
+/// One tool call's result.
+#[derive(Debug, Clone)]
+pub struct ToolOutcome {
+  /// What the model reads.
+  pub content: String,
+  /// The fuller text the chat shows, when it differs from `content`.
+  pub display: Option<String>,
+  pub is_error: bool,
+}
+
+impl ToolOutcome {
+  pub fn error(content: impl Into<String>) -> Self {
+    Self { content: content.into(), display: None, is_error: true }
+  }
+
+  pub fn block(self, tool_use_id: String) -> Block {
+    Block::ToolResult { tool_use_id, content: self.content, is_error: self.is_error, display: self.display }
+  }
+}
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(600);
 const UI_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -164,12 +200,16 @@ pub struct Assistant {
   turn_tools: Mutex<HashMap<String, Vec<String>>>,
   /// Sub-agent settings and budget of a chat's running turn, when it may start them.
   turn_sub_agents: Mutex<HashMap<String, Arc<subagents::Turn>>>,
+  /// Running sub-agents' own stop tokens, by the `agent_task` call that started them.
+  sub_agent_cancels: Mutex<HashMap<String, CancellationToken>>,
   /// Messages the user sent into a running API turn, not yet read by it. An
   /// entry exists only while the turn can take them.
   steered: Mutex<HashMap<String, Vec<String>>>,
   /// Chats (or `"mcp"`) where the user said "don't ask again".
   allow_all: Mutex<HashSet<String>>,
   mcp_endpoint: RwLock<Option<McpEndpoint>>,
+  /// MCP servers the app itself runs for a while (the UI tests' browser). Not stored in settings.
+  transient_mcp: Mutex<Vec<McpServerConfig>>,
 }
 
 impl Assistant {
@@ -190,9 +230,11 @@ impl Assistant {
       turn_tools: Mutex::new(HashMap::new()),
       turn_modes: Mutex::new(HashMap::new()),
       turn_sub_agents: Mutex::new(HashMap::new()),
+      sub_agent_cancels: Mutex::new(HashMap::new()),
       steered: Mutex::new(HashMap::new()),
       allow_all: Mutex::new(HashSet::new()),
       mcp_endpoint: RwLock::new(None),
+      transient_mcp: Mutex::new(Vec::new()),
     });
     this.mcp_clients.set_host(Arc::downgrade(&this));
     this
@@ -364,7 +406,27 @@ impl Assistant {
       }
     }
     self.attach_sign_ins(&settings, &mut servers).await;
+    for t in self.transient_mcp.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+      servers.retain(|s| s.name != t.name);
+      let mut t = t.clone();
+      t.source = "transient".into();
+      servers.push(t);
+    }
     Ok(servers)
+  }
+
+  /// Adds (or replaces) a runtime-only MCP server. Its tools stay out of chats
+  /// unless a turn lists them by name (see [`UITEST_PREFIX`]).
+  pub fn set_transient_mcp(&self, cfg: McpServerConfig) {
+    let mut list = self.transient_mcp.lock().unwrap_or_else(|e| e.into_inner());
+    list.retain(|s| s.name != cfg.name);
+    list.push(cfg);
+  }
+
+  /// Drops a runtime-only MCP server and stops it.
+  pub async fn remove_transient_mcp(&self, name: &str) {
+    self.transient_mcp.lock().unwrap_or_else(|e| e.into_inner()).retain(|s| s.name != name);
+    self.mcp_clients.restart(name).await;
   }
 
   /// Adds the stored OAuth token to each HTTP server that has no `Authorization`
@@ -427,6 +489,12 @@ impl Assistant {
   /// Every tool: built-in ones, then those of connected MCP servers.
   /// `external` includes tools meant only for outside MCP clients.
   pub async fn tool_specs(&self, external: bool) -> Vec<ToolSpec> {
+    let mut specs = self.all_tool_specs(external).await;
+    specs.retain(|t| !is_hidden_tool(&t.name));
+    specs
+  }
+
+  async fn all_tool_specs(&self, external: bool) -> Vec<ToolSpec> {
     let mut specs: Vec<ToolSpec> =
       self.tools.iter().filter(|t| external || !t.spec.external_only).map(|t| t.spec.clone()).collect();
     self.mcp_clients.sync_roots(&self.mcp_roots().await).await;
@@ -450,6 +518,11 @@ impl Assistant {
       Some(allowed) => allowed.iter().any(|a| a == name),
       None => true,
     }
+  }
+
+  /// Whether the chat's turn names `name` in its narrowed tool list.
+  fn turn_lists(&self, chat_id: &str, name: &str) -> bool {
+    self.turn_tools.lock().unwrap_or_else(|e| e.into_inner()).get(chat_id).is_some_and(|l| l.iter().any(|a| a == name))
   }
 
   pub fn turn_mode(&self, chat_id: Option<&str>) -> TurnModes {
@@ -492,15 +565,77 @@ impl Assistant {
     self.running.lock().unwrap_or_else(|e| e.into_inner()).get(chat_id).cloned()
   }
 
-  /// The tools a chat's turn sees: [`Self::tool_specs`] narrowed to its
+  /// The tools a chat's turn is offered: see [`Self::offered_specs`].
+  pub async fn tool_specs_for(&self, chat_id: &str) -> Vec<ToolSpec> {
+    self.offered_specs(chat_id).await.0
+  }
+
+  /// `(offered, available)`. Available is every tool the turn may use;
+  /// offered is the part sent with each model call: the `core` tools and the
+  /// screen's groups, with `tools_find` / `tools_call` reaching the rest. A
+  /// turn whose tools the user picked, or Settings → "Load all tools", gets
+  /// everything it may use.
+  pub async fn offered_specs(&self, chat_id: &str) -> (Vec<ToolSpec>, Vec<ToolSpec>) {
+    let all = self.available_specs(chat_id).await;
+    let is_meta = |t: &ToolSpec| t.name == tools::catalog::FIND || t.name == tools::catalog::CALL;
+    let narrowed = self.turn_tools.lock().unwrap_or_else(|e| e.into_inner()).contains_key(chat_id);
+    let load_all = self.settings().await.map(|s| s.load_all_tools).unwrap_or(false);
+    if narrowed || load_all {
+      return (all.iter().filter(|t| !is_meta(t)).cloned().collect(), all);
+    }
+    let groups = self.screen_groups();
+    let (mut offered, hidden): (Vec<&ToolSpec>, Vec<&ToolSpec>) = all.iter().partition(|t| {
+      let g = self.tool_group(&t.name);
+      g == tools::catalog::CORE || groups.contains(&g.as_str())
+    });
+    let mut offered: Vec<ToolSpec> = if hidden.is_empty() {
+      offered.retain(|t| !is_meta(t));
+      offered.into_iter().cloned().collect()
+    } else {
+      let find = tools::catalog::find_description(&hidden, |n| self.tool_group(n));
+      offered
+        .into_iter()
+        .cloned()
+        .map(|mut t| {
+          if t.name == tools::catalog::FIND {
+            t.description = find.clone();
+          }
+          t
+        })
+        .collect()
+    };
+    offered.sort_by_key(|t| is_meta(t));
+    (offered, all)
+  }
+
+  /// A tool's group: its built-in group, the MCP server it comes from, or `core`.
+  pub fn tool_group(&self, name: &str) -> String {
+    if let Some(server) = tools::catalog::mcp_group(name) {
+      return server.to_string();
+    }
+    self.tools.iter().find(|t| t.spec.name == name).map_or(tools::catalog::CORE, |t| t.group).to_string()
+  }
+
+  /// The tool groups the current screen lists.
+  fn screen_groups(&self) -> &'static [&'static str] {
+    let ctx = self.context.get();
+    if ctx.screen.is_empty() && ctx.route.is_empty() {
+      return tools::catalog::DEFAULT_GROUPS;
+    }
+    let screen = if ctx.screen.is_empty() { prompt::screen_for_route(&ctx.route) } else { ctx.screen };
+    prompt::profile(&screen).map_or(tools::catalog::DEFAULT_GROUPS, |p| p.tools)
+  }
+
+  /// Every tool a chat's turn may use: [`Self::tool_specs`] narrowed to its
   /// selection, plus `agent_task` when the turn may start sub-agents (the
   /// composer's sub-agent switch decides that, not the tool selection).
-  pub async fn tool_specs_for(&self, chat_id: &str) -> Vec<ToolSpec> {
-    let specs = self.tool_specs(false).await;
+  pub async fn available_specs(&self, chat_id: &str) -> Vec<ToolSpec> {
+    let specs = self.all_tool_specs(false).await;
     let modes = self.turn_mode(Some(chat_id));
     let mut out: Vec<ToolSpec> = specs
       .into_iter()
       .filter(|t| self.tool_allowed(Some(chat_id), &t.name))
+      .filter(|t| !is_hidden_tool(&t.name) || self.turn_lists(chat_id, &t.name))
       .filter(|t| modes.offers(&t.name, t.risk))
       .collect();
     if let Some(turn) = self.sub_agent_turn(chat_id) {
@@ -518,8 +653,16 @@ impl Assistant {
     fallback
   }
 
-  /// Runs a tool after any approval it needs. Returns its output and whether it failed.
-  pub async fn call_tool(self: &Arc<Self>, name: &str, args: Value, meta: CallMeta) -> (String, bool) {
+  /// Runs a tool after any approval it needs.
+  pub async fn call_tool(self: &Arc<Self>, name: &str, args: Value, meta: CallMeta) -> ToolOutcome {
+    // `tools_call` runs the tool it names, as if that were called directly.
+    let unwrapped = (name == tools::catalog::CALL).then(|| tools::catalog::unwrap(&args));
+    let (name, args, failed) = match unwrapped {
+      Some(Ok((inner, input))) => (inner, input, None),
+      Some(Err(e)) => (name.to_string(), args, Some(e)),
+      None => (name.to_string(), args, None),
+    };
+    let name = name.as_str();
     self.emit(AssistantEvent::ToolCall {
       chat_id: meta.chat_id.clone(),
       call_id: meta.call_id.clone(),
@@ -527,16 +670,24 @@ impl Assistant {
       input: args.clone(),
       source: meta.source.clone(),
     });
-    let (content, is_error) = match self.run_tool(name, &args, &meta).await {
-      // Big results are saved for `tool_output_query`; the model gets a preview.
-      Ok(out) => (context::clip(&tools::outputs::spill(&meta.call_id, name, out), TOOL_OUTPUT_LIMIT), false),
-      Err(e) => (e.to_string(), true),
+    let run = match failed {
+      Some(e) => Err(e),
+      None => self.run_tool(name, &args, &meta).await,
+    };
+    let outcome = match run {
+      // Big results are saved for `tool_output_query`; the model gets a preview, the chat more.
+      Ok(out) => {
+        let display = (out.len() > tools::outputs::SPILL_OVER).then(|| context::clip(&out, DISPLAY_LIMIT));
+        let content = context::clip(&tools::outputs::spill(&meta.call_id, name, out), TOOL_OUTPUT_LIMIT);
+        ToolOutcome { content, display, is_error: false }
+      }
+      Err(e) => ToolOutcome::error(e.to_string()),
     };
     self.emit(AssistantEvent::ToolResult {
       chat_id: meta.chat_id.clone(),
       call_id: meta.call_id.clone(),
-      content: content.clone(),
-      is_error,
+      content: outcome.display.clone().unwrap_or_else(|| outcome.content.clone()),
+      is_error: outcome.is_error,
     });
     // An agent CLI's calls arrive over MCP; keep them so its turn can store them.
     if meta.source == "assistant" {
@@ -544,12 +695,12 @@ impl Assistant {
         if let Some(list) = self.collected.lock().unwrap_or_else(|e| e.into_inner()).get_mut(chat_id) {
           list.push((
             Block::ToolUse { id: meta.call_id.clone(), name: name.into(), input: args },
-            Block::ToolResult { tool_use_id: meta.call_id.clone(), content: content.clone(), is_error },
+            outcome.clone().block(meta.call_id.clone()),
           ));
         }
       }
     }
-    (content, is_error)
+    outcome
   }
 
   async fn run_tool(self: &Arc<Self>, name: &str, args: &Value, meta: &CallMeta) -> Result<String> {
@@ -558,6 +709,9 @@ impl Assistant {
       return subagents::run(self.clone(), args, meta.clone()).await;
     }
     if !self.tool_allowed(meta.chat_id.as_deref(), name) {
+      return Err(CoreError::Invalid(format!("{name} is switched off for this message.")));
+    }
+    if is_hidden_tool(name) && !meta.chat_id.as_deref().is_some_and(|c| self.turn_lists(c, name)) {
       return Err(CoreError::Invalid(format!("{name} is switched off for this message.")));
     }
     if let Some(tool) = self.tools.iter().find(|t| t.spec.name == name) {
@@ -583,6 +737,24 @@ impl Assistant {
   }
 
   // ---- turns ----------------------------------------------------------------
+
+  /// Stops one running sub-agent (by its `agent_task` call id); the turn goes
+  /// on. False when none runs under that id.
+  pub fn stop_sub_agent(&self, call_id: &str) -> bool {
+    match self.sub_agent_cancels.lock().unwrap_or_else(|e| e.into_inner()).get(call_id) {
+      Some(token) => {
+        token.cancel();
+        true
+      }
+      None => false,
+    }
+  }
+
+  /// Registers a sub-agent's stop token until the returned guard drops.
+  pub(crate) fn track_sub_agent(self: &Arc<Self>, call_id: &str, token: CancellationToken) -> SubAgentGuard {
+    self.sub_agent_cancels.lock().unwrap_or_else(|e| e.into_inner()).insert(call_id.to_string(), token);
+    SubAgentGuard { assistant: self.clone(), call_id: call_id.to_string() }
+  }
 
   /// Stops a chat's running turn. False when none runs.
   pub fn cancel(&self, chat_id: &str) -> bool {
@@ -668,6 +840,13 @@ impl Assistant {
   }
 }
 
+/// Prefix of the UI tests' browser tools: only a turn that lists them by name gets them.
+pub const UITEST_PREFIX: &str = "uitest__";
+
+fn is_hidden_tool(name: &str) -> bool {
+  name.starts_with(UITEST_PREFIX)
+}
+
 pub(crate) fn log_warn(message: &str) {
   eprintln!("{message}");
 }
@@ -736,6 +915,34 @@ mod tests {
     .unwrap();
     assert!(a.permit("x", &input, Risk::Write, &ext).await.is_err());
     assert!(a.tool_specs(true).await.iter().all(|t| t.risk == Risk::Read));
+  }
+
+  #[tokio::test]
+  async fn screens_offer_their_groups_and_find_the_rest() {
+    let (_dir, a) = assistant().await;
+    let names = |specs: Vec<ToolSpec>| specs.into_iter().map(|t| t.name).collect::<Vec<_>>();
+    a.context.set(context::ScreenContext { route: "/repo".into(), screen: "repo".into(), ..Default::default() });
+    let (offered, all) = a.offered_specs("c1").await;
+    let (offered, all) = (names(offered), names(all));
+    assert!(offered.contains(&"repo_diff".to_string()) && offered.contains(&"navigate".to_string()));
+    assert!(!offered.contains(&"flow_run".to_string()) && all.contains(&"flow_run".to_string()));
+    assert_eq!(offered.last().map(String::as_str), Some(tools::catalog::CALL));
+    let find = a.tool_specs_for("c1").await.into_iter().find(|t| t.name == tools::catalog::FIND).unwrap();
+    assert!(find.description.contains("flows (visual service flows)"));
+    // Found and run through tools_find / tools_call.
+    let found = a.call_tool(tools::catalog::FIND, json!({"query": "flow list"}), meta("c1")).await;
+    assert!(!found.is_error && found.content.contains("\"flow_list\""), "{}", found.content);
+    let ran = a.call_tool(tools::catalog::CALL, json!({"name": "flow_list", "arguments": {}}), meta("c1")).await;
+    assert!(!ran.is_error, "{}", ran.content);
+    let bad = a.call_tool(tools::catalog::CALL, json!({"name": "no_such_tool"}), meta("c1")).await;
+    assert!(bad.is_error);
+    // Picked tools, or "load all", offer everything without the catalog tools.
+    a.set_turn_tools("c1", Some(vec!["flow_run".into()]));
+    assert_eq!(names(a.tool_specs_for("c1").await), ["flow_run"]);
+    a.set_turn_tools("c1", None);
+    settings::update(&a.pool().await, settings::AssistantSettingsPatch { load_all_tools: Some(true), ..Default::default() }).await.unwrap();
+    let every = names(a.tool_specs_for("c1").await);
+    assert!(every.contains(&"flow_run".to_string()) && !every.contains(&tools::catalog::FIND.to_string()));
   }
 
   #[tokio::test]

@@ -136,7 +136,7 @@ pub async fn handle(assistant: &Arc<Assistant>, msg: Value, caller: &Caller) -> 
         source: if caller.internal() { "assistant".into() } else { "mcp".into() },
         call_id: uuid::Uuid::new_v4().to_string(),
       };
-      let (text, is_error) = assistant.call_tool(name, args, meta).await;
+      let crate::assistant::ToolOutcome { content: text, is_error, .. } = assistant.call_tool(name, args, meta).await;
       let mut out = json!({ "content": [{ "type": "text", "text": text }] });
       if is_error {
         out["isError"] = json!(true);

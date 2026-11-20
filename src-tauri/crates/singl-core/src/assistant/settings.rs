@@ -14,6 +14,9 @@ use crate::db::now;
 
 pub const DEFAULT_MCP_PORT: u16 = 47821;
 pub const DEFAULT_TOOL_TIMEOUT_MINUTES: u32 = 30;
+pub const DEFAULT_COMPACT_AFTER_KB: u32 = 150;
+const MIN_COMPACT_AFTER_KB: u32 = 20;
+const MAX_COMPACT_AFTER_KB: u32 = 4096;
 const MAX_TOOL_TIMEOUT_MINUTES: u32 = 24 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +52,10 @@ pub struct AssistantSettings {
   pub mcp_oauth: HashMap<String, super::mcp::oauth::OAuthToken>,
   /// Tools switched off per project (`.mcp.json`) server; Settings-page servers keep theirs in their config.
   pub project_disabled_tools: HashMap<String, Vec<String>>,
+  /// Offer every tool on every model call, instead of the screen's groups plus `tools_find`.
+  pub load_all_tools: bool,
+  /// Summarise a chat's older part once its conversation passes this many KB; 0 = never.
+  pub compact_after_kb: u32,
 }
 
 impl Default for AssistantSettings {
@@ -72,6 +79,8 @@ impl Default for AssistantSettings {
       mcp_profiles: Vec::new(),
       mcp_oauth: HashMap::new(),
       project_disabled_tools: HashMap::new(),
+      load_all_tools: false,
+      compact_after_kb: DEFAULT_COMPACT_AFTER_KB,
     }
   }
 }
@@ -121,6 +130,8 @@ pub struct AssistantSettingsView {
   pub project_mcp_root: String,
   pub disabled_project_servers: Vec<String>,
   pub tool_timeout_minutes: u32,
+  pub load_all_tools: bool,
+  pub compact_after_kb: u32,
 }
 
 /// A partial update; `None` leaves a field alone. An empty key clears it.
@@ -141,6 +152,8 @@ pub struct AssistantSettingsPatch {
   pub project_mcp_root: Option<String>,
   pub disabled_project_servers: Option<Vec<String>>,
   pub tool_timeout_minutes: Option<u32>,
+  pub load_all_tools: Option<bool>,
+  pub compact_after_kb: Option<u32>,
   /// Makes a new MCP token, cutting off every client that holds the old one.
   pub regenerate_mcp_token: Option<bool>,
 }
@@ -165,6 +178,8 @@ impl AssistantSettings {
       project_mcp_root: self.project_mcp_root.clone(),
       disabled_project_servers: self.disabled_project_servers.clone(),
       tool_timeout_minutes: self.tool_timeout().as_secs() as u32 / 60,
+      load_all_tools: self.load_all_tools,
+      compact_after_kb: self.compact_after_kb,
     }
   }
 
@@ -246,6 +261,12 @@ impl AssistantSettings {
     }
     if let Some(v) = patch.tool_timeout_minutes {
       self.tool_timeout_minutes = if v == 0 { DEFAULT_TOOL_TIMEOUT_MINUTES } else { v.min(MAX_TOOL_TIMEOUT_MINUTES) };
+    }
+    if let Some(v) = patch.load_all_tools {
+      self.load_all_tools = v;
+    }
+    if let Some(v) = patch.compact_after_kb {
+      self.compact_after_kb = if v == 0 { 0 } else { v.clamp(MIN_COMPACT_AFTER_KB, MAX_COMPACT_AFTER_KB) };
     }
     if patch.regenerate_mcp_token == Some(true) || self.mcp_token.is_empty() {
       self.mcp_token = new_token();

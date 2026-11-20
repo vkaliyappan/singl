@@ -20,9 +20,13 @@ pub enum Block {
   },
   ToolResult {
     tool_use_id: String,
+    /// What the model reads (big results are cut to a preview, see `tools::outputs`).
     content: String,
     #[serde(default)]
     is_error: bool,
+    /// The fuller result the chat shows, when it differs from `content`. Never sent to a model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display: Option<String>,
   },
   /// A provider block kept verbatim and sent back only to that provider, e.g.
   /// Anthropic `thinking` / `redacted_thinking` blocks, which must be passed
@@ -114,6 +118,10 @@ pub struct Message {
   /// The screen context when a user message was sent, so old chats stay readable.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub context: Option<Value>,
+  /// Set on a summary of the conversation before it (see `compact`): the number
+  /// of messages it replaces. Models see it instead of them.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub summary_of: Option<u32>,
   #[serde(default)]
   pub created_at: i64,
 }
@@ -129,6 +137,7 @@ impl Message {
       effort: None,
       skills: Vec::new(),
       context: None,
+      summary_of: None,
       created_at: crate::db::now(),
     }
   }

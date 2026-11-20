@@ -74,8 +74,8 @@ function chatToMarkdown(chat: Chat) {
     if (m.role === "user" && m.blocks.every((b) => b.type === "tool_result")) {
       for (const b of m.blocks) {
         if (b.type !== "tool_result") continue;
-        const body =
-          b.content.length > 2000 ? `${b.content.slice(0, 2000)}…` : b.content;
+        const full = b.display ?? b.content;
+        const body = full.length > 2000 ? `${full.slice(0, 2000)}…` : full;
         out.push(
           `<details><summary>${b.is_error ? "Tool error" : "Tool result"}</summary>`,
           "",

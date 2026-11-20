@@ -134,6 +134,12 @@ pub async fn session(pool: &SqlitePool, chat_id: &str) -> Result<Option<Assistan
   Ok(sqlx::query_as("SELECT * FROM assistant_sessions WHERE chatId = ?1").bind(chat_id).fetch_optional(pool).await?)
 }
 
+/// Forgets a chat's CLI session, so its next turn starts a new one.
+pub async fn clear_session(pool: &SqlitePool, chat_id: &str) -> Result<()> {
+  sqlx::query("DELETE FROM assistant_sessions WHERE chatId = ?1").bind(chat_id).execute(pool).await?;
+  Ok(())
+}
+
 /// Remembers a CLI session. `turn_count` is the number of chat messages it has seen.
 pub async fn save_session(
   pool: &SqlitePool,

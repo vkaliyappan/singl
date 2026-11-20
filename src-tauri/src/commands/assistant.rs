@@ -29,6 +29,12 @@ pub fn assistant_cancel(state: State<'_, AppState>, chat_id: String) -> bool {
   state.assistant.cancel(&chat_id)
 }
 
+/// Stops one running sub-agent (its `agent_task` call); the turn goes on.
+#[tauri::command]
+pub fn assistant_stop_sub_agent(state: State<'_, AppState>, call_id: String) -> bool {
+  state.assistant.stop_sub_agent(&call_id)
+}
+
 /// Adds a message to a chat's running turn. False when it cannot take one:
 /// the page then queues it as the next message.
 #[tauri::command]
@@ -237,6 +243,12 @@ pub async fn assistant_usage_chat(state: State<'_, AppState>, chat_id: String) -
 #[tauri::command]
 pub async fn assistant_usage_summary(state: State<'_, AppState>, days: Option<i64>) -> IpcResult<usage::UsageSummary> {
   Ok(usage::summary(&state.db().await, days.unwrap_or(30)).await?)
+}
+
+/// Every recorded model call (or CLI turn) of one chat, oldest first.
+#[tauri::command]
+pub async fn assistant_usage_calls(state: State<'_, AppState>, chat_id: String) -> IpcResult<Vec<usage::CallUsage>> {
+  Ok(usage::calls(&state.db().await, &chat_id).await?)
 }
 
 /// Undoes the local entity file change of one assistant tool call (the Undo button on its card).

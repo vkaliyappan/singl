@@ -22,10 +22,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
+  assistantUsageCalls,
   assistantUsageChat,
   assistantUsageSummary,
   onAssistantEvent,
+  type CallUsage,
+  type ChatUsage,
   type UsageSummary,
   type UsageTotals,
 } from "@/lib/assistant/api";
@@ -125,12 +129,128 @@ const MODEL_COLUMNS: GridColumn<ModelRow>[] = [
   { key: "cost", label: "Cost", kind: "number", width: 90, value: (m) => m.costUsd, render: (m) => costText(m) },
 ];
 
-/** "Usage" card for AI settings: last 30 days by model, and a cost-by-day chart. */
+/** Everything the model read for a call: new input plus cache reads and writes. */
+const readOf = (t: { input: number; cacheRead: number; cacheWrite: number }) =>
+  t.input + t.cacheRead + t.cacheWrite;
+
+const when = (secs: number) =>
+  new Date(secs * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const CHAT_COLUMNS: GridColumn<ChatUsage>[] = [
+  {
+    key: "title",
+    label: "Chat",
+    kind: "text",
+    width: 240,
+    value: (c) => c.title ?? "(deleted chat)",
+  },
+  { key: "calls", label: "Calls", kind: "number", width: 70 },
+  { key: "read", label: "Read", kind: "number", width: 80, value: readOf, render: (c) => tokens(readOf(c)) },
+  { key: "output", label: "Out", kind: "number", width: 70, render: (c) => tokens(c.output) },
+  { key: "cost", label: "Cost", kind: "number", width: 80, value: (c) => c.costUsd, render: (c) => costText(c) },
+  { key: "lastAt", label: "Last used", kind: "number", width: 130, render: (c) => when(c.lastAt) },
+];
+
+const CALL_COLUMNS: GridColumn<CallUsage & { n: number }>[] = [
+  { key: "n", label: "#", kind: "number", width: 50 },
+  { key: "createdAt", label: "Time", kind: "number", width: 130, render: (c) => when(c.createdAt) },
+  { key: "model", label: "Model", kind: "text", width: 160, value: (c) => c.model || c.provider },
+  { key: "read", label: "Read", kind: "number", width: 80, value: readOf, render: (c) => tokens(readOf(c)) },
+  { key: "cacheWrite", label: "Cache write", kind: "number", width: 90, render: (c) => tokens(c.cacheWrite) },
+  { key: "output", label: "Out", kind: "number", width: 70, render: (c) => tokens(c.output) },
+  {
+    key: "cost",
+    label: "Cost",
+    kind: "number",
+    width: 80,
+    value: (c) => c.costUsd ?? 0,
+    render: (c) => (c.costUsd == null ? "n/a" : dollars(c.costUsd)),
+  },
+];
+
+/** One chat's calls: how much the model read each time, and what each cost. */
+function ChatCalls({ chat, onClose }: { chat: ChatUsage; onClose: () => void }) {
+  const { data, error } = useUsage<CallUsage[]>(
+    () => assistantUsageCalls(chat.chatId),
+    chat.chatId,
+  );
+  const rows = (data ?? []).map((c, i) => ({ ...c, n: i + 1 }));
+  const bars = rows.map((c) => ({ n: c.n, read: readOf(c), cost: c.costUsd ?? 0 }));
+  return (
+    <div className="space-y-2 rounded-md border p-2.5">
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 truncate font-medium">
+          {chat.title ?? "(deleted chat)"}
+        </p>
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Tokens the model read for each message. Every message re-reads the
+        whole chat so far, so the bars grow as a chat gets longer; a new chat
+        starts small again.
+      </p>
+      {error && <p className="text-destructive">{error}</p>}
+      {rows.length > 0 && (
+        <>
+          <div className="h-28">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={bars}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+                <XAxis dataKey="n" tick={{ fontSize: 10 }} stroke="var(--border)" />
+                <YAxis
+                  tick={{ fontSize: 10 }}
+                  stroke="var(--border)"
+                  width={40}
+                  tickFormatter={(v: number) => tokens(v)}
+                />
+                <ChartTooltip
+                  formatter={(v, name) =>
+                    name === "read"
+                      ? [nf.format(Number(v)), "Tokens read"]
+                      : [dollars(Number(v)), "Cost"]
+                  }
+                  labelFormatter={(n) => `Message ${n}`}
+                  contentStyle={{
+                    background: "var(--popover)",
+                    border: "1px solid var(--border)",
+                    fontSize: 11,
+                  }}
+                />
+                <Bar dataKey="read" fill="var(--primary)" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <DataGrid
+            id="usage-chat-calls"
+            columns={CALL_COLUMNS}
+            rows={rows}
+            rowKey={(c) => String(c.id)}
+            searchable={false}
+            pageSize={20}
+            csvName="assistant-usage-chat"
+            initialSort={{ key: "n", dir: "asc" }}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** "Usage" card for AI settings: last 30 days by model, a cost-by-day chart, and the costliest chats. */
 export function UsageSettings() {
   const { data, error } = useUsage<UsageSummary>(
     () => assistantUsageSummary(30),
     "30",
   );
+  const [openChat, setOpenChat] = useState<string | null>(null);
+  const selected = data?.byChat.find((c) => c.chatId === openChat) ?? null;
   const days = (data?.byDay ?? []).map((d) => ({
     day: d.day.slice(5),
     cost: Number(d.costUsd.toFixed(4)),
@@ -141,10 +261,10 @@ export function UsageSettings() {
       <CardHeader className="border-b px-3.5 py-2.5">
         <CardTitle className="text-xs font-semibold">Usage</CardTitle>
         <CardDescription className="text-[11px]">
-          Tokens and cost of the assistant over the last 30 days. Cost is what
-          the provider reported, else worked out from Anthropic list prices; a
-          + means some calls have no known price (CLI agents other than Claude
-          Code report none).
+          Tokens and cost of the assistant over the last 30 days. Claude models
+          (API and Claude Code) are priced from their tokens at Anthropic list
+          prices; OpenRouter cost is what it reported. A + means some calls
+          have no known price (Codex and other CLI agents report none).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 p-3.5 text-xs">
@@ -197,6 +317,25 @@ export function UsageSettings() {
               csvName="assistant-usage"
               initialSort={{ key: "cost", dir: "desc" }}
             />
+            <div className="space-y-1.5">
+              <p className="font-medium">Costliest chats</p>
+              <p className="text-[11px] text-muted-foreground">
+                Click a chat to see what each of its messages read and cost.
+              </p>
+              <DataGrid
+                id="usage-by-chat"
+                columns={CHAT_COLUMNS}
+                rows={data.byChat}
+                rowKey={(c) => c.chatId}
+                searchable={data.byChat.length > 10}
+                pageSize={10}
+                csvName="assistant-usage-chats"
+                initialSort={{ key: "cost", dir: "desc" }}
+                onRowClick={(c) => setOpenChat((cur) => (cur === c.chatId ? null : c.chatId))}
+                rowClassName={(c) => (c.chatId === openChat ? "bg-accent" : undefined)}
+              />
+            </div>
+            {selected && <ChatCalls chat={selected} onClose={() => setOpenChat(null)} />}
           </>
         )}
       </CardContent>

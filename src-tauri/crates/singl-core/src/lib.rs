@@ -12,6 +12,7 @@ pub mod flow;
 pub mod jobs;
 pub mod repo;
 pub mod twx;
+pub mod uitest;
 pub mod workspace;
 
 pub use error::{CoreError, Result};

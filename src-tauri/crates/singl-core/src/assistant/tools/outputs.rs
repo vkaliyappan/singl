@@ -15,9 +15,11 @@ use crate::flow::sandbox;
 use crate::{CoreError, Result};
 
 /// Results larger than this are saved and previewed.
-pub const SPILL_OVER: usize = 100_000;
+/// Every result stays in the conversation and is re-read on each later model
+/// call, so this is kept small.
+pub const SPILL_OVER: usize = 16_000;
 /// How much of a saved result the model sees right away.
-const PREVIEW: usize = 20_000;
+const PREVIEW: usize = 6_000;
 /// Saved results are removed after this long…
 const KEEP_FOR: Duration = Duration::from_secs(3 * 24 * 3600);
 /// …or, oldest first, once all of them together pass this.

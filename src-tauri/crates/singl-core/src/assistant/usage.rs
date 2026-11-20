@@ -105,11 +105,39 @@ const PRICES: &[(&str, f64, f64, f64)] = &[
   ("claude-haiku-4-5", 1.0, 5.0, 0.10),
 ];
 
+/// Claude Code model aliases and the models they stand for.
+const ALIASES: &[(&str, &str)] = &[("opus", "claude-opus-5-5"), ("sonnet", "claude-sonnet-5-5"), ("haiku", "claude-haiku-5-5")];
+
 /// The price row for a model id (longest matching id prefix, so dated ids work).
 fn price(model: &str) -> Option<(f64, f64, f64)> {
   let m = model.trim().to_lowercase();
   let m = m.strip_prefix("anthropic/").unwrap_or(&m);
+  let m = ALIASES.iter().find(|(alias, _)| m == *alias || m.starts_with(&format!("{alias}["))).map_or(m, |(_, id)| *id);
   PRICES.iter().filter(|(id, ..)| m.starts_with(id)).max_by_key(|(id, ..)| id.len()).map(|&(_, i, o, r)| (i, o, r))
+}
+
+/// Prices the Claude Code rows that have no cost yet (migration 0026 cleared the
+/// running totals stored before). Unknown models stay unpriced.
+pub async fn backfill_costs(pool: &SqlitePool) -> Result<()> {
+  let rows: Vec<(i64, String, i64, i64, i64, i64)> = sqlx::query_as(
+    "SELECT id, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens FROM assistant_usage
+     WHERE provider = 'claude' AND costUsd IS NULL",
+  )
+  .fetch_all(pool)
+  .await?;
+  for (id, model, input, output, cache_read, cache_write) in rows {
+    let u = Usage {
+      input: input as u64,
+      output: output as u64,
+      cache_read: cache_read as u64,
+      cache_write: cache_write as u64,
+      cost_usd: None,
+    };
+    if let Some(c) = cost("claude", &model, &u) {
+      sqlx::query("UPDATE assistant_usage SET costUsd = ?1 WHERE id = ?2").bind(c).bind(id).execute(pool).await?;
+    }
+  }
+  Ok(())
 }
 
 /// Cost in USD: the reported figure, else computed for Anthropic models, else `None`.
@@ -201,6 +229,59 @@ pub struct UsageSummary {
   pub by_model: Vec<ModelUsage>,
   /// Oldest first; days with no calls are left out.
   pub by_day: Vec<DayUsage>,
+  /// The costliest chats first, at most [`TOP_CHATS`].
+  pub by_chat: Vec<ChatUsage>,
+}
+
+const TOP_CHATS: i64 = 50;
+
+#[derive(Debug, Clone, FromRow, Serialize)]
+#[sqlx(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
+pub struct ChatUsage {
+  pub chat_id: String,
+  /// `None` when the chat was deleted.
+  pub title: Option<String>,
+  /// Unix seconds of its last recorded call.
+  pub last_at: i64,
+  #[sqlx(flatten)]
+  #[serde(flatten)]
+  pub totals: Totals,
+}
+
+/// One recorded model call (API providers) or CLI turn.
+#[derive(Debug, Clone, FromRow, Serialize)]
+#[sqlx(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
+pub struct CallUsage {
+  pub id: i64,
+  pub message_id: Option<String>,
+  pub provider: String,
+  pub model: String,
+  #[sqlx(rename = "inputTokens")]
+  pub input: i64,
+  #[sqlx(rename = "outputTokens")]
+  pub output: i64,
+  #[sqlx(rename = "cacheReadTokens")]
+  pub cache_read: i64,
+  #[sqlx(rename = "cacheWriteTokens")]
+  pub cache_write: i64,
+  pub cost_usd: Option<f64>,
+  /// Unix seconds.
+  pub created_at: i64,
+}
+
+/// Every recorded call of one chat, oldest first.
+pub async fn calls(pool: &SqlitePool, chat_id: &str) -> Result<Vec<CallUsage>> {
+  Ok(
+    sqlx::query_as(
+      "SELECT id, messageId, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd, createdAt
+       FROM assistant_usage WHERE chatId = ?1 ORDER BY createdAt, id",
+    )
+    .bind(chat_id)
+    .fetch_all(pool)
+    .await?,
+  )
 }
 
 /// Totals for the last `days` days, overall, by provider/model and by day.
@@ -219,7 +300,16 @@ pub async fn summary(pool: &SqlitePool, days: i64) -> Result<UsageSummary> {
   .bind(since)
   .fetch_all(pool)
   .await?;
-  Ok(UsageSummary { total, by_model, by_day })
+  let by_chat = sqlx::query_as(&format!(
+    "SELECT u.chatId AS chatId, c.title AS title, MAX(u.createdAt) AS lastAt, {TOTALS}
+     FROM assistant_usage u LEFT JOIN assistant_chats c ON c.id = u.chatId
+     WHERE u.createdAt >= ?1 GROUP BY u.chatId ORDER BY costUsd DESC, cacheRead + input DESC LIMIT ?2"
+  ))
+  .bind(since)
+  .bind(TOP_CHATS)
+  .fetch_all(pool)
+  .await?;
+  Ok(UsageSummary { total, by_model, by_day, by_chat })
 }
 
 #[cfg(test)]
@@ -232,7 +322,7 @@ mod tests {
     assert_eq!(price("claude-opus-5-5").unwrap().0, 4.0);
     assert_eq!(price("claude-opus-5").unwrap().0, 5.0);
     assert_eq!(price("claude-sonnet-4-6-20260101").unwrap().0, 3.0);
-    assert!(price("opus").is_none());
+    assert!(price("gpt-5").is_none());
   }
 
   #[test]
@@ -271,5 +361,30 @@ mod tests {
     assert_eq!(s.by_model.len(), 2);
     assert_eq!(s.by_day.len(), 1);
     assert!(s.total.cost_usd > 0.0);
+    assert_eq!(s.by_chat.len(), 1);
+    assert_eq!((s.by_chat[0].chat_id.as_str(), s.by_chat[0].title.as_deref(), s.by_chat[0].totals.calls), ("c1", None, 2));
+    let rows = calls(&pool, "c1").await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!((rows[0].model.as_str(), rows[0].input, rows[0].message_id.as_deref()), ("claude-haiku-5-5", 100, Some("m1")));
+  }
+
+  #[test]
+  fn claude_code_aliases_are_priced() {
+    assert_eq!(price("opus"), price("claude-opus-5-5"));
+    assert_eq!(price("sonnet[1m]"), price("claude-sonnet-5-5"));
+    assert!(price("opusx").is_none());
+  }
+
+  #[tokio::test]
+  async fn backfill_prices_claude_rows_from_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = crate::db::open(&dir.path().join("singl.db")).await.unwrap();
+    let u = Usage { input: 0, output: 0, cache_read: 1_000_000, cache_write: 0, cost_usd: None };
+    record(&pool, "c1", "m1", "claude", "claude-opus-5-5", &u).await.unwrap();
+    // A row from before the fix: the session's running total instead of the turn's cost.
+    sqlx::query("UPDATE assistant_usage SET costUsd = NULL").execute(&pool).await.unwrap();
+    backfill_costs(&pool).await.unwrap();
+    let c: f64 = sqlx::query_scalar("SELECT costUsd FROM assistant_usage").fetch_one(&pool).await.unwrap();
+    assert!((c - 0.2).abs() < 1e-9);
   }
 }

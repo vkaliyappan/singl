@@ -33,12 +33,13 @@ import {
   IconHierarchy2,
   IconPaperclip,
   IconTool,
+  IconPlayerStopFilled,
 } from "@tabler/icons-react";
 import { Badge } from "@/components/ui/badge";
 import { effortLabel, ProviderIcon, shortModelName } from "./model-picker";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Block, Message, Risk } from "@/lib/assistant/api";
+import { assistantStopSubAgent, type Block, type Message, type Risk } from "@/lib/assistant/api";
 import type { Approval, LiveCall } from "./use-assistant-chat";
 
 const RESULT_LIMIT = 6000;
@@ -624,6 +625,49 @@ const SUB_AGENT_SOURCE = "sub-agent:";
 const SUB_AGENT_TOOL = "agent_task";
 /** Live tool calls of running sub-agents, by the `agent_task` call that started them. */
 const SubAgentCalls = createContext<Map<string, LiveCall[]>>(new Map());
+/** Stops the whole running answer (Claude Code cannot stop one sub-agent). */
+const StopTurn = createContext<(() => void) | null>(null);
+
+/** Stop control of a running sub-agent card. */
+function SubAgentStop({ callId, viaClaude }: { callId?: string; viaClaude: boolean }) {
+  const stopTurn = use(StopTurn);
+  const [state, setState] = useState<"idle" | "stopping" | "gone">("idle");
+  if (viaClaude) {
+    if (!stopTurn) return null;
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        className="h-5 shrink-0 px-1.5 text-[10px]"
+        title="Claude Code cannot stop one sub-agent; this stops the whole answer."
+        onClick={stopTurn}
+      >
+        <IconPlayerStopFilled />
+        Stop answer
+      </Button>
+    );
+  }
+  if (!callId) return null;
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      className="h-5 shrink-0 px-1.5 text-[10px]"
+      disabled={state !== "idle"}
+      title={state === "gone" ? "It already finished." : "Stop this sub-agent; the answer carries on without it."}
+      onClick={async () => {
+        setState("stopping");
+        const ok = await assistantStopSubAgent(callId).catch(() => false);
+        setState(ok ? "stopping" : "gone");
+      }}
+    >
+      <IconPlayerStopFilled />
+      {state === "stopping" ? "Stopping" : "Stop"}
+    </Button>
+  );
+}
 
 /** The parent call id of a sub-agent's tool call, or null for the turn's own. */
 function subAgentParent(source: string | undefined) {
@@ -650,6 +694,7 @@ function SubAgentCard({
   const description = typeof inp.description === "string" && inp.description ? inp.description : "Sub-agent";
   const prompt = typeof inp.prompt === "string" ? inp.prompt : "";
   const model = typeof inp.model === "string" ? inp.model : "";
+  const viaClaude = inp.via === "claude";
   const recent = children.slice(-6);
   return (
     <div
@@ -658,11 +703,12 @@ function SubAgentCard({
         isError && "border-destructive/40",
       )}
     >
+      <div className="flex items-center gap-1.5 pr-2">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
+        className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left"
       >
         <IconChevronRight
           className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
@@ -687,6 +733,8 @@ function SubAgentCard({
         )}
         {isError && <span className="text-[10px] text-destructive">failed</span>}
       </button>
+      {running && <SubAgentStop callId={callId} viaClaude={viaClaude} />}
+      </div>
       {running && recent.length > 0 && (
         <ul className="space-y-0.5 border-t px-2 py-1.5" aria-label="What the sub-agent is doing">
           {recent.map((c) => (
@@ -1099,6 +1147,26 @@ function Activity({ status }: { status: string }) {
   );
 }
 
+
+/** A summary that stands in for the messages above it (see the backend's `compact`). */
+function SummaryNote({ message }: { message: Message }) {
+  const text = message.blocks
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("\n\n")
+    .replace(/^Summary of the earlier conversation[^\n]*\n+/, "");
+  return (
+    <details className="rounded-md border border-dashed px-3 py-2">
+      <summary className="cursor-pointer text-[11px] text-muted-foreground">
+        Earlier conversation summarised ({message.summaryOf} messages). The
+        assistant reads this summary instead of the messages above.
+      </summary>
+      <div className="mt-2 text-xs">
+        <Markdown text={text} />
+      </div>
+    </details>
+  );
+}
+
 export function MessageList({
   messages,
   streaming,
@@ -1108,6 +1176,7 @@ export function MessageList({
   runningProvider,
   liveCalls,
   onChoose,
+  onStopTurn,
 }: {
   messages: Message[];
   streaming: string;
@@ -1120,6 +1189,8 @@ export function MessageList({
   liveCalls: Record<string, LiveCall>;
   /** Send a reply for the user (a clicked choice). */
   onChoose?: (text: string) => void;
+  /** Stop the running answer (offered on Claude Code sub-agent cards). */
+  onStopTurn?: () => void;
 }) {
   const { visible, results, savedToolIds } = useMemo(() => {
     const results = new Map<string, { content: string; isError: boolean }>();
@@ -1134,7 +1205,7 @@ export function MessageList({
         for (const b of m.blocks)
           if (b.type === "tool_result")
             results.set(b.tool_use_id, {
-              content: b.content,
+              content: b.display ?? b.content,
               isError: !!b.is_error,
             });
         continue;
@@ -1190,9 +1261,12 @@ export function MessageList({
 
   return (
     <SubAgentCalls value={subAgentCalls}>
+    <StopTurn value={onStopTurn ?? null}>
     <div className="flex flex-col gap-5">
       {visible.map((m, i) =>
-        m.role === "user" ? (
+        m.summaryOf != null ? (
+          <SummaryNote key={m.id} message={m} />
+        ) : m.role === "user" ? (
           <div key={m.id} className="flex flex-col items-end gap-1">
             <UserImages message={m} />
             <UserChips message={m} />
@@ -1271,6 +1345,7 @@ export function MessageList({
         </div>
       )}
     </div>
+    </StopTurn>
     </SubAgentCalls>
   );
 }

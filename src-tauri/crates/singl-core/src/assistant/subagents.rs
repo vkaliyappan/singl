@@ -25,6 +25,14 @@ use super::tools::{Args, CallMeta, Risk, ToolFuture, ToolSpec};
 use super::types::{Block, Message, Role};
 use crate::{CoreError, Result};
 
+/// What the model is told when the user stops one sub-agent.
+const STOPPED: &str = "The user stopped this sub-agent before it finished. Do not start it again unless they ask; carry on without its answer or tell the user what is missing.";
+
+/// Why a sub-agent ended early: the whole turn was cancelled, or the user stopped just it.
+fn stopped(turn: &tokio_util::sync::CancellationToken) -> CoreError {
+  if turn.is_cancelled() { CoreError::Cancelled } else { CoreError::Invalid(STOPPED.into()) }
+}
+
 /// The tool a turn uses to start a sub-agent.
 pub const TOOL: &str = "agent_task";
 /// Sub-agent tool calls carry this source plus the parent call id, so the UI
@@ -288,7 +296,10 @@ pub fn run(a: Arc<Assistant>, args: Value, meta: CallMeta) -> ToolFuture {
       return Err(CoreError::Invalid("A sub-agent cannot start another sub-agent.".into()));
     }
     let turn = a.sub_agent_turn(&chat_id).ok_or_else(|| CoreError::Invalid("Sub-agents are switched off for this message.".into()))?;
-    let cancel = a.turn_cancel(&chat_id).ok_or(CoreError::Cancelled)?;
+    let turn_cancel = a.turn_cancel(&chat_id).ok_or(CoreError::Cancelled)?;
+    // Its own token: the user can stop this sub-agent alone, and stopping the turn stops it too.
+    let cancel = turn_cancel.child_token();
+    let _tracked = a.track_sub_agent(&meta.call_id, cancel.clone());
     let args = Args(&args);
     let prompt = args.need("prompt")?.to_string();
     let model = match args.str("model") {
@@ -304,7 +315,7 @@ pub fn run(a: Arc<Assistant>, args: Value, meta: CallMeta) -> ToolFuture {
     turn.claim()?;
     let _slot = tokio::select! {
       p = turn.gate.acquire() => p.map_err(|_| CoreError::Cancelled)?,
-      () = cancel.cancelled() => return Err(CoreError::Cancelled),
+      () = cancel.cancelled() => return Err(stopped(&turn_cancel)),
     };
 
     let tools: Vec<ToolSpec> = a.tool_specs_for(&chat_id).await.into_iter().filter(|t| t.name != TOOL).collect();
@@ -321,7 +332,10 @@ pub fn run(a: Arc<Assistant>, args: Value, meta: CallMeta) -> ToolFuture {
       source: format!("{SOURCE_PREFIX}{}", meta.call_id),
     };
     let mut history = super::runner::History::Scratch(vec![Message::new(Role::User, vec![Block::Text { text: prompt }])]);
-    let answer = a.api_loop(&job, &mut history, &|_| {}, &|_| {}, &cancel).await?;
+    let answer = match a.api_loop(&job, &mut history, &|_| {}, &|_| {}, &cancel).await {
+      Err(CoreError::Cancelled) => return Err(stopped(&turn_cancel)),
+      other => other?,
+    };
     if answer.trim().is_empty() {
       return Err(CoreError::Invalid("The sub-agent finished without an answer.".into()));
     }

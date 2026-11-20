@@ -15,28 +15,34 @@ pub struct ScreenProfile {
   pub title: &'static str,
   /// What the screen is for and how to help on it.
   pub guide: &'static str,
+  /// Tool groups offered on it besides `core` (see `tools::catalog`); the rest are found with `tools_find`.
+  pub tools: &'static [&'static str],
 }
 
 pub const SCREENS: &[ScreenProfile] = &[
   ScreenProfile {
     id: "home",
     title: "Home",
+    tools: &["twx"],
     guide: "Landing page. Help the user find the right screen; use navigate to take them there.",
   },
   ScreenProfile {
     id: "repo",
     title: "TWX Repository",
+    tools: &["repo", "files"],
     guide: "Git working copy of the ThingWorx sources. Status, diffs, branches, pull and file search. \
             When files or hunks are selected, explain or review exactly those.",
   },
   ScreenProfile {
     id: "repo2",
     title: "Windchill Repository",
+    tools: &["repo", "files"],
     guide: "Git working copy of the Windchill sources. Same tools as the TWX repository.",
   },
   ScreenProfile {
     id: "twx-entities",
     title: "Entities",
+    tools: &["twx", "entities", "services"],
     guide: "Local ThingWorx entity files (twx-entities/) next to a live server. The open entity and its \
             selected services are in the context. Explain, review or edit service code; compare with the \
             server; export or re-export. Service code edits go to the .js service files, never entity XML.",
@@ -44,74 +50,94 @@ pub const SCREENS: &[ScreenProfile] = &[
   ScreenProfile {
     id: "twx-services",
     title: "Services",
+    tools: &["twx", "services"],
     guide: "Search and run ThingWorx services with saved input presets. Help build inputs, run the selected \
             service (twx_invoke_service asks first) and explain its result.",
   },
   ScreenProfile {
     id: "twx-flow",
     title: "Flows",
+    tools: &["flows", "twx", "services"],
     guide: "Visual service flows: nodes call ThingWorx services, code, conditions and agents. Selected nodes \
             and edges are in the context. Explain, debug or change the flow; run it when asked.",
   },
   ScreenProfile {
     id: "twx-migrate",
     title: "Migrate",
+    tools: &["twx", "entities", "deploy"],
     guide: "Moves entities between ThingWorx environments. Check what will change before anything is written.",
   },
   ScreenProfile {
     id: "json-table",
     title: "JSON to Table",
+    tools: &[],
     guide: "Turns JSON (often infotables) into a table. Explain the data, find rows, summarise columns.",
   },
   ScreenProfile {
     id: "compare",
     title: "Compare",
+    tools: &["files"],
     guide: "Compares two folders or files (e.g. repo vs exported entities). Explain the selected differences.",
   },
   ScreenProfile {
     id: "deploy",
     title: "Deploy",
+    tools: &["deploy", "twx"],
     guide: "Exports, bundles and uploads deployment files to ThingWorx. Every upload is destructive: list \
             what will go where, and let the approval prompt confirm it.",
   },
   ScreenProfile {
     id: "assistant",
     title: "AI Assistant",
+    tools: &["twx", "entities", "services"],
     guide: "Full-page assistant with chat history. Nothing on screen to act on besides the conversation itself; use navigate to take the user to the screen a task needs.",
   },
   ScreenProfile {
     id: "twx-logs",
     title: "Logs",
+    tools: &["twx", "server"],
     guide: "ThingWorx server logs with filters and live tail. Explain errors and stack traces, find the             service or Thing behind them, and suggest fixes; use twx_query_logs to look further.",
   },
   ScreenProfile {
     id: "twx-server",
     title: "Server",
+    tools: &["twx", "server"],
     guide: "Server health, subscriptions, schedulers and streams for one environment. Enabling, disabling             and firing events change the server: say what will change and let the approval confirm it.",
   },
   ScreenProfile {
     id: "twx-import",
     title: "Import",
+    tools: &["twx", "server", "entities"],
     guide: "Imports entity XML into a ThingWorx server after a diff preview, backing up first. Always             preview, name the environment, and import only after the user confirms.",
   },
   ScreenProfile {
     id: "twx-access",
     title: "Access & Mashups",
+    tools: &["twx", "server"],
     guide: "Entity permissions and visibility, a can-user-do-this check, and mashup previews. Explain             which rule decided a verdict.",
   },
   ScreenProfile {
     id: "twx-deps",
     title: "Dependencies",
+    tools: &["entities", "twx"],
     guide: "Dependency graph from exported entity XML: what an entity uses, who uses it, who calls a             service, unused entities. Unused is a heuristic, not proof.",
   },
   ScreenProfile {
     id: "automation",
     title: "Automation",
+    tools: &["automation", "twx", "services"],
     guide: "Service test suites, environment drift reports and scheduled tasks. Help write cases and             assertions, explain failures and drift.",
+  },
+  ScreenProfile {
+    id: "app-tests",
+    title: "App Tests",
+    tools: &["apptests", "twx"],
+    guide: "AI-driven browser tests of ThingWorx mashups: Azure-format test cases (steps + expected results) run through             Playwright with a saved SSO session. Use the apptests_* tools to list, write, edit, import/export and run cases.             Inspect the mashup first (twx tools) so names and labels are real. Good cases: one behaviour per case; the first             step opens the mashup by name or URL path; test data goes in the step text; every Expected is concrete and             checkable (visible text, row count, field value, button state, no error toast), never \"verify it works\".             You cannot log in to ThingWorx (SSO/MFA): if the session is missing or expired, ask the user to log in on this             page. Runs execute real clicks against a server: start one only when asked, then poll apptests_run_status.             Explain failed verdicts from the reason and step results.",
   },
   ScreenProfile {
     id: "settings",
     title: "Settings",
+    tools: &[],
     guide: "Environments, credentials, paths and assistant settings. Never reveal secrets.",
   },
 ];
@@ -139,6 +165,8 @@ their text; when they say \"these\" or \"this\", they usually mean the pinned it
 trimmed; fetch the rest with tools when you need it.
 - Prefer doing over describing: use tools to look things up before answering.
 - Tools that change things may ask the user for approval; if they decline, do not retry the same call.
+- Only this screen's tools are loaded. When you need one you do not have (git, deploy, flows, server logs, an MCP server…), find it with tools_find and run it with tools_call.
+- A tool result over ~16 KB is saved and you get its start; query the rest with tool_output_query rather than asking for the same data again.
 - Be concise. Use Markdown. Put code in fenced blocks with a language.
 - Never print secrets (API keys, app keys, tokens).
 

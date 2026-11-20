@@ -35,6 +35,10 @@ pub async fn open(path: &Path) -> Result<SqlitePool> {
     .await?;
   heal_line_endings(&pool).await?;
   MIGRATOR.run(&pool).await?;
+  // Best effort: an unpriced row must not stop the app from starting.
+  if let Err(e) = crate::assistant::usage::backfill_costs(&pool).await {
+    crate::assistant::log_warn(&format!("Could not price usage rows: {e}"));
+  }
   Ok(pool)
 }
 

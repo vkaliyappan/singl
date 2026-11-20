@@ -80,11 +80,11 @@ import {
   setEditorMarkdown,
   useComposerEditor,
 } from "./composer-editor";
-import { ApprovalModePicker, useApprovalMode, type ApprovalModes } from "./approval-mode";
+import { ApprovalModePicker, savedApprovalModes, useApprovalMode, type ApprovalModes } from "./approval-mode";
 import { ModelPicker, useModelChoice } from "./model-picker";
 import { FollowUpToggle, useFollowUp } from "./follow-up";
 import { QueueList } from "./queue-list";
-import { SubAgentPicker, subAgentsFor, useSubAgents } from "./sub-agents";
+import { SubAgentPicker, savedSubAgents, subAgentsFor, useSubAgents } from "./sub-agents";
 import type {
   AssistantChat,
   ChatChoice,
@@ -786,7 +786,19 @@ export function AssistantPanel({
   const send = async (text: string, extras?: SendExtras) => {
     if (!choice) return false;
     stick.current = true;
-    return chat.send(text, choice, extras);
+    // A clicked choice or suggestion has no composer extras; it still follows the
+    // composer's approval and sub-agent settings (without them the backend asks).
+    const modes = savedApprovalModes();
+    const sent: SendExtras = extras ?? {
+      attachments: [],
+      tools: null,
+      skills: [],
+      skillNames: [],
+      approval: modes.local,
+      serverApproval: modes.server,
+      subAgents: subAgentsFor(savedSubAgents(), choice.provider),
+    };
+    return chat.send(text, choice, sent);
   };
   const mine = chat.approvals.filter(
     (a) => a.chatId === null || a.chatId === chat.chatId,
@@ -884,6 +896,7 @@ export function AssistantPanel({
               runningProvider={chat.runningProvider ?? choice}
               liveCalls={chat.liveCalls}
               onChoose={(text) => void send(text)}
+              onStopTurn={() => void chat.stop()}
             />
           )}
 

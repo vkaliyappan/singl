@@ -35,6 +35,11 @@ const PROMPTS: &[(&str, &str, &[(&str, &str, bool)])] = &[
     "Explain what an exported ThingWorx entity does and how it is built.",
     &[("env", "Environment name", true), ("type", "Collection, e.g. Things", true), ("name", "Entity name", true)],
   ),
+  (
+    "write_app_tests",
+    "Write App Tests (AI browser test cases in Azure format) for a ThingWorx mashup or feature.",
+    &[("suite", "Suite name or id (created if missing)", true), ("feature", "The feature or mashup to test", true), ("env", "Environment name", false)],
+  ),
 ];
 
 pub fn list() -> Value {
@@ -155,6 +160,23 @@ pub fn get(a: &Assistant, name: &str, args: &Value) -> Result<Value> {
         ],
       ))
     }
+    "write_app_tests" => {
+      let (suite, feature) = (need(args, "suite")?, need(args, "feature")?);
+      let env = arg(args, "env").map(|e| format!(" on environment {e}")).unwrap_or_default();
+      Ok(reply(
+        &format!("Write App Tests for {feature}"),
+        vec![text(
+          "user",
+          format!(
+            "Write App Tests for: {feature}{env}. Steps:
+             1. Inspect the mashup first with the twx tools (twx_list_entities for Mashups, twx_export_entity for its              widgets, bindings and services) so the names, labels and data you test are real.
+             2. apptests_suites_list: use the suite \"{suite}\" if it exists, else create it with apptests_suite_save (set env).
+             3. Add cases with apptests_cases_add. One behaviour per case; the first step opens the mashup by name or URL              path; put test data in the step text; every step's Expected is concrete and checkable (visible text, row              count, a field's value, button enabled/disabled, no error toast), never \"verify it works\". Cover the happy              path, an empty or no-match result, and one invalid input.
+             4. Do not run them unless asked; running needs a saved ThingWorx login, which the user creates on the App              Tests page. Summarise the cases you added."
+          ),
+        )],
+      ))
+    }
     other => Err(CoreError::Invalid(format!("Unknown prompt: {other}"))),
   }
 }
@@ -167,7 +189,7 @@ mod tests {
   fn lists_every_prompt_with_arguments() {
     let v = list();
     let names: Vec<&str> = v["prompts"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["review-service", "debug-service", "deploy-checklist", "explain-entity"]);
+    assert_eq!(names, ["review-service", "debug-service", "deploy-checklist", "explain-entity", "write_app_tests"]);
     assert_eq!(v["prompts"][1]["arguments"].as_array().unwrap().len(), 5);
   }
 

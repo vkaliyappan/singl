@@ -52,6 +52,14 @@ pub fn run() {
       state.assistant.set_sink(std::sync::Arc::new(move |event| {
         let _ = handle.emit("assistant://event", event);
       }));
+      // App Tests: lets assistant tools start runs and tell the page what they changed.
+      let handle = app.handle().clone();
+      singl_core::uitest::runner::set_host(
+        state.db_path.parent().map(std::path::PathBuf::from).unwrap_or_default(),
+        std::sync::Arc::new(move |event: &str, payload| {
+          let _ = handle.emit(event, payload);
+        }),
+      );
       let (assistant, discovery) =
         (state.assistant.clone(), singl_core::assistant::mcp::discovery_path(&state.db_path));
       tauri::async_runtime::spawn(async move {
@@ -163,6 +171,7 @@ pub fn run() {
       commands::agents::agent_anthropic_models,
       commands::assistant::assistant_send,
       commands::assistant::assistant_cancel,
+      commands::assistant::assistant_stop_sub_agent,
       commands::assistant::assistant_steer,
       commands::assistant::assistant_entity_undo,
       commands::assistant::assistant_chat_running,
@@ -203,6 +212,7 @@ pub fn run() {
       commands::assistant::assistant_mcp_call_log_clear,
       commands::assistant::assistant_usage_chat,
       commands::assistant::assistant_usage_summary,
+      commands::assistant::assistant_usage_calls,
       commands::settings::settings_get,
       commands::settings::settings_azure_pat_set,
       commands::settings::settings_compare_paths_set,
@@ -246,6 +256,23 @@ pub fn run() {
       commands::automation::automation_schedule_enable,
       commands::automation::automation_schedule_delete,
       commands::automation::automation_schedule_run,
+      commands::uitest::uitest_suites_list,
+      commands::uitest::uitest_suite_get,
+      commands::uitest::uitest_suite_save,
+      commands::uitest::uitest_suite_delete,
+      commands::uitest::uitest_cases_save,
+      commands::uitest::uitest_import_csv,
+      commands::uitest::uitest_export_csv,
+      commands::uitest::uitest_session_status,
+      commands::uitest::uitest_session_login_start,
+      commands::uitest::uitest_session_login_finish,
+      commands::uitest::uitest_session_login_cancel,
+      commands::uitest::uitest_session_check,
+      commands::uitest::uitest_session_clear,
+      commands::uitest::uitest_run,
+      commands::uitest::uitest_run_cancel,
+      commands::uitest::uitest_run_active,
+      commands::uitest::uitest_report_generate,
     ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")

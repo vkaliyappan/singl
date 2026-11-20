@@ -24,6 +24,9 @@
     "notification:default",
     "dialog:allow-open",
     "dialog:allow-save",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
     "autostart:default"
   ]
 }

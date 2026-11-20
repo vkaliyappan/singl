@@ -26,7 +26,7 @@ pub fn convert_messages(system: &str, messages: &[Message]) -> Vec<Value> {
         // Tool messages must directly follow the assistant's tool_calls, so
         // they go before any text the user added.
         for b in &m.blocks {
-          if let Block::ToolResult { tool_use_id, content, is_error } = b {
+          if let Block::ToolResult { tool_use_id, content, is_error, .. } = b {
             let content = if *is_error { format!("Error: {content}") } else { content.clone() };
             out.push(json!({"role": "tool", "tool_call_id": tool_use_id, "content": content}));
           }
@@ -261,8 +261,8 @@ mod tests {
           Role::User,
           vec![
             Block::Text { text: "also".into() },
-            Block::ToolResult { tool_use_id: "a".into(), content: "files".into(), is_error: false },
-            Block::ToolResult { tool_use_id: "b".into(), content: "nope".into(), is_error: true },
+            Block::ToolResult { tool_use_id: "a".into(), content: "files".into(), is_error: false, display: None },
+            Block::ToolResult { tool_use_id: "b".into(), content: "nope".into(), is_error: true, display: None },
           ],
         ),
         msg(Role::Assistant, vec![Block::ToolUse { id: "c".into(), name: "x".into(), input: json!({}) }]),
