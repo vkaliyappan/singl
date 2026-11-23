@@ -53,9 +53,14 @@ target/
 # local agent/MCP configs (contain API keys)
 .mcp.json
 .vscode/mcp.json
-.agents/mcp_config.json
-.codex/config.toml
-.claude/settings.local.json
+
+# AI agent folders
+/.agent/
+/.agents/
+/.claude/
+/.codex/
+/.github/
+/.impeccable/
 
 # Playwright MCP snapshots
 /.playwright-mcp/
