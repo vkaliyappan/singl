@@ -83,7 +83,7 @@ export function TeamsPresenceKeeper() {
     <div
       className={cn(
         "flex items-center justify-between gap-4 rounded-xl border bg-card/80 px-4 py-2.5 backdrop-blur-xs transition-all shadow-xs shrink-0",
-        running ? "border-emerald-500/30 bg-gradient-to-r from-card via-emerald-500/5 to-card" : "border-border"
+        running ? "border-success/30 bg-success/5" : "border-border"
       )}
     >
       <div className="flex items-center gap-3.5 min-w-0">
@@ -107,8 +107,8 @@ export function TeamsPresenceKeeper() {
             ) : unsupported ? (
               <Badge variant="outline" className="text-[11px] px-2 py-0.5 font-medium">Windows only</Badge>
             ) : running ? (
-              <Badge className="gap-1.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[11px] px-2 py-0.5 font-semibold">
-                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse ring-2 ring-emerald-500/30" />
+              <Badge className="gap-1.5 bg-success/15 text-success border-success/20 text-[11px] px-2 py-0.5 font-semibold">
+                <span className="size-1.5 rounded-full bg-success animate-pulse" />
                 Active
               </Badge>
             ) : (

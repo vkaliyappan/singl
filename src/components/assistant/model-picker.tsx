@@ -101,7 +101,7 @@ export function ProviderIcon({
   switch (provider) {
     case "anthropic":
     case "claude":
-      return <IconAsterisk className={cn(cls, "text-orange-500")} />;
+      return <IconAsterisk className={cn(cls, "text-warning")} />;
     case "codex":
       return <IconBrandOpenai className={cls} />;
     case "openrouter":
@@ -109,7 +109,7 @@ export function ProviderIcon({
     case "copilot":
       return <IconBrandGithubCopilot className={cls} />;
     case "antigravity":
-      return <IconRocket className={cn(cls, "text-sky-500")} />;
+      return <IconRocket className={cn(cls, "text-info")} />;
     default:
       return <IconAsterisk className={cls} />;
   }
@@ -255,7 +255,7 @@ export function ModelPicker({
         )}
         {current && !current.available && (
           <span
-            className="size-1.5 shrink-0 rounded-full bg-amber-500"
+            className="size-1.5 shrink-0 rounded-full bg-warning"
             aria-hidden
           />
         )}
@@ -309,7 +309,7 @@ export function ModelPicker({
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1 p-1">
           {browsing && !browsing.available && (
-            <p className="m-1 rounded-md bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-300">
+            <p className="m-1 rounded-md bg-warning/10 p-2 text-[11px] text-warning">
               {browsing.note ?? "Not available."}
             </p>
           )}

@@ -58,9 +58,9 @@ export function isVtq(rows: PropRow[]): boolean {
 
 function qualityClass(q: string): string {
   const u = q.toUpperCase();
-  if (u === "GOOD") return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
-  if (u === "BAD") return "bg-red-500/15 text-red-700 dark:text-red-300";
-  return "bg-amber-500/15 text-amber-700 dark:text-amber-300";
+  if (u === "GOOD") return "bg-success/15 text-success";
+  if (u === "BAD") return "bg-destructive/15 text-destructive";
+  return "bg-warning/15 text-warning";
 }
 
 function ValueCell({ value }: { value: unknown }) {
@@ -134,7 +134,7 @@ export function PropertyPanel({ value }: { value: unknown }) {
           const stale = !Number.isNaN(ms) && now - ms > STALE_MS;
           return (
             <span
-              className={cn("whitespace-nowrap", stale ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}
+              className={cn("whitespace-nowrap", stale ? "text-warning" : "text-muted-foreground")}
               title={r.time !== undefined ? `${absTime(r.time)}${stale ? " (stale: older than 24h)" : ""}` : undefined}
             >
               {relTime(r.time)}
@@ -157,7 +157,7 @@ export function PropertyPanel({ value }: { value: unknown }) {
       pageSize={50}
       maxHeight={352}
       csvName="properties"
-      rowClassName={(r) => (r.quality?.toUpperCase() === "BAD" ? "bg-red-500/5" : undefined)}
+      rowClassName={(r) => (r.quality?.toUpperCase() === "BAD" ? "bg-destructive/5" : undefined)}
     />
   );
 }

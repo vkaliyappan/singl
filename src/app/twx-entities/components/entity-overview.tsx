@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { Spinner } from "@/components/ui/spinner";
 import { addPins, usePinnables, type NewPin, type Pinnable } from "@/lib/assistant/pins";
 import { setDragPins } from "@/lib/assistant/drag";
 import { PIN_LIMIT, clipJson, clipText } from "@/lib/assistant/pin-utils";
@@ -49,7 +50,8 @@ import {
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-36 text-muted-foreground text-xs font-mono">
+    <div className="flex items-center justify-center gap-2 h-36 text-muted-foreground text-xs font-mono">
+      <Spinner className="size-3.5" />
       Loading code editor…
     </div>
   ),
@@ -396,7 +398,7 @@ export function EntityOverview({
                   title="Copy Entity Name"
                 >
                   {copiedField === "Entity Name" ? (
-                    <IconCheck className="size-3 text-emerald-500" />
+                    <IconCheck className="size-3 text-success" />
                   ) : (
                     <IconCopy className="size-3" />
                   )}
@@ -565,26 +567,32 @@ export function EntityOverview({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div
               onClick={() => setActiveTab("services")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveTab("services"); } }}
               className="flex items-center gap-3 p-4 rounded-xl border bg-card/60 hover:bg-accent/40 cursor-pointer transition-colors"
             >
               <div className="flex size-10 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
                 <IconBolt className="size-5" />
               </div>
               <div>
-                <div className="text-2xl font-bold font-mono">{entity.services.length}</div>
+                <div className="text-2xl font-bold font-mono tabular">{entity.services.length}</div>
                 <div className="text-xs text-muted-foreground">Services Defined</div>
               </div>
             </div>
 
             <div
               onClick={() => setActiveTab("properties")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveTab("properties"); } }}
               className="flex items-center gap-3 p-4 rounded-xl border bg-card/60 hover:bg-accent/40 cursor-pointer transition-colors"
             >
               <div className="flex size-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
                 <IconAdjustmentsHorizontal className="size-5" />
               </div>
               <div>
-                <div className="text-2xl font-bold font-mono">{entity.properties.length}</div>
+                <div className="text-2xl font-bold font-mono tabular">{entity.properties.length}</div>
                 <div className="text-xs text-muted-foreground">
                   {entity.entityType.toLowerCase() === "datashape" ? "DataShape Fields" : "Properties"}
                 </div>
@@ -596,7 +604,7 @@ export function EntityOverview({
                 <IconLayersLinked className="size-5" />
               </div>
               <div>
-                <div className="text-2xl font-bold font-mono">{entity.implementedShapes.length}</div>
+                <div className="text-2xl font-bold font-mono tabular">{entity.implementedShapes.length}</div>
                 <div className="text-xs text-muted-foreground">ThingShapes</div>
               </div>
             </div>
@@ -606,7 +614,7 @@ export function EntityOverview({
                 <IconDatabase className="size-5" />
               </div>
               <div>
-                <div className="text-2xl font-bold font-mono">{entity.configurationTables.length}</div>
+                <div className="text-2xl font-bold font-mono tabular">{entity.configurationTables.length}</div>
                 <div className="text-xs text-muted-foreground">Config Tables</div>
               </div>
             </div>
@@ -776,7 +784,7 @@ export function EntityOverview({
                             {s.name}
                           </span>
                           {s.script && (
-                            <Badge variant="outline" className="text-[9px] px-1 py-0 bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 bg-info/10 text-info border-info/20">
                               JS
                             </Badge>
                           )}
@@ -848,7 +856,7 @@ export function EntityOverview({
                           className="h-7 text-xs gap-1"
                         >
                           {copiedField === `${selectedService.name} Code` ? (
-                            <IconCheck className="size-3 text-emerald-500" />
+                            <IconCheck className="size-3 text-success" />
                           ) : (
                             <IconCopy className="size-3" />
                           )}
@@ -888,7 +896,7 @@ export function EntityOverview({
                                 {p.name}
                               </span>
                               {p.isRequired && (
-                                <Badge variant="destructive" className="text-[9px] px-1 py-0 h-3.5">
+                                <Badge variant="destructive" className="text-[10px] px-1 py-0 h-3.5">
                                   required
                                 </Badge>
                               )}

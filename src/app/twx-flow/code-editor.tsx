@@ -133,7 +133,7 @@ export function CodeEditor({
               key={h.snippet}
               type="button"
               onClick={() => insert(h.snippet)}
-              className="flex items-baseline gap-2 rounded px-1 py-0.5 text-left hover:bg-accent"
+              className="flex items-baseline gap-2 rounded px-1 py-0.5 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
             >
               <code className="shrink-0 font-mono text-[10px]">{h.snippet}</code>
               <span className="truncate text-[10px] text-muted-foreground">{h.hint}</span>

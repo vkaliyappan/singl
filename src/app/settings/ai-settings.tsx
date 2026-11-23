@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Card,
   CardContent,
@@ -159,8 +160,7 @@ function KeyRow({
       />
       {has && (
         <Badge
-          variant="secondary"
-          className="h-4 border-green-500/20 bg-green-500/10 py-0 text-[9px] font-normal text-green-600 dark:text-green-400"
+          variant="success" className="h-4 py-0 text-[10px] font-normal"
         >
           Saved
         </Badge>
@@ -392,10 +392,10 @@ function ServerDialog({
 
 const STATE_CLS: Record<string, string> = {
   running:
-    "border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400",
+    "border-success/20 bg-success/10 text-success",
   starting:
-    "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  error: "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400",
+    "border-warning/20 bg-warning/10 text-warning",
+  error: "border-destructive/20 bg-destructive/10 text-destructive",
 };
 
 export function AiSettings() {
@@ -499,7 +499,13 @@ export function AiSettings() {
 
   if (!s)
     return (
-      <p className="text-xs text-muted-foreground">{error || "Loading…"}</p>
+      error ? (
+        <p className="text-xs text-destructive">{error}</p>
+      ) : (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Spinner className="size-3.5" /> Loading…
+        </p>
+      )
     );
 
   /** Restarts `name` and starts every other enabled server that is not running. */
@@ -761,7 +767,7 @@ export function AiSettings() {
             </div>
           ))}
           {s.externalMcpServerMode === "auto" && (
-            <p className="text-red-600 dark:text-red-400">
+            <p className="text-destructive">
               Outside clients can run services, flows and uploads on ThingWorx
               without asking.
             </p>
@@ -871,7 +877,7 @@ export function AiSettings() {
                   <IconCopy />
                 </Button>
               </div>
-              <pre className="selectable max-h-48 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-[10.5px]">
+              <pre className="selectable max-h-48 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-[11px]">
                 {showToken
                   ? mcp.configSnippet
                   : mcp.configSnippet.replaceAll(mcp.token, "••••••••")}
@@ -889,7 +895,7 @@ export function AiSettings() {
                   <IconCopy />
                 </Button>
               </div>
-              <pre className="selectable overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-[10.5px] whitespace-pre-wrap">
+              <pre className="selectable overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-[11px] whitespace-pre-wrap">
                 {showToken
                   ? mcp.claudeCommand
                   : mcp.claudeCommand.replaceAll(mcp.token, "••••••••")}
@@ -999,13 +1005,13 @@ export function AiSettings() {
                       <span className="text-xs font-medium">{st.name}</span>
                       <Badge
                         variant="outline"
-                        className="h-4 py-0 text-[9px] font-normal"
+                        className="h-4 py-0 text-[10px] font-normal"
                       >
                         {st.source}
                       </Badge>
                       <Badge
                         variant="secondary"
-                        className={`h-4 gap-1 py-0 text-[9px] font-normal ${STATE_CLS[state] ?? ""}`}
+                        className={`h-4 gap-1 py-0 text-[10px] font-normal ${STATE_CLS[state] ?? ""}`}
                       >
                         {busy && <IconLoader2 className="size-2.5 animate-spin" />}
                         {busy ? "connecting…" : state}
@@ -1155,7 +1161,7 @@ export function AiSettings() {
           type="button"
           aria-expanded={toolsOpen}
           onClick={() => setToolsOpen((o) => !o)}
-          className="flex items-center gap-2 px-3.5 py-2.5 text-left"
+          className="flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-left focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
         >
           <IconChevronRight
             className={`size-3.5 transition-transform ${toolsOpen ? "rotate-90" : ""}`}

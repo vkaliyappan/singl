@@ -56,7 +56,7 @@ function HighlightedLine({
   return (
     <span>
       {before}
-      <mark className="bg-yellow-200 dark:bg-yellow-700/60 text-inherit rounded-[2px] px-px">
+      <mark className="bg-warning/30 text-inherit rounded-[2px] px-px">
         {match}
       </mark>
       {after}

@@ -1,0 +1,19 @@
+[package]
+name = "singl-scripts"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Developer and ops command-line tools (Rust ports of the old .mjs/.ts/.bat/.vbs scripts)"
+publish = false
+# The workspace root is src-tauri/, which is not an ancestor of this folder.
+workspace = "../src-tauri"
+
+[dependencies]
+regex = "1.13.1"
+serde_json = "1.0.154"
+singl-core = { path = "../src-tauri/crates/singl-core" }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time"] }
+zip = { version = "9.3.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

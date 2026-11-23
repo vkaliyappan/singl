@@ -103,7 +103,8 @@ import { onAssistantChange } from "@/lib/assistant/changes";
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full text-muted-foreground text-xs font-mono">
+    <div className="flex items-center justify-center gap-2 h-full text-muted-foreground text-xs font-mono">
+      <Spinner className="size-3.5" />
       Loading Monaco editor…
     </div>
   ),
@@ -1494,7 +1495,7 @@ export function TwxServicesExplorer({
             <span
               className={cn(
                 "size-2 rounded-full",
-                activeEnvRecord?.hasAppKey ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-amber-500"
+                activeEnvRecord?.hasAppKey ? "bg-success" : "bg-warning"
               )}
             />
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1954,7 +1955,7 @@ export function TwxServicesExplorer({
                                   <span className="font-mono text-xs truncate font-semibold">{d.name}</span>
                                   <Badge
                                     variant="outline"
-                                    className={cn("text-[9px] font-mono px-1 py-0 shrink-0", getBaseTypeBadgeColor(returnType))}
+                                    className={cn("text-[10px] font-mono px-1 py-0 shrink-0", getBaseTypeBadgeColor(returnType))}
                                   >
                                     {returnType}
                                   </Badge>
@@ -2087,7 +2088,7 @@ export function TwxServicesExplorer({
                             {preset.entityName} / {preset.serviceName}
                           </span>
                           {preset.outputType && (
-                            <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
+                            <Badge variant="outline" className="text-[10px] font-mono px-1 py-0">
                               {preset.outputType}
                             </Badge>
                           )}
@@ -2143,7 +2144,7 @@ export function TwxServicesExplorer({
                           <span className="font-mono text-xs font-semibold truncate">{item.serviceName}</span>
                           <Badge
                             variant={item.isError ? "destructive" : "default"}
-                            className="text-[9px] px-1 py-0 font-mono"
+                            className="text-[10px] px-1 py-0 font-mono"
                           >
                             {item.isError ? "Error" : formatDuration(item.durationMs)}
                           </Badge>
@@ -2186,11 +2187,11 @@ export function TwxServicesExplorer({
                 <EmptyContent>
                   <div className="grid grid-cols-2 gap-2 text-left w-full mt-2">
                     <div className="p-2.5 rounded-lg border bg-background text-[11px] flex flex-col gap-0.5">
-                      <span className="font-semibold">⚡ Fast Execution</span>
+                      <span className="font-semibold">Fast Execution</span>
                       <span className="text-muted-foreground">Run with <kbd className="font-mono text-[10px] px-1 py-0.5 bg-muted rounded">⌘↵</kbd></span>
                     </div>
                     <div className="p-2.5 rounded-lg border bg-background text-[11px] flex flex-col gap-0.5">
-                      <span className="font-semibold">📥 Insert Outputs</span>
+                      <span className="font-semibold">Insert Outputs</span>
                       <span className="text-muted-foreground">Pipe data across services</span>
                     </div>
                   </div>
@@ -2354,7 +2355,7 @@ export function TwxServicesExplorer({
                     </span>
 
                     {execResult !== null && (
-                      <Badge variant="default" className="bg-emerald-600 text-white font-mono text-[10px] px-1.5 py-0">
+                      <Badge variant="default" className="bg-success text-success-foreground font-mono text-[10px] px-1.5 py-0">
                         200 OK
                       </Badge>
                     )}
@@ -2411,7 +2412,7 @@ export function TwxServicesExplorer({
                             )
                           }
                         >
-                          <IconFileSpreadsheet className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                          <IconFileSpreadsheet className="size-3.5 text-success" />
                           <span className="hidden sm:inline">Export CSV</span>
                         </Button>
                       )}

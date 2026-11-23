@@ -84,8 +84,8 @@ import { onAssistantChange } from "@/lib/assistant/changes";
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-      Loading editor…
+    <div className="flex items-center justify-center gap-2 h-full text-muted-foreground text-xs">
+      <Spinner className="size-3.5" /> Loading editor…
     </div>
   ),
 });
@@ -670,7 +670,7 @@ export function RepoExplorer({
       {hasClone && (
         <>
           {/* Top Repository Bar */}
-          <div className="shrink-0 border-b bg-card/80 backdrop-blur px-3 py-1.5 flex items-center justify-between gap-3 select-none">
+          <div className="shrink-0 border-b bg-card px-3 py-1.5 flex items-center justify-between gap-3 select-none">
             {/* Left: Repo Identity & Branch Selector */}
             <div className="flex items-center gap-2.5 min-w-0">
               {/* Sidebar toggle */}
@@ -703,7 +703,7 @@ export function RepoExplorer({
                     className="p-1 rounded text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
                   >
                     {copiedCloneUrl ? (
-                      <IconCheck className="size-3 text-emerald-500" />
+                      <IconCheck className="size-3 text-success" />
                     ) : (
                       <IconCopy className="size-3" />
                     )}
@@ -732,7 +732,7 @@ export function RepoExplorer({
                             {b === currentBranch && (
                               <Badge
                                 variant="secondary"
-                                className="text-[9px] px-1 py-0 h-3.5 bg-primary/10 text-primary border-primary/20"
+                                className="text-[10px] px-1 py-0 h-3.5 bg-primary/10 text-primary border-primary/20"
                               >
                                 active
                               </Badge>
@@ -860,7 +860,7 @@ export function RepoExplorer({
                       size="sm"
                       variant="outline"
                       disabled={!!gitOp || clearStatus === "clearing"}
-                      className="h-7 text-xs gap-1 text-rose-600 dark:text-rose-400 hover:text-rose-600 border-rose-500/30 hover:bg-rose-500/10 shadow-2xs"
+                      className="h-7 text-xs gap-1 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10 shadow-2xs"
                     >
                       {clearStatus === "clearing" ? (
                         <Spinner className="size-3" />
@@ -1115,7 +1115,7 @@ export function RepoExplorer({
                                       className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
                                     >
                                       {copiedBreadcrumb ? (
-                                        <IconCheck className="size-3 text-emerald-500" />
+                                        <IconCheck className="size-3 text-success" />
                                       ) : (
                                         <IconCopy className="size-3" />
                                       )}
@@ -1194,7 +1194,7 @@ export function RepoExplorer({
                                           className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
                                         >
                                           {copiedContent ? (
-                                            <IconCheck className="size-3 text-emerald-500" />
+                                            <IconCheck className="size-3 text-success" />
                                           ) : (
                                             <IconCopy className="size-3.5" />
                                           )}

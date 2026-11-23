@@ -69,7 +69,7 @@ export function AppSidebar() {
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={`${collapsed ? "Expand" : "Collapse"} sidebar (Ctrl+B)`}
           onClick={toggleSidebar}
-          className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none"
+          className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring outline-none"
         >
           <ToggleIcon className="size-4 stroke-[1.75]" />
         </button>
@@ -80,7 +80,7 @@ export function AppSidebar() {
       <SidebarContent className="-mt-7 gap-3 pt-0 group-data-[collapsible=icon]:mt-0 group-data-[collapsible=icon]:pt-4">
         {navSections.map((section) => (
           <SidebarGroup key={section.title} className="p-0">
-            <SidebarGroupLabel className="h-6 px-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-muted-foreground/60 uppercase">
+            <SidebarGroupLabel className="h-6 px-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
               {section.title}
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -95,21 +95,12 @@ export function AppSidebar() {
                         isActive={active}
                         tooltip={item.title}
                         className={cn(
-                          "relative h-8 gap-2.5 rounded-lg px-2.5 text-[13px] font-normal transition-[background-color,color] duration-150",
+                          "h-8 gap-2.5 rounded-lg px-2.5 text-[13px] font-normal transition-[background-color,color] duration-150",
                           "text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                           "data-active:bg-primary/10 data-active:font-medium data-active:text-primary hover:data-active:bg-primary/12",
                           "dark:data-active:bg-sidebar-primary/15 dark:data-active:text-sidebar-accent-foreground"
                         )}
                       >
-                        {/* Accent rail on the active item; hidden in the collapsed icon rail */}
-                        <span
-                          aria-hidden
-                          className={cn(
-                            "absolute top-1/2 left-0 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-primary transition-opacity dark:bg-sidebar-primary",
-                            "group-data-[collapsible=icon]:hidden",
-                            active ? "opacity-100" : "opacity-0"
-                          )}
-                        />
                         <Icon
                           className={cn(
                             "size-4 stroke-[1.75] text-muted-foreground transition-colors group-hover/menu-button:text-foreground",
@@ -136,8 +127,8 @@ export function AppSidebar() {
       <SidebarFooter className="px-0 pb-2 group-data-[collapsible=icon]:hidden">
         <div className="flex items-center gap-2.5 rounded-lg bg-background/60 px-2.5 py-2 ring-1 ring-sidebar-border dark:bg-sidebar-accent">
           <span className="relative flex size-2">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/50 [animation-duration:2.5s]" />
-            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-success/50 [animation-duration:2.5s]" />
+            <span className="relative inline-flex size-2 rounded-full bg-success" />
           </span>
           <div className="flex min-w-0 flex-col leading-tight">
             <span className="text-[12px] font-medium text-foreground/90">Local workspace</span>

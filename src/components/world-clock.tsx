@@ -362,9 +362,9 @@ export function zoneClock(zone: string, date: Date): { hour: number; isWeekend: 
 }
 
 export function solarIcon(hour: number) {
-  if (hour >= 5 && hour < 8) return { Icon: IconSunrise, className: "text-amber-500", label: "Dawn" }
-  if (hour >= 8 && hour < 17) return { Icon: IconSun, className: "text-amber-500", label: "Day" }
-  if (hour >= 17 && hour < 20) return { Icon: IconSunset, className: "text-rose-500", label: "Dusk" }
+  if (hour >= 5 && hour < 8) return { Icon: IconSunrise, className: "text-warning", label: "Dawn" }
+  if (hour >= 8 && hour < 17) return { Icon: IconSun, className: "text-warning", label: "Day" }
+  if (hour >= 17 && hour < 20) return { Icon: IconSunset, className: "text-destructive", label: "Dusk" }
   return { Icon: IconMoon, className: "text-indigo-400", label: "Night" }
 }
 
@@ -383,8 +383,8 @@ function bandAt(zoneMinute: number): Band {
 const BAND_EDGES = [7, 9, 18, 22]
 
 const BAND_CLASS: Record<Band, string> = {
-  work: "bg-emerald-500/75 dark:bg-emerald-400/60",
-  edge: "bg-amber-400/45 dark:bg-amber-300/45",
+  work: "bg-success/70",
+  edge: "bg-warning/40",
   night: "",
 }
 
@@ -522,7 +522,7 @@ function ClockRow({
                 className="h-6 w-32 rounded-md border bg-background px-1.5 text-sm font-medium focus:ring-1 focus:ring-primary focus:outline-none"
               />
               <Button size="icon-xs" variant="ghost" onClick={() => saveLabel(index)} aria-label="Save label">
-                <IconCheck className="text-emerald-500" />
+                <IconCheck className="text-success" />
               </Button>
             </div>
           ) : (
@@ -1020,7 +1020,7 @@ export function WorldClock() {
               title="Drag a bar or use the arrow keys to look at another time"
             >
               <span
-                className={cn("size-1.5 shrink-0 rounded-full", scrubbing ? "bg-primary" : "bg-emerald-500")}
+                className={cn("size-1.5 shrink-0 rounded-full", scrubbing ? "bg-primary" : "bg-success")}
                 aria-hidden
               />
               <span className={cn("truncate", scrubbing && "font-medium text-foreground")}>{scrubLabel}</span>

@@ -143,7 +143,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
 
 function GroupLabel({ children, count }: { children: string; count?: number }) {
   return (
-    <div className="bg-background/90 sticky top-0 z-10 flex items-center gap-2 px-2 py-1.5 backdrop-blur-sm">
+    <div className="bg-background/95 sticky top-0 z-10 flex items-center gap-2 px-2 py-1.5">
       <span className="text-muted-foreground text-[9px] font-medium tracking-wider uppercase">
         {children}
       </span>
@@ -489,7 +489,7 @@ export function NodePalette({
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div
-        className="bg-background/50 flex-1 backdrop-blur-[1px]"
+        className="bg-background/50 flex-1"
         onClick={() => onOpenChange(false)}
         role="presentation"
       />
@@ -534,7 +534,7 @@ export function NodePalette({
             <p className="truncate text-sm font-semibold">
               {entityName || group?.title || "What happens next?"}
             </p>
-            <p className="text-muted-foreground truncate text-[11px]">
+            <p className="text-muted-foreground truncate text-xs">
               {level === "services"
                 ? `${collection} · pick a service`
                 : level === "entities"
@@ -735,7 +735,7 @@ export function NodePalette({
                       </Badge>
                     </span>
                     {s.description && (
-                      <span className="text-muted-foreground line-clamp-2 text-[11px]">
+                      <span className="text-muted-foreground line-clamp-2 text-xs">
                         {s.description}
                       </span>
                     )}

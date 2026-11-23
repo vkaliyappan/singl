@@ -30,8 +30,8 @@ function Access({ permitted }: { permitted: boolean }) {
       variant="outline"
       className={cn(
         permitted
-          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-          : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+          ? "border-success/30 bg-success/10 text-success"
+          : "border-destructive/30 bg-destructive/10 text-destructive",
       )}
     >
       {permitted ? <IconCheck /> : <IconX />}
@@ -109,13 +109,13 @@ function Verdict({ d }: { d: PermissionDecision }) {
     <div
       className={cn(
         "flex flex-col gap-2 rounded-xl border p-4",
-        d.allowed ? "border-emerald-500/30 bg-emerald-500/10" : "border-red-500/30 bg-red-500/10",
+        d.allowed ? "border-success/30 bg-success/10" : "border-destructive/30 bg-destructive/10",
       )}
     >
       <div
         className={cn(
           "flex items-center gap-2 text-base font-semibold",
-          d.allowed ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400",
+          d.allowed ? "text-success" : "text-destructive",
         )}
       >
         {d.allowed ? <IconShieldCheck className="size-5" /> : <IconX className="size-5" />}
@@ -319,7 +319,7 @@ export function PermissionsTab({ env }: { env: string }) {
       </form>
 
       {error && (
-        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-700 dark:text-red-400">{error}</p>
+        <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive">{error}</p>
       )}
 
       {perms && (
@@ -363,7 +363,7 @@ export function PermissionsTab({ env }: { env: string }) {
                 Check
               </Button>
             </form>
-            {checkError && <p className="text-xs text-red-700 dark:text-red-400">{checkError}</p>}
+            {checkError && <p className="text-xs text-destructive">{checkError}</p>}
             {decision && <Verdict d={decision} />}
           </div>
 

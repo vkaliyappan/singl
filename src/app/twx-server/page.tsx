@@ -86,7 +86,7 @@ function TwxServer() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6 lg:p-8">
+    <div className="flex flex-col gap-5 p-8">
       <PageHeader
         title="ThingWorx server"
         description="Health, subscriptions, schedulers, streams and data tables of one environment."

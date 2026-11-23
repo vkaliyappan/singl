@@ -38,8 +38,8 @@ const MonacoDiffEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        Loading diff editor…
+      <div className="flex items-center justify-center gap-2 h-full text-muted-foreground text-xs">
+        <Spinner className="size-3.5" /> Loading diff editor…
       </div>
     ),
   }
@@ -47,9 +47,9 @@ const MonacoDiffEditor = dynamic(
 
 function StatusBadge({ status }: { status: ChangedFile["status"] }) {
   const map: Record<ChangedFile["status"], { label: string; title: string; className: string }> = {
-    M: { label: "M", title: "Modified", className: "text-amber-500 dark:text-amber-400 bg-amber-500/10 border-amber-500/30" },
-    A: { label: "A", title: "Added", className: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-    D: { label: "D", title: "Deleted", className: "text-rose-500 dark:text-rose-400 bg-rose-500/10 border-rose-500/30" },
+    M: { label: "M", title: "Modified", className: "text-warning bg-warning/10 border-warning/30" },
+    A: { label: "A", title: "Added", className: "text-success bg-success/10 border-success/30" },
+    D: { label: "D", title: "Deleted", className: "text-destructive bg-destructive/10 border-destructive/30" },
     "?": { label: "?", title: "Untracked", className: "text-muted-foreground bg-muted border-border" },
   };
   const { label, title, className } = map[status];
@@ -260,20 +260,20 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
         {status.files.length > 0 && (
           <div className="shrink-0 px-3 py-1.5 border-b bg-muted/20 flex flex-wrap items-center gap-1.5 text-[11px]">
             {modifiedCount > 0 && (
-              <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
-                <span className="size-1.5 rounded-full bg-amber-500" />
+              <span className="inline-flex items-center gap-1 text-warning font-medium">
+                <span className="size-1.5 rounded-full bg-warning" />
                 {modifiedCount} modified
               </span>
             )}
             {addedCount > 0 && (
-              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                <span className="size-1.5 rounded-full bg-emerald-500" />
+              <span className="inline-flex items-center gap-1 text-success font-medium">
+                <span className="size-1.5 rounded-full bg-success" />
                 {addedCount} added
               </span>
             )}
             {deletedCount > 0 && (
-              <span className="inline-flex items-center gap-1 text-rose-500 dark:text-rose-400 font-medium">
-                <span className="size-1.5 rounded-full bg-rose-500" />
+              <span className="inline-flex items-center gap-1 text-destructive font-medium">
+                <span className="size-1.5 rounded-full bg-destructive" />
                 {deletedCount} deleted
               </span>
             )}
@@ -328,8 +328,8 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
                     className={cn(
                       "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors cursor-pointer group",
                       isSelected
-                        ? "bg-primary/10 text-primary font-medium border-l-2 border-l-primary"
-                        : "hover:bg-accent/40 text-foreground border-l-2 border-l-transparent"
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "hover:bg-accent/40 text-foreground"
                     )}
                   >
                     <StatusBadge status={f.status} />
@@ -396,7 +396,7 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
                     onClick={handleCopyPath}
                     className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {copiedPath ? <IconCheck className="size-3 text-emerald-500" /> : <IconCopy className="size-3" />}
+                    {copiedPath ? <IconCheck className="size-3 text-success" /> : <IconCopy className="size-3" />}
                   </TooltipTrigger>
                   <TooltipContent side="bottom">Copy file path</TooltipContent>
                 </Tooltip>
@@ -442,7 +442,7 @@ export function ChangesPanel({ slot, refreshTrigger }: { slot: RepoSlot; refresh
             {/* Diff Content */}
             {!diffContent.hasTextualChanges ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground p-6">
-                <IconInfoCircle className="size-8 opacity-40 text-amber-500" />
+                <IconInfoCircle className="size-8 opacity-40 text-warning" />
                 <p className="text-xs font-semibold text-foreground">No textual content diff</p>
                 <p className="text-[11px] text-muted-foreground/80 text-center max-w-sm leading-relaxed">
                   The file differs only in file modes or line endings (CRLF vs LF).

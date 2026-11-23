@@ -442,10 +442,10 @@ export const Markdown = memo(function Markdown({
 export function RiskBadge({ risk }: { risk: Risk }) {
   const cls =
     risk === "destructive"
-      ? "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400"
+      ? "border-destructive/20 bg-destructive/10 text-destructive"
       : risk === "write"
-        ? "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-        : "border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400";
+        ? "border-warning/20 bg-warning/10 text-warning"
+        : "border-success/20 bg-success/10 text-success";
   return (
     <Badge
       variant="secondary"
@@ -925,10 +925,10 @@ export function ApprovalCard({
     <div
       role="group"
       aria-label={`Approval needed for ${approval.tool}`}
-      className="my-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
+      className="my-1.5 rounded-md border border-warning/40 bg-warning/5 p-2 text-xs"
     >
       <div className="mb-1.5 flex items-center gap-1.5">
-        <IconAlertTriangle className="size-3.5 text-amber-600 dark:text-amber-400" />
+        <IconAlertTriangle className="size-3.5 text-warning" />
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium">
           {approval.tool}
         </span>

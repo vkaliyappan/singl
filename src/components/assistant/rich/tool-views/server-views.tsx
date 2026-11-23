@@ -34,10 +34,10 @@ function Grid<T>({ id, columns, rows, maxHeight = 340 }: { id: string; columns: 
 
 function Pill({ tone, children }: { tone: "ok" | "bad" | "warn" | "info" | "muted"; children: ReactNode }) {
   const t = {
-    ok: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-    bad: "bg-red-500/15 text-red-700 dark:text-red-300",
-    warn: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-    info: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    ok: "bg-success/15 text-success",
+    bad: "bg-destructive/15 text-destructive",
+    warn: "bg-warning/15 text-warning",
+    info: "bg-info/15 text-info",
     muted: "bg-muted text-muted-foreground",
   }[tone];
   return <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-[10px] font-semibold whitespace-nowrap", t)}>{children}</span>;
@@ -177,7 +177,7 @@ export function SchedulersView({ rows }: { rows: Row[] }) {
 // ---- health ----
 
 function Tile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "ok" | "bad" | "warn" }) {
-  const border = tone === "bad" ? "border-red-500/50 bg-red-500/5" : tone === "warn" ? "border-amber-500/50 bg-amber-500/5" : tone === "ok" ? "border-emerald-500/40 bg-emerald-500/5" : "bg-background/50";
+  const border = tone === "bad" ? "border-destructive/50 bg-destructive/5" : tone === "warn" ? "border-warning/50 bg-warning/5" : tone === "ok" ? "border-success/40 bg-success/5" : "bg-background/50";
   return (
     <div className={cn("min-w-0 rounded-md border px-2.5 py-1.5", border)}>
       <div className="text-[10.5px] text-muted-foreground">{label}</div>
@@ -218,12 +218,12 @@ export function HealthView({ ping, health }: { ping: Row; health: Row }) {
         <Tile label="License" value={typeof p.licenseDaysLeft === "number" ? `${p.licenseDaysLeft} days left` : "-"} sub={p.licenseEvaluation ? "evaluation" : undefined} />
       </div>
       {typeof ping.error === "string" && ping.error && <p className="text-xs text-destructive">{ping.error}</p>}
-      {errors.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-300">{errors.join("; ")}</p>}
+      {errors.length > 0 && <p className="text-xs text-warning">{errors.join("; ")}</p>}
       {subs.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {subs.map((s) => (
             <span key={str(s.name)} title={str(s.description)} className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px]">
-              <span className={cn("size-1.5 rounded-full", s.running ? "bg-emerald-500" : "bg-red-500")} />
+              <span className={cn("size-1.5 rounded-full", s.running ? "bg-success" : "bg-destructive")} />
               {str(s.name)}
             </span>
           ))}
@@ -268,8 +268,8 @@ export function VerdictView({ value }: { value: Row }) {
   const allowed = value.allowed === true;
   const groups = Array.isArray(value.userGroups) ? value.userGroups.map(str) : [];
   return (
-    <div className={cn("my-1 flex flex-col gap-1 rounded-md border p-2.5", allowed ? "border-emerald-500/30 bg-emerald-500/10" : "border-red-500/30 bg-red-500/10")}>
-      <div className={cn("flex items-center gap-1.5 text-sm font-semibold", allowed ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400")}>
+    <div className={cn("my-1 flex flex-col gap-1 rounded-md border p-2.5", allowed ? "border-success/30 bg-success/10" : "border-destructive/30 bg-destructive/10")}>
+      <div className={cn("flex items-center gap-1.5 text-sm font-semibold", allowed ? "text-success" : "text-destructive")}>
         {allowed ? <IconShieldCheck className="size-4" /> : <IconX className="size-4" />}
         {allowed ? "Allowed" : "Denied"}
         <span className="text-xs font-normal text-muted-foreground">
@@ -456,7 +456,7 @@ export function SuiteRunView({ value }: { value: Row }) {
   const rows = rowsOf(value.results) ?? [];
   const failed = rows.filter((r) => !r.passed).length;
   const columns: GridColumn<Row>[] = [
-    { key: "passed", label: "Result", kind: "text", width: 80, value: (r) => (r.passed ? "Pass" : "Fail"), render: (r) => (r.passed ? <IconCheck className="size-4 text-emerald-600 dark:text-emerald-400" aria-label="passed" /> : <IconX className="size-4 text-red-600 dark:text-red-400" aria-label="failed" />) },
+    { key: "passed", label: "Result", kind: "text", width: 80, value: (r) => (r.passed ? "Pass" : "Fail"), render: (r) => (r.passed ? <IconCheck className="size-4 text-success" aria-label="passed" /> : <IconX className="size-4 text-destructive" aria-label="failed" />) },
     { key: "case", label: "Case", kind: "text", width: 220 },
     { key: "env", label: "Env", kind: "text", width: 100 },
     { key: "durationMs", label: "Time", kind: "number", width: 80, render: (r) => (typeof r.durationMs === "number" ? (r.durationMs < 1000 ? `${r.durationMs} ms` : `${(r.durationMs / 1000).toFixed(1)} s`) : "") },
@@ -472,7 +472,7 @@ export function SuiteRunView({ value }: { value: Row }) {
   return (
     <>
       <Caption>
-        <span className={cn("font-medium", failed ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300")}>
+        <span className={cn("font-medium", failed ? "text-destructive" : "text-success")}>
           {num(value.passed)}/{num(value.total)} passed
         </span>
         {value.suite ? ` · ${str(value.suite)}` : ""}
@@ -494,9 +494,9 @@ export function DriftView({ value }: { value: Row }) {
     return { key, title, tone, count: Number(g.count) || 0, shown, truncated: g.truncated === true };
   };
   const groups = [
-    group("onlyInA", "Only in A", "text-amber-700 dark:text-amber-300"),
-    group("onlyInB", "Only in B", "text-amber-700 dark:text-amber-300"),
-    group("different", "Different", "text-red-700 dark:text-red-300"),
+    group("onlyInA", "Only in A", "text-warning"),
+    group("onlyInB", "Only in B", "text-warning"),
+    group("different", "Different", "text-destructive"),
   ];
   const stat = (label: string, n: unknown, tone = "") => (
     <div className="min-w-24 rounded-md border bg-background/50 px-2.5 py-1.5">
@@ -510,7 +510,7 @@ export function DriftView({ value }: { value: Row }) {
       <Caption>{str(value.summary)}</Caption>
       <div className="flex flex-wrap gap-1.5">
         {groups.map((g) => stat(g.title, g.count, g.tone))}
-        {stat("Same", value.same, "text-emerald-700 dark:text-emerald-300")}
+        {stat("Same", value.same, "text-success")}
         {Number(value.notCompared) > 0 && stat("Not compared", value.notCompared)}
       </div>
       {groups.map(
@@ -531,7 +531,7 @@ export function DriftView({ value }: { value: Row }) {
             </details>
           ),
       )}
-      {warnings.length > 0 && <p className="text-[11px] text-amber-700 dark:text-amber-300">{warnings.length} warnings, e.g. {warnings[0]}</p>}
+      {warnings.length > 0 && <p className="text-[11px] text-warning">{warnings.length} warnings, e.g. {warnings[0]}</p>}
     </div>
   );
 }

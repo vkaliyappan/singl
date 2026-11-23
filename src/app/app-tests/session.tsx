@@ -55,13 +55,13 @@ type SessionState = ReturnType<typeof useSession>
 function chipLook(status: UiSessionStatus | null): { label: string; tone: string; icon: React.ReactNode } {
   if (!status) return { label: "Session…", tone: "bg-muted text-muted-foreground", icon: <IconLock className="size-3" /> }
   if (status.loginOpen)
-    return { label: "Logging in", tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300", icon: <IconLockOpen className="size-3" /> }
+    return { label: "Logging in", tone: "bg-info/15 text-info", icon: <IconLockOpen className="size-3" /> }
   if (!status.exists)
-    return { label: "Log in", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300", icon: <IconAlertTriangle className="size-3" /> }
+    return { label: "Log in", tone: "bg-warning/15 text-warning", icon: <IconAlertTriangle className="size-3" /> }
   if (status.valid === false)
-    return { label: "Session expired", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300", icon: <IconAlertTriangle className="size-3" /> }
+    return { label: "Session expired", tone: "bg-warning/15 text-warning", icon: <IconAlertTriangle className="size-3" /> }
   if (status.valid)
-    return { label: "Session valid", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300", icon: <IconCircleCheck className="size-3" /> }
+    return { label: "Session valid", tone: "bg-success/15 text-success", icon: <IconCircleCheck className="size-3" /> }
   return { label: "Session saved", tone: "bg-muted text-foreground", icon: <IconLock className="size-3" /> }
 }
 

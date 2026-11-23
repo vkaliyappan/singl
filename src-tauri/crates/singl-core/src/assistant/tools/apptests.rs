@@ -434,6 +434,7 @@ pub fn tools() -> Vec<Tool> {
           "cases": { "type": "array", "items": { "type": "string" }, "description": "Case ids to run." },
           "scope": { "type": "string", "enum": ["all", "failed"], "description": "Used when `cases` is empty. Default all." },
           "mode": { "type": "string", "enum": ["headless", "headed"], "description": "Override for this run." },
+          "instructions": { "type": "string", "description": "Extra instructions for the test agent, added to every case of this run." },
         }),
         &["suite"],
       ),
@@ -453,7 +454,7 @@ pub fn tools() -> Vec<Tool> {
         let ids = run_targets(&cases, &x.strings("cases"), x.str("scope").unwrap_or("all"))?;
         let mode = x.str("mode").map(|m| mode_of(m, false)).transpose()?;
         let total = ids.as_ref().map_or(cases.len(), Vec::len);
-        let run_id = runner::start(&a, dir, emit, &s.id, ids, mode).await?;
+        let run_id = runner::start(&a, dir, emit, &s.id, ids, mode, x.str("instructions").unwrap_or_default().to_string()).await?;
         ser(&json!({ "runId": run_id, "suite": s.name, "cases": total, "next": "Poll apptests_run_status." }))
       },
     ),

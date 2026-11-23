@@ -23,6 +23,7 @@ import {
 } from "@/lib/ui-tests"
 import { ErrorNote } from "../automation/shared"
 import { CaseDetail } from "./case-detail"
+import { AgentPanel, runInstructions } from "./agent-panel"
 import { UiTestsGrid } from "./cases-grid"
 import { SuiteHeader, type RunState } from "./header"
 import { ReportDialog } from "./report-dialog"
@@ -434,7 +435,7 @@ export function AppTests({ envs }: { envs: string[] }) {
     else if (which === "failed") ids = fresh.filter((c) => c.status === "failed" || c.status === "error").map((c) => c.id)
     if (ids && ids.length === 0) return toast.error(which === "selected" ? "Select at least one case." : "No failed cases.")
     try {
-      const runId = await runUiTests(suite.id, ids, runMode || null)
+      const runId = await runUiTests(suite.id, ids, runMode || null, runInstructions(suite.id))
       setRun({ runId, suiteId: suite.id, index: 0, total: ids?.length ?? fresh.length })
     } catch (e) {
       fail(e)
@@ -576,12 +577,13 @@ export function AppTests({ envs }: { envs: string[] }) {
               hasRuns={history.length > 0}
               onOpenReport={() => setReport({ runId: null })}
             />
+            {saved && <AgentPanel key={suite.id} suiteId={suite.id} runningHere={runningHere} cases={cases} />}
             {saved && (
               <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b bg-muted/30 px-3 py-1.5 text-xs">
                 <span><b>{counts.total}</b> cases</span>
-                <span className="text-emerald-700 dark:text-emerald-300"><b>{counts.passed}</b> passed</span>
-                <span className="text-red-700 dark:text-red-300"><b>{counts.failed}</b> failed</span>
-                <span className="text-amber-700 dark:text-amber-300"><b>{counts.review}</b> needs review</span>
+                <span className="text-success"><b>{counts.passed}</b> passed</span>
+                <span className="text-destructive"><b>{counts.failed}</b> failed</span>
+                <span className="text-warning"><b>{counts.review}</b> needs review</span>
                 <span className="text-muted-foreground"><b>{counts.notRun}</b> not run</span>
                 <span className="ml-auto text-muted-foreground">Last run {formatMs(lastRun || null)}</span>
               </div>

@@ -70,7 +70,7 @@ export function SuiteHeader({
             type="button"
             onClick={onOpenSettings}
             title="Change environment"
-            className="inline-flex h-6 items-center gap-1 rounded-full bg-muted px-2.5 text-[11px] font-medium"
+            className="inline-flex h-6 items-center gap-1 rounded-full bg-muted px-2.5 text-[11px] font-medium hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
           >
             <IconServer className="size-3" /> {suite.envId}
           </button>
@@ -78,7 +78,7 @@ export function SuiteHeader({
           <button
             type="button"
             onClick={onOpenSettings}
-            className="inline-flex h-6 items-center gap-1 rounded-full bg-amber-500/15 px-2.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+            className="inline-flex h-6 items-center gap-1 rounded-full bg-warning/15 px-2.5 text-[11px] font-medium text-warning hover:bg-warning/25 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
           >
             <IconAlertTriangle className="size-3" /> Select an environment
           </button>
@@ -134,8 +134,8 @@ export function SuiteHeader({
           </span>
           {runningHere ? (
             <>
-              <span className="text-emerald-700 dark:text-emerald-300">{counts.passed} passed</span>
-              <span className="text-red-700 dark:text-red-300">{counts.failed} failed</span>
+              <span className="text-success">{counts.passed} passed</span>
+              <span className="text-destructive">{counts.failed} failed</span>
             </>
           ) : (
             <span className="text-muted-foreground">running another suite</span>

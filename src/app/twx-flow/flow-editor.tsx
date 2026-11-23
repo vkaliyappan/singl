@@ -1587,7 +1587,7 @@ export function FlowEditor({
                         className={cn(
                           active && "animate-[twx-dash_0.6s_linear_infinite] stroke-primary",
                           !active && isSelected && "stroke-primary",
-                          !active && !isSelected && carried && "stroke-emerald-500/70",
+                          !active && !isSelected && carried && "stroke-success/70",
                           !active && !isSelected && !carried && dropped && "stroke-muted-foreground/25",
                           !active && !isSelected && !carried && !dropped && "stroke-muted-foreground/50"
                         )}
@@ -1752,7 +1752,7 @@ export function FlowEditor({
             {/* Canvas controls, bottom-left like n8n */}
             <div
               data-canvas-ui
-              className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-lg border bg-background/90 p-1 shadow-sm backdrop-blur"
+              className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-lg border bg-background/95 p-1 shadow-sm"
             >
               <Button
                 variant="ghost"
@@ -1767,7 +1767,7 @@ export function FlowEditor({
                 type="button"
                 onClick={resetZoom}
                 title="Reset zoom to 100%"
-                className="w-11 rounded px-1 text-center text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="w-11 rounded px-1 text-center text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 {Math.round(camera.z * 100)}%
               </button>
@@ -1819,7 +1819,7 @@ export function FlowEditor({
             />
 
             {/* Legend */}
-            <div className="pointer-events-none absolute right-4 bottom-3 flex items-center gap-3 rounded-md border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur">
+            <div className="pointer-events-none absolute right-4 bottom-3 flex items-center gap-3 rounded-md border bg-background/95 px-2 py-1 text-[10px] text-muted-foreground">
               <span>Drag to select · Space/middle-drag to pan</span>
               <Badge variant="outline" className="text-[9px]">
                 {graph.nodes.length} nodes · {graph.edges.length} wires

@@ -159,10 +159,10 @@ export function DataTablesTab({ env }: { env: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3">
-        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Data table
           <NativeSelect value={table} onChange={(e) => setTable(e.target.value)}>
-            {!tables && <NativeSelectOption value="">Loading...</NativeSelectOption>}
+            {!tables && <NativeSelectOption value="">Loading…</NativeSelectOption>}
             {userTables.length > 0 && (
               <optgroup label="Data tables">
                 {userTables.map((t) => (
@@ -183,7 +183,7 @@ export function DataTablesTab({ env }: { env: string }) {
             )}
           </NativeSelect>
         </label>
-        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Search
           <Input
             className="w-56"
@@ -193,7 +193,7 @@ export function DataTablesTab({ env }: { env: string }) {
             onKeyDown={(e) => e.key === "Enter" && table && !loading && void run().catch(() => {})}
           />
         </label>
-        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Max items
           <Input className="w-24" type="number" min={1} max={5000} value={maxItems} onChange={(e) => setMaxItems(e.target.value)} />
         </label>
@@ -221,7 +221,7 @@ export function DataTablesTab({ env }: { env: string }) {
         </p>
       )}
 
-      {error && <p className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs">{error}</p>}
+      {error && <p className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-xs text-destructive">{error}</p>}
 
       {result && value && (
         <>

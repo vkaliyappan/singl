@@ -178,7 +178,7 @@ export function ExpressionField({
               onClick={() => onChange("")}
               aria-label="Clear"
               title="Clear"
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
             >
               <IconX className="size-3" />
             </button>
@@ -283,7 +283,7 @@ export function ExpressionField({
                 key={h.snippet}
                 type="button"
                 onClick={() => insert(h.snippet)}
-                className="flex items-baseline gap-2 rounded px-1 py-0.5 text-left hover:bg-accent"
+                className="flex items-baseline gap-2 rounded px-1 py-0.5 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 <code className="shrink-0 font-mono text-[10px]">{h.snippet}</code>
                 <span className="truncate text-[10px] text-muted-foreground">{h.hint}</span>
@@ -323,7 +323,7 @@ export function ExpressionField({
                 type="button"
                 onClick={() => setResultOpen((open) => !open)}
                 title={resultOpen ? "Show less" : "Show more"}
-                className="shrink-0 text-muted-foreground hover:text-foreground"
+                className="shrink-0 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 {resultOpen ? (
                   <IconChevronUp className="size-3" />

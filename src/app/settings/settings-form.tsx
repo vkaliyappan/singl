@@ -110,7 +110,7 @@ function SaveStatus({ state, saved }: { state: ActionState; saved: string }) {
   return (
     <div className="text-[10px]">
       {state.error && <span className="font-medium text-destructive">{state.error}</span>}
-      {state.success && <span className="font-medium text-green-600 dark:text-green-400">{state.info ?? saved}</span>}
+      {state.success && <span className="font-medium text-success">{state.info ?? saved}</span>}
     </div>
   )
 }
@@ -135,7 +135,7 @@ function SecretToggle({ shown, onToggle }: { shown: boolean; onToggle: () => voi
     <button
       type="button"
       onClick={onToggle}
-      className="inline-flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+      className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-[10px] text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
     >
       {shown ? <IconEyeOff className="size-3" /> : <IconEye className="size-3" />}
       {shown ? "Hide" : "Show"}
@@ -145,11 +145,11 @@ function SecretToggle({ shown, onToggle }: { shown: boolean; onToggle: () => voi
 
 function StatusBadge({ ok, okLabel, missingLabel }: { ok: boolean; okLabel: string; missingLabel: string }) {
   return ok ? (
-    <Badge variant="secondary" className="h-4 border-green-500/20 bg-green-500/10 py-0 text-[9px] font-normal text-green-600 dark:text-green-400">
+    <Badge variant="success" className="h-4 py-0 text-[10px] font-normal">
       {okLabel}
     </Badge>
   ) : (
-    <Badge variant="secondary" className="h-4 border-amber-500/20 bg-amber-500/10 py-0 text-[9px] font-normal text-amber-600 dark:text-amber-400">
+    <Badge variant="warning" className="h-4 py-0 text-[10px] font-normal">
       {missingLabel}
     </Badge>
   )
@@ -291,7 +291,7 @@ function EnvironmentsPanel({ settings, generation }: { settings: EnvSetting[]; g
                 aria-selected={active}
                 onClick={() => setSelected(s.environment)}
                 className={cn(
-                  "flex cursor-pointer flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                  "flex cursor-pointer flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                   active ? "border-primary/40 bg-primary/5 shadow-xs" : "border-transparent hover:bg-muted"
                 )}
               >
@@ -299,7 +299,7 @@ function EnvironmentsPanel({ settings, generation }: { settings: EnvSetting[]; g
                   <span
                     className={cn(
                       "size-1.5 shrink-0 rounded-full",
-                      !s.enabled ? "bg-muted-foreground/40" : s.hasAppKey ? "bg-green-500" : "bg-amber-500"
+                      !s.enabled ? "bg-muted-foreground/40" : s.hasAppKey ? "bg-success" : "bg-warning"
                     )}
                     title={!s.enabled ? "Disabled" : s.hasAppKey ? "App key configured" : "App key missing"}
                   />
@@ -452,7 +452,7 @@ function EnvironmentDetail({ setting, projectQuery }: { setting: EnvSetting; pro
           <span className="flex items-center gap-1.5 text-xs font-medium">
             <IconFolders className="size-3.5 text-muted-foreground" />
             Projects
-            <Badge variant="outline" className="h-4 py-0 text-[9px]">
+            <Badge variant="outline" className="h-4 py-0 text-[10px]">
               {pf ? `${projects.length} / ${setting.projects.length}` : setting.projects.length}
             </Badge>
           </span>
@@ -556,7 +556,7 @@ function ProjectRow({ project, onEdit }: { project: ProjectConfig; onEdit: () =>
   return (
     <tr className="group hover:bg-muted/30">
       <td className="px-3.5 py-1.5">
-        <button type="button" onClick={onEdit} className="cursor-pointer text-left font-semibold hover:text-primary">
+        <button type="button" onClick={onEdit} className="cursor-pointer rounded-sm text-left font-semibold hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none">
           {project.projectName}
         </button>
         {state.error && <p className="text-[10px] text-destructive">{state.error}</p>}
@@ -1270,7 +1270,7 @@ export function SettingsExplorer({
                 onClick={() => setSection(id)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+                  "flex shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                   active ? "bg-card font-medium text-foreground shadow-xs ring-1 ring-border" : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
@@ -1287,7 +1287,7 @@ export function SettingsExplorer({
         <section className="flex min-w-0 flex-col gap-4">
           <div className="flex items-end justify-between gap-4 border-b pb-3">
             <div className="flex flex-col gap-0.5">
-              <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{current.title}</h2>
+              <h2 className="text-base font-semibold tracking-tight">{current.title}</h2>
               <p className="text-xs text-muted-foreground">{current.description}</p>
             </div>
             {section === "environments" && settings.length > 0 && (
@@ -1308,7 +1308,7 @@ export function SettingsExplorer({
                   <p className="text-sm font-medium">No environments yet</p>
                   <p className="max-w-sm text-xs text-muted-foreground">
                     Add a ThingWorx environment, or import your singl-web settings from{" "}
-                    <button type="button" className="cursor-pointer underline underline-offset-2 hover:text-foreground" onClick={() => setSection("data")}>
+                    <button type="button" className="cursor-pointer rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none" onClick={() => setSection("data")}>
                       Data
                     </button>
                     .

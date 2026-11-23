@@ -18,7 +18,7 @@ function StatusIcon({ status }: { status: Step["status"] }) {
   const c = "size-3.5";
   switch (status) {
     case "done":
-      return <IconCheck className={cn(c, "text-emerald-600 dark:text-emerald-400")} />;
+      return <IconCheck className={cn(c, "text-success")} />;
     case "running":
       return <IconLoader2 className={cn(c, "animate-spin text-primary")} />;
     case "failed":

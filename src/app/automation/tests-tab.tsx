@@ -57,7 +57,7 @@ function ResultsGrid({ run }: { run: SuiteRun }) {
               {r.checks
                 .filter((k) => !k.passed)
                 .map((k, i) => (
-                  <p key={i} className="mt-1 max-w-xs break-words text-red-700 dark:text-red-300">
+                  <p key={i} className="mt-1 max-w-xs break-words text-destructive">
                     {k.label}: expected {k.expected}, got {k.actual}
                   </p>
                 ))}
@@ -245,7 +245,7 @@ export function TestsTab({ envs }: { envs: string[] }) {
             type="button"
             onClick={() => open(s)}
             className={cn(
-              "rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted",
+              "rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
               draft?.id === s.id && "bg-muted font-medium",
             )}
           >

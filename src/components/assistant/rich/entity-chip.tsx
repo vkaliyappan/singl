@@ -131,7 +131,7 @@ export function EntityChip({ href, children }: { href: string; children: ReactNo
         <span>{children}</span>
         {ref.service && (
           <>
-            <IconBolt className="size-3 shrink-0 text-amber-500" />
+            <IconBolt className="size-3 shrink-0 text-warning" />
             <span className="text-muted-foreground">{ref.service}</span>
           </>
         )}

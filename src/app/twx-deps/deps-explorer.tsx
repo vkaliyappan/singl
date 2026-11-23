@@ -76,7 +76,7 @@ function NodeTable({
         render: (r) => (
           <button
             type="button"
-            className="max-w-full truncate text-left font-medium hover:underline"
+            className="max-w-full truncate text-left font-medium hover:underline focus-visible:ring-2 focus-visible:ring-ring/30 rounded-sm"
             title="Centre the graph on this entity"
             onClick={() => onPick(r.node)}
           >
@@ -452,7 +452,7 @@ export function DepsExplorer({ envs }: { envs: string[] }) {
                     <li key={n.key}>
                       <button
                         type="button"
-                        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-muted"
+                        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
                         onClick={() => pick(n)}
                       >
                         <span className="truncate">{n.name}</span>

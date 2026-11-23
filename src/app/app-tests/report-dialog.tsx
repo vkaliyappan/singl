@@ -87,7 +87,7 @@ function Segmented<T extends string>({
           title={o.title}
           onClick={() => onChange(o.value)}
           className={cn(
-            "h-6 rounded-md px-2.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+            "h-6 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
             value === o.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
           )}
         >

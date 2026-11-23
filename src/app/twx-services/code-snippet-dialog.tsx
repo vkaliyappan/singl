@@ -12,13 +12,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { IconCopy, IconCheck, IconCode } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { Spinner } from "@/components/ui/spinner";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/components/providers";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+    <div className="flex items-center justify-center gap-2 h-full text-muted-foreground text-xs">
+      <Spinner className="size-3.5" />
       Loading snippet…
     </div>
   ),
@@ -138,7 +140,7 @@ let result = ${entityType}["${entityName}"].${serviceName}(params);`;
             >
               {copied ? (
                 <>
-                  <IconCheck className="size-3.5 text-emerald-500" />
+                  <IconCheck className="size-3.5 text-success" />
                   Copied
                 </>
               ) : (

@@ -1,10 +1,23 @@
 //! Teams Presence Keeper, ported from singl-web's /api/teams-presence.
 //!
-//! Runs `scripts/teams-presence-keeper.ps1` (embedded below) as a hidden,
-//! independent PowerShell process that nudges the idle timer every interval.
-//! It outlives singl on purpose; state lives in `<data dir>/teams-presence/`:
-//! `keeper.pid.json` records the launch, `keeper.heartbeat` is rewritten by
-//! the script each tick so a live keeper can be told from a recycled PID.
+//! Keeps the Windows session from going idle so Microsoft Teams reports
+//! "Available" instead of flipping to "Away" after its idle timeout:
+//!   - injects a VK_F15 key event once per interval. F15 is on no modern
+//!     keyboard, so no application reacts, but it resets the
+//!     GetLastInputInfo idle timer that Teams reads;
+//!   - holds ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED so the
+//!     machine does not sleep or blank the display while the keeper runs.
+//!
+//! It does NOT work around a locked workstation (Win+L): Teams goes Away
+//! regardless. It only prevents the *idle* transition.
+//!
+//! The keeper is a hidden, independent process that outlives singl on purpose.
+//! It is singl's own executable, copied to `<data dir>/teams-presence/` and
+//! started with [`KEEPER_ARG`] (see [`run_keeper_if_requested`]): running from
+//! a copy keeps the real exe free for rebuilds and updater installs, and lets
+//! a PID be confirmed as ours by its image path. State lives in the same folder:
+//! `keeper.pid.json` records the launch, `keeper.heartbeat` is rewritten by the
+//! keeper each tick so a live keeper can be told from a recycled PID.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,8 +29,9 @@ use tauri::State;
 use crate::error::IpcResult;
 use crate::state::AppState;
 
-const SCRIPT_NAME: &str = "teams-presence-keeper.ps1";
-const SCRIPT: &str = include_str!("../../../scripts/teams-presence-keeper.ps1");
+/// First argument that turns the singl executable into the keeper.
+pub const KEEPER_ARG: &str = "--presence-keeper";
+const KEEPER_EXE: &str = "singl-presence-keeper.exe";
 
 const DEFAULT_INTERVAL_SECONDS: u32 = 60;
 const MIN_INTERVAL_SECONDS: u32 = 15;
@@ -47,7 +61,7 @@ struct KeeperRecord {
 
 struct Paths {
   dir: PathBuf,
-  script: PathBuf,
+  exe: PathBuf,
   pid_file: PathBuf,
   heartbeat: PathBuf,
 }
@@ -55,9 +69,12 @@ struct Paths {
 impl Paths {
   fn new(state: &AppState) -> Self {
     let base = state.db_path.parent().map(Path::to_path_buf).unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("teams-presence");
+    Self::in_dir(base.join("teams-presence"))
+  }
+
+  fn in_dir(dir: PathBuf) -> Self {
     Self {
-      script: dir.join(SCRIPT_NAME),
+      exe: dir.join(KEEPER_EXE),
       pid_file: dir.join("keeper.pid.json"),
       heartbeat: dir.join("keeper.heartbeat"),
       dir,
@@ -74,7 +91,7 @@ impl Paths {
     let _ = std::fs::remove_file(&self.heartbeat);
   }
 
-  /// Seconds since the Unix epoch of the last heartbeat. The script writes an
+  /// Seconds since the Unix epoch of the last heartbeat. The keeper writes an
   /// ISO timestamp, but the file's mtime is the same instant and needs no parsing.
   fn heartbeat_secs(&self) -> Option<u64> {
     let modified = std::fs::metadata(&self.heartbeat).ok()?.modified().ok()?;
@@ -117,10 +134,61 @@ fn clamp_interval(value: Option<u32>) -> u32 {
   value.unwrap_or(DEFAULT_INTERVAL_SECONDS).clamp(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS)
 }
 
+/// `--interval <secs> --heartbeat <path>` after [`KEEPER_ARG`].
+fn parse_keeper_args(args: &[String]) -> Option<(u32, PathBuf)> {
+  let mut interval = None;
+  let mut heartbeat = None;
+  let mut it = args.iter();
+  while let Some(arg) = it.next() {
+    match arg.as_str() {
+      "--interval" => interval = it.next().and_then(|v| v.parse::<u32>().ok()),
+      "--heartbeat" => heartbeat = it.next().map(PathBuf::from),
+      _ => {}
+    }
+  }
+  Some((clamp_interval(interval), heartbeat?))
+}
+
+/// Runs the keeper loop when the process was started as one, and never returns
+/// then. Called first thing in `main`, before Tauri builds a window.
+pub fn run_keeper_if_requested() {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  if args.first().map(String::as_str) != Some(KEEPER_ARG) {
+    return;
+  }
+  let code = match parse_keeper_args(&args[1..]) {
+    Some((interval, heartbeat)) => keeper_loop(interval, &heartbeat),
+    None => 64,
+  };
+  std::process::exit(code);
+}
+
+#[cfg(windows)]
+fn keeper_loop(interval_seconds: u32, heartbeat: &Path) -> i32 {
+  if let Some(dir) = heartbeat.parent() {
+    let _ = std::fs::create_dir_all(dir);
+  }
+  loop {
+    // Re-asserted every tick: the flag is per-thread and cheap to set. A kill
+    // skips any cleanup, but Windows drops the execution state with the process.
+    win::keep_awake();
+    win::tap_f15();
+    // Best effort: a missed heartbeat only makes the UI double-check the PID.
+    let _ = std::fs::write(heartbeat, iso(now_secs()));
+    std::thread::sleep(Duration::from_secs(u64::from(interval_seconds)));
+  }
+}
+
+#[cfg(not(windows))]
+fn keeper_loop(_interval_seconds: u32, _heartbeat: &Path) -> i32 {
+  eprintln!("Teams Presence Keeper only runs on Windows.");
+  1
+}
+
 #[cfg(windows)]
 mod win {
-  use std::os::windows::process::CommandExt;
-  use std::process::Command;
+  use std::path::{Path, PathBuf};
+  use std::time::Duration;
 
   type Handle = *mut core::ffi::c_void;
 
@@ -128,14 +196,41 @@ mod win {
   unsafe extern "system" {
     fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
     fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+    fn TerminateProcess(process: Handle, code: u32) -> i32;
+    fn QueryFullProcessImageNameW(process: Handle, flags: u32, name: *mut u16, size: *mut u32) -> i32;
     fn CloseHandle(handle: Handle) -> i32;
+    fn SetThreadExecutionState(flags: u32) -> u32;
   }
 
+  #[link(name = "user32")]
+  unsafe extern "system" {
+    fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
+  }
+
+  const PROCESS_TERMINATE: u32 = 0x0001;
   const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
   const STILL_ACTIVE: u32 = 259;
   const ERROR_ACCESS_DENIED: i32 = 5;
   pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
   pub const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+  const ES_CONTINUOUS: u32 = 0x8000_0000;
+  const ES_SYSTEM_REQUIRED: u32 = 0x0000_0001;
+  const ES_DISPLAY_REQUIRED: u32 = 0x0000_0002;
+  const VK_F15: u8 = 0x7E;
+  const KEYEVENTF_KEYUP: u32 = 0x0002;
+
+  pub fn keep_awake() {
+    // SAFETY: plain Win32 call with constant flags.
+    unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) };
+  }
+
+  pub fn tap_f15() {
+    // SAFETY: plain Win32 calls with constant arguments.
+    unsafe { keybd_event(VK_F15, 0, 0, 0) };
+    std::thread::sleep(Duration::from_millis(40));
+    unsafe { keybd_event(VK_F15, 0, KEYEVENTF_KEYUP, 0) };
+  }
 
   /// Cheap liveness check, no child process. Access denied means it exists
   /// but belongs to someone else.
@@ -153,26 +248,42 @@ mod win {
     }
   }
 
-  pub fn hidden(program: &str) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd
+  fn image_path(pid: u32) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    // SAFETY: plain Win32 calls; the buffer outlives the call and the handle is closed.
+    unsafe {
+      let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+      if handle.is_null() {
+        return None;
+      }
+      let mut buf = vec![0u16; 32_768];
+      let mut len = buf.len() as u32;
+      let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len) != 0;
+      CloseHandle(handle);
+      ok.then(|| PathBuf::from(std::ffi::OsString::from_wide(&buf[..len as usize])))
+    }
   }
 
   /// Confirms a live PID is our keeper and not a PID Windows recycled for some
-  /// unrelated process. Costs a PowerShell round trip, so only used before
-  /// killing and when the heartbeat looks stale.
-  pub fn owns_pid(pid: u32) -> bool {
-    hidden("powershell.exe")
-      .args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        &format!("(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\").CommandLine"),
-      ])
-      .output()
-      .map(|out| String::from_utf8_lossy(&out.stdout).contains(super::SCRIPT_NAME))
-      .unwrap_or(false)
+  /// unrelated process: its image must be the keeper copy of the executable.
+  pub fn owns_pid(pid: u32, keeper_exe: &Path) -> bool {
+    let same = |a: &Path, b: &Path| a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy());
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    image_path(pid).is_some_and(|img| same(&img, keeper_exe) || same(&canon(&img), &canon(keeper_exe)))
+  }
+
+  pub fn terminate(pid: u32) -> std::io::Result<()> {
+    // SAFETY: plain Win32 calls; the handle is closed before returning.
+    unsafe {
+      let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+      if handle.is_null() {
+        return Err(std::io::Error::last_os_error());
+      }
+      let ok = TerminateProcess(handle, 1) != 0;
+      let err = std::io::Error::last_os_error();
+      CloseHandle(handle);
+      if ok { Ok(()) } else { Err(err) }
+    }
   }
 }
 
@@ -191,7 +302,7 @@ fn status_blocking(paths: &Paths) -> KeeperStatus {
 
   // Alive but not ticking: a hung keeper or a recycled PID. Verify before
   // trusting it, so the UI never shows a phantom "Active".
-  if is_stale && !win::owns_pid(record.pid) {
+  if is_stale && !win::owns_pid(record.pid, &paths.exe) {
     paths.clear();
     return stopped(record.interval_seconds);
   }
@@ -211,6 +322,18 @@ fn status_blocking(_paths: &Paths) -> KeeperStatus {
   stopped(DEFAULT_INTERVAL_SECONDS)
 }
 
+/// Refreshes the keeper copy of this executable so an app update ships keeper
+/// changes too. A copy still locked by an orphaned keeper is used as it is.
+#[cfg(windows)]
+fn install_keeper_exe(paths: &Paths, source: &Path) -> Result<(), CoreError> {
+  std::fs::create_dir_all(&paths.dir)?;
+  match std::fs::copy(source, &paths.exe) {
+    Ok(_) => Ok(()),
+    Err(_) if paths.exe.is_file() => Ok(()),
+    Err(e) => Err(CoreError::Invalid(format!("Could not prepare the keeper at {}: {e}", paths.exe.display()))),
+  }
+}
+
 #[cfg(windows)]
 fn start_blocking(paths: &Paths, interval_seconds: u32) -> Result<KeeperStatus, CoreError> {
   use std::os::windows::process::CommandExt;
@@ -220,24 +343,22 @@ fn start_blocking(paths: &Paths, interval_seconds: u32) -> Result<KeeperStatus, 
     return Ok(current);
   }
 
-  std::fs::create_dir_all(&paths.dir)?;
-  // Rewritten each start so an app update ships script changes too.
-  std::fs::write(&paths.script, SCRIPT)?;
+  let me = std::env::current_exe().map_err(|e| CoreError::Invalid(format!("Cannot locate singl's executable: {e}")))?;
+  install_keeper_exe(paths, &me)?;
   // Seed the heartbeat so the first status poll doesn't see it as stale
-  // before the script has written its own.
+  // before the keeper has written its own.
   let started = now_secs();
   std::fs::write(&paths.heartbeat, iso(started))?;
 
-  // CREATE_NO_WINDOW still gives PowerShell a (hidden) console, which it needs;
-  // the new process group keeps singl's console signals away from it. Windows
+  // The new process group keeps singl's console signals away from it. Windows
   // doesn't kill children with their parent, so the keeper outlives singl.
-  let child = std::process::Command::new("powershell.exe")
-    .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
-    .arg(&paths.script)
-    .arg("-IntervalSeconds")
+  let child = std::process::Command::new(&paths.exe)
+    .arg(KEEPER_ARG)
+    .arg("--interval")
     .arg(interval_seconds.to_string())
-    .arg("-HeartbeatPath")
+    .arg("--heartbeat")
     .arg(&paths.heartbeat)
+    .current_dir(&paths.dir)
     .creation_flags(win::CREATE_NO_WINDOW | win::CREATE_NEW_PROCESS_GROUP)
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -272,19 +393,13 @@ fn start_blocking(_paths: &Paths, _interval_seconds: u32) -> Result<KeeperStatus
 fn stop_blocking(paths: &Paths) -> Result<KeeperStatus, CoreError> {
   let Some(record) = paths.read_record() else { return Ok(stopped(DEFAULT_INTERVAL_SECONDS)) };
 
-  if win::is_alive(record.pid) && win::owns_pid(record.pid) {
-    let result = win::hidden("taskkill").args(["/PID", &record.pid.to_string(), "/T", "/F"]).output();
-    // taskkill fails when the process died between the check and the kill;
+  if win::is_alive(record.pid) && win::owns_pid(record.pid, &paths.exe) {
+    // Termination fails when the process died between the check and the kill;
     // only a still-running process is an actual failure.
-    let failed = !matches!(&result, Ok(out) if out.status.success());
-    if failed {
+    if let Err(e) = win::terminate(record.pid) {
       std::thread::sleep(Duration::from_millis(200));
       if win::is_alive(record.pid) {
-        let detail = match result {
-          Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
-          Err(e) => e.to_string(),
-        };
-        return Err(CoreError::Invalid(format!("Could not stop PID {}: {detail}", record.pid)));
+        return Err(CoreError::Invalid(format!("Could not stop PID {}: {e}", record.pid)));
       }
     }
   }
@@ -327,7 +442,8 @@ pub async fn presence_stop(state: State<'_, AppState>) -> IpcResult<KeeperStatus
 
 #[cfg(test)]
 mod tests {
-  use super::{clamp_interval, iso};
+  use super::{clamp_interval, iso, parse_keeper_args};
+  use std::path::PathBuf;
 
   #[test]
   fn formats_iso() {
@@ -343,31 +459,12 @@ mod tests {
     assert_eq!(clamp_interval(Some(999)), 240);
   }
 
-  /// Launches a real keeper for a few seconds: `cargo test -- --ignored keeper_lifecycle`.
-  #[cfg(windows)]
   #[test]
-  #[ignore]
-  fn keeper_lifecycle() {
-    use super::*;
-    let dir = std::env::temp_dir().join(format!("singl-presence-test-{}", std::process::id()));
-    let paths = Paths {
-      script: dir.join(SCRIPT_NAME),
-      pid_file: dir.join("keeper.pid.json"),
-      heartbeat: dir.join("keeper.heartbeat"),
-      dir: dir.clone(),
-    };
-    let started = start_blocking(&paths, 15).expect("starts");
-    let pid = started.pid.expect("pid");
-    std::thread::sleep(Duration::from_secs(4));
-    assert!(win::is_alive(pid), "keeper should still be running");
-    assert!(win::owns_pid(pid), "command line should name the script");
-    let status = status_blocking(&paths);
-    assert!(status.running && status.pid == Some(pid));
-    let stopped = stop_blocking(&paths).expect("stops");
-    assert!(!stopped.running);
-    std::thread::sleep(Duration::from_millis(500));
-    assert!(!win::is_alive(pid), "keeper should be gone");
-    assert!(!status_blocking(&paths).running);
-    let _ = std::fs::remove_dir_all(dir);
+  fn parses_keeper_args() {
+    let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+    assert_eq!(parse_keeper_args(&args(&["--interval", "30", "--heartbeat", "C:\\hb"])), Some((30, PathBuf::from("C:\\hb"))));
+    assert_eq!(parse_keeper_args(&args(&["--heartbeat", "hb", "--interval", "5"])), Some((15, PathBuf::from("hb"))));
+    assert_eq!(parse_keeper_args(&args(&["--heartbeat", "hb"])), Some((60, PathBuf::from("hb"))));
+    assert_eq!(parse_keeper_args(&args(&["--interval", "30"])), None);
   }
 }

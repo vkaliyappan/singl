@@ -257,7 +257,7 @@ export function FlowTree({
         header={
           <div className="select-none">
             <div className="flex items-center justify-between gap-2 px-3 py-1.5">
-              <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+              <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                 Library
               </span>
               <div className="flex items-center gap-0.5">
@@ -279,7 +279,7 @@ export function FlowTree({
               </div>
             </div>
             {roots.length === 0 && (
-              <p className="px-4 pb-2 text-[11px] leading-relaxed text-muted-foreground">
+              <p className="px-4 pb-2 text-xs leading-relaxed text-muted-foreground">
                 No folders yet. Create one, then drag flows onto it to nest them.
               </p>
             )}

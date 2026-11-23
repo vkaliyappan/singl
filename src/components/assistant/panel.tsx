@@ -717,7 +717,7 @@ function Composer({
         </div>
       </div>
       {current && !current.available && (
-        <p className="mt-1 px-2 text-[10.5px] text-amber-600 dark:text-amber-400">
+        <p className="mt-1 px-2 text-[10.5px] text-warning">
           {current.note ?? "This provider is not available."}
         </p>
       )}

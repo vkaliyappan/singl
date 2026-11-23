@@ -17,8 +17,8 @@ const COLLAPSE_OVER = 6;
 const CONTEXT = 3;
 
 const ROW_BG: Record<Kind, string> = {
-  add: "bg-emerald-500/15 dark:bg-emerald-400/15",
-  del: "bg-red-500/15 dark:bg-red-400/15",
+  add: "bg-success/15",
+  del: "bg-destructive/15",
   ctx: "",
 };
 const MARK: Record<Kind, string> = { add: "+", del: "−", ctx: " " };
@@ -225,8 +225,8 @@ export function DiffView({
         {label && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{label}</span>}
         {data && (
           <span className="shrink-0 font-mono text-[10.5px]">
-            <span className="text-emerald-600 dark:text-emerald-400">+{data.add}</span>{" "}
-            <span className="text-red-600 dark:text-red-400">−{data.del}</span>
+            <span className="text-success">+{data.add}</span>{" "}
+            <span className="text-destructive">−{data.del}</span>
           </span>
         )}
         {data && (
@@ -275,7 +275,7 @@ export function DiffView({
 
 function patchClass(line: string): string {
   if (/^(diff |index |--- |\+\+\+ )/.test(line)) return "font-semibold text-muted-foreground";
-  if (line.startsWith("@@")) return "bg-blue-500/10 text-blue-700 dark:text-blue-300";
+  if (line.startsWith("@@")) return "bg-info/10 text-info";
   if (line.startsWith("+")) return ROW_BG.add;
   if (line.startsWith("-") || line.startsWith("−")) return ROW_BG.del;
   return "";

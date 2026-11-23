@@ -9,16 +9,16 @@ import type { LogRow } from "@/lib/twx-logs"
 import { addPins } from "@/lib/assistant/pins"
 
 const LEVEL_STYLE: Record<string, string> = {
-  ERROR: "bg-red-500/15 text-red-600 dark:text-red-400",
-  WARN: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  INFO: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  ERROR: "bg-destructive/15 text-destructive",
+  WARN: "bg-warning/15 text-warning",
+  INFO: "bg-info/15 text-info",
 }
 
 export function LevelBadge({ level }: { level: string }) {
   return (
     <span
       className={cn(
-        "inline-block w-12 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold",
+        "inline-block w-12 rounded px-1.5 py-0.5 text-center text-xs font-semibold",
         LEVEL_STYLE[level] ?? "bg-muted text-muted-foreground",
       )}
     >
@@ -51,7 +51,7 @@ const COLUMNS: GridColumn<LogRow>[] = [
     label: "Time",
     kind: "date",
     width: 220,
-    render: (r) => <span className="font-mono text-[11px] whitespace-nowrap text-muted-foreground">{time(r.timestamp)}</span>,
+    render: (r) => <span className="tabular font-mono text-xs whitespace-nowrap text-muted-foreground">{time(r.timestamp)}</span>,
   },
   { key: "level", label: "Level", kind: "text", width: 112, value: (r) => r.level || "?", render: (r) => <LevelBadge level={r.level} /> },
   { key: "message", label: "Message", kind: "text", width: 520, maxWidthRem: 40, render: (r) => <span className="block truncate font-mono text-xs">{firstLine(r.message)}</span> },
@@ -93,7 +93,7 @@ ${r.message.slice(0, 4000)}`,
             },
           ])
         }
-        className="shrink-0 text-muted-foreground hover:text-foreground"
+        className="shrink-0 rounded text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
       >
         <IconMessagePlus className="size-3.5" />
       </button>
@@ -101,7 +101,7 @@ ${r.message.slice(0, 4000)}`,
         type="button"
         aria-label="Copy entry"
         onClick={() => copyRow(r)}
-        className="shrink-0 text-muted-foreground hover:text-foreground"
+        className="shrink-0 rounded text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
       >
         <IconCopy className="size-3.5" />
       </button>

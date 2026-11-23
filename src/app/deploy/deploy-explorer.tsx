@@ -723,7 +723,7 @@ export function DeployExplorer({
                   <h1 className="text-sm font-semibold tracking-tight font-heading leading-none">
                     Deployment Pipeline
                   </h1>
-                  <Badge variant="outline" className="text-[9px] font-mono py-0 h-4 font-normal">
+                  <Badge variant="outline" className="text-[10px] font-mono py-0 h-4 font-normal">
                     ThingWorx CCD
                   </Badge>
                 </div>
@@ -781,7 +781,7 @@ export function DeployExplorer({
                     {stage.isRunning ? (
                       <IconLoader2 className="size-3.5 animate-spin" />
                     ) : stage.hasResult ? (
-                      <IconCircleCheck className="size-3.5 text-green-500 dark:text-green-400" />
+                      <IconCircleCheck className="size-3.5 text-success" />
                     ) : (
                       <Icon className="size-3.5" />
                     )}
@@ -795,7 +795,7 @@ export function DeployExplorer({
                       {stage.isRunning && (
                         <Badge
                           variant="secondary"
-                          className="text-[9px] px-1 py-0 h-4 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                          className="text-[10px] px-1 py-0 h-4 bg-warning/10 text-warning border border-warning/20"
                         >
                           Running
                         </Badge>
@@ -803,7 +803,7 @@ export function DeployExplorer({
                       {!stage.isRunning && stage.hasResult && (
                         <Badge
                           variant="secondary"
-                          className="text-[9px] px-1 py-0 h-4 bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20"
+                          className="text-[10px] px-1 py-0 h-4 bg-success/10 text-success border border-success/20"
                         >
                           Ready
                         </Badge>
@@ -840,7 +840,7 @@ export function DeployExplorer({
                         <IconCloudDownload className="size-3.5 text-primary" />
                         <CardTitle className="text-xs font-semibold">Stage 1: Export from ThingWorx</CardTitle>
                       </div>
-                      <Badge variant="outline" className="text-[9px] font-mono py-0 h-4">
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
                         export-deploymentfiles
                       </Badge>
                     </div>
@@ -966,7 +966,7 @@ export function DeployExplorer({
                           {exportProjects.map((p) => (
                             <SelectItem key={p.key} value={p.key}>
                               <span className="text-xs">{p.alias}</span>
-                              <span className="ml-1.5 text-muted-foreground font-mono text-[9px]">
+                              <span className="ml-1.5 text-muted-foreground font-mono text-[10px]">
                                 ({p.key})
                               </span>
                             </SelectItem>
@@ -1029,7 +1029,7 @@ export function DeployExplorer({
                         <IconArchive className="size-3.5 text-primary" />
                         <CardTitle className="text-xs font-semibold">Stage 2: Extract & Format</CardTitle>
                       </div>
-                      <Badge variant="outline" className="text-[9px] font-mono py-0 h-4">
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
                         extract-deploymentfiles
                       </Badge>
                     </div>
@@ -1128,7 +1128,7 @@ export function DeployExplorer({
                           {projects.map((p) => (
                             <SelectItem key={p.key} value={p.key}>
                               <span className="text-xs">{p.alias}</span>
-                              <span className="ml-1.5 text-muted-foreground font-mono text-[9px]">
+                              <span className="ml-1.5 text-muted-foreground font-mono text-[10px]">
                                 ({p.key})
                               </span>
                             </SelectItem>
@@ -1191,7 +1191,7 @@ export function DeployExplorer({
                         <IconPlugConnected className="size-3.5 text-primary" />
                         <CardTitle className="text-xs font-semibold">Stage 3: Update Connector Configs</CardTitle>
                       </div>
-                      <Badge variant="outline" className="text-[9px] font-mono py-0 h-4">
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
                         update-connectors
                       </Badge>
                     </div>
@@ -1570,7 +1570,7 @@ export function DeployExplorer({
                         <IconPackage className="size-3.5 text-primary" />
                         <CardTitle className="text-xs font-semibold">Stage 4: Bundle Release</CardTitle>
                       </div>
-                      <Badge variant="outline" className="text-[9px] font-mono py-0 h-4">
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
                         twx bundle
                       </Badge>
                     </div>
@@ -1644,7 +1644,7 @@ export function DeployExplorer({
                           {bundleProjects.map((p) => (
                             <SelectItem key={p.alias} value={p.alias}>
                               <span className="text-xs">{p.alias}</span>
-                              <span className="ml-1.5 text-muted-foreground font-mono text-[9px]">
+                              <span className="ml-1.5 text-muted-foreground font-mono text-[10px]">
                                 ({p.projectName})
                               </span>
                             </SelectItem>
@@ -1707,7 +1707,7 @@ export function DeployExplorer({
                         <IconDatabaseExport className="size-3.5 text-primary" />
                         <CardTitle className="text-xs font-semibold">Stage 5: Backup Target Server</CardTitle>
                       </div>
-                      <Badge variant="outline" className="text-[9px] font-mono py-0 h-4">
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
                         backup-deploymentfiles
                       </Badge>
                     </div>
@@ -1836,7 +1836,7 @@ export function DeployExplorer({
                           {backupProjects.map((p) => (
                             <SelectItem key={p.key} value={p.key}>
                               <span className="text-xs">{p.alias}</span>
-                              <span className="ml-1.5 text-muted-foreground font-mono text-[9px]">
+                              <span className="ml-1.5 text-muted-foreground font-mono text-[10px]">
                                 ({p.key})
                               </span>
                             </SelectItem>
@@ -1919,7 +1919,7 @@ export function DeployExplorer({
                         <IconCloudUpload className="size-3.5 text-primary" />
                         <CardTitle className="text-xs font-semibold">Stage 6: Upload to SystemRepository</CardTitle>
                       </div>
-                      <Badge variant="outline" className="text-[9px] font-mono py-0 h-4">
+                      <Badge variant="outline" className="text-[10px] font-mono py-0 h-4">
                         upload-deploymentfiles
                       </Badge>
                     </div>
@@ -2190,11 +2190,11 @@ export function DeployExplorer({
             <div className="lg:col-span-6 space-y-3">
               {/* Structured Completion Summary Card */}
               {activeTab === "export" && exportResult && (
-                <Card className="border-green-500/30 bg-green-500/5 shadow-xs gap-0 py-0">
+                <Card className="border-success/30 bg-success/5 shadow-xs gap-0 py-0">
                   <CardContent className="p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <IconCircleCheck className="size-4 text-green-600 dark:text-green-400" />
+                        <IconCircleCheck className="size-4 text-success" />
                         <span className="font-semibold text-xs text-foreground">
                           Export Completed Successfully
                         </span>
@@ -2214,7 +2214,7 @@ export function DeployExplorer({
                         <div
                           className={cn(
                             "font-semibold text-xs",
-                            exportResult.errors.length > 0 ? "text-destructive" : "text-green-600"
+                            exportResult.errors.length > 0 ? "text-destructive" : "text-success"
                           )}
                         >
                           {exportResult.errors.length}
@@ -2257,11 +2257,11 @@ export function DeployExplorer({
               )}
 
               {activeTab === "extract" && extractResult && (
-                <Card className="border-green-500/30 bg-green-500/5 shadow-xs gap-0 py-0">
+                <Card className="border-success/30 bg-success/5 shadow-xs gap-0 py-0">
                   <CardContent className="p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <IconCircleCheck className="size-4 text-green-600 dark:text-green-400" />
+                        <IconCircleCheck className="size-4 text-success" />
                         <span className="font-semibold text-xs text-foreground">
                           Extraction Completed Successfully
                         </span>
@@ -2280,7 +2280,7 @@ export function DeployExplorer({
                       </div>
                       <div className="p-1.5 rounded border bg-background/50">
                         <span className="text-muted-foreground text-[10px]">Extracted</span>
-                        <div className="font-semibold text-xs text-green-600">
+                        <div className="font-semibold text-xs text-success">
                           {extractResult.entitiesExtracted}
                         </div>
                       </div>
@@ -2305,11 +2305,11 @@ export function DeployExplorer({
               )}
 
               {activeTab === "configs" && configResult && (
-                <Card className="border-green-500/30 bg-green-500/5 shadow-xs gap-0 py-0">
+                <Card className="border-success/30 bg-success/5 shadow-xs gap-0 py-0">
                   <CardContent className="p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <IconCircleCheck className="size-4 text-green-600 dark:text-green-400" />
+                        <IconCircleCheck className="size-4 text-success" />
                         <span className="font-semibold text-xs text-foreground">
                           Connector Configs Updated
                         </span>
@@ -2322,7 +2322,7 @@ export function DeployExplorer({
                     <div className="grid grid-cols-3 gap-1.5 text-xs">
                       <div className="p-1.5 rounded border bg-background/50">
                         <span className="text-muted-foreground text-[10px]">URLs Replaced</span>
-                        <div className="font-semibold text-xs text-green-600">{configResult.urlsReplaced}</div>
+                        <div className="font-semibold text-xs text-success">{configResult.urlsReplaced}</div>
                       </div>
                       <div className="p-1.5 rounded border bg-background/50">
                         <span className="text-muted-foreground text-[10px]">Usernames</span>
@@ -2333,7 +2333,7 @@ export function DeployExplorer({
                         <div
                           className={cn(
                             "font-semibold text-xs",
-                            configResult.errors.length > 0 ? "text-destructive" : "text-green-600"
+                            configResult.errors.length > 0 ? "text-destructive" : "text-success"
                           )}
                         >
                           {configResult.errors.length}
@@ -2354,11 +2354,11 @@ export function DeployExplorer({
               )}
 
               {activeTab === "bundle" && bundleResult && (
-                <Card className="border-green-500/30 bg-green-500/5 shadow-xs gap-0 py-0">
+                <Card className="border-success/30 bg-success/5 shadow-xs gap-0 py-0">
                   <CardContent className="p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <IconCircleCheck className="size-4 text-green-600 dark:text-green-400" />
+                        <IconCircleCheck className="size-4 text-success" />
                         <span className="font-semibold text-xs text-foreground">
                           Bundling Completed
                         </span>
@@ -2377,7 +2377,7 @@ export function DeployExplorer({
                       </div>
                       <div className="p-1.5 rounded border bg-background/50">
                         <span className="text-muted-foreground text-[10px]">ZIP Packages Created</span>
-                        <div className="font-semibold text-xs text-green-600">
+                        <div className="font-semibold text-xs text-success">
                           {bundleResult.zipsCreated}
                         </div>
                       </div>
@@ -2396,11 +2396,11 @@ export function DeployExplorer({
               )}
 
               {activeTab === "backup" && backupResult && (
-                <Card className="border-green-500/30 bg-green-500/5 shadow-xs gap-0 py-0">
+                <Card className="border-success/30 bg-success/5 shadow-xs gap-0 py-0">
                   <CardContent className="p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <IconCircleCheck className="size-4 text-green-600 dark:text-green-400" />
+                        <IconCircleCheck className="size-4 text-success" />
                         <span className="font-semibold text-xs text-foreground">
                           Backup Completed
                         </span>
@@ -2420,7 +2420,7 @@ export function DeployExplorer({
                         <div
                           className={cn(
                             "font-semibold text-xs",
-                            backupResult.errors.length > 0 ? "text-destructive" : "text-green-600"
+                            backupResult.errors.length > 0 ? "text-destructive" : "text-success"
                           )}
                         >
                           {backupResult.errors.length}
@@ -2448,11 +2448,11 @@ export function DeployExplorer({
               )}
 
               {activeTab === "upload" && uploadResult && (
-                <Card className="border-green-500/30 bg-green-500/5 shadow-xs gap-0 py-0">
+                <Card className="border-success/30 bg-success/5 shadow-xs gap-0 py-0">
                   <CardContent className="p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <IconCircleCheck className="size-4 text-green-600 dark:text-green-400" />
+                        <IconCircleCheck className="size-4 text-success" />
                         <span className="font-semibold text-xs text-foreground">
                           Upload Completed
                         </span>
@@ -2469,7 +2469,7 @@ export function DeployExplorer({
                       </div>
                       <div className="p-1.5 rounded border bg-background/50">
                         <span className="text-muted-foreground text-[10px]">ZIPs Extracted</span>
-                        <div className="font-semibold text-xs text-green-600">
+                        <div className="font-semibold text-xs text-success">
                           {uploadResult.zipsExtracted}
                         </div>
                       </div>
@@ -2478,7 +2478,7 @@ export function DeployExplorer({
                         <div
                           className={cn(
                             "font-semibold text-xs",
-                            uploadResult.errors.length > 0 ? "text-destructive" : "text-green-600"
+                            uploadResult.errors.length > 0 ? "text-destructive" : "text-success"
                           )}
                         >
                           {uploadResult.errors.length}
@@ -2501,13 +2501,13 @@ export function DeployExplorer({
                     <IconTerminal2 className="size-3.5 text-muted-foreground" />
                     <span className="text-xs font-medium">Live Execution Console</span>
                     {currentRunning ? (
-                      <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-mono">
-                        <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span className="flex items-center gap-1 text-[10px] text-warning font-mono">
+                        <span className="size-1.5 rounded-full bg-warning animate-pulse" />
                         streaming
                       </span>
                     ) : currentLogs.length > 0 ? (
-                      <span className="flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400 font-mono">
-                        <span className="size-1.5 rounded-full bg-green-500" />
+                      <span className="flex items-center gap-1 text-[10px] text-success font-mono">
+                        <span className="size-1.5 rounded-full bg-success" />
                         completed
                       </span>
                     ) : (
@@ -2557,7 +2557,7 @@ export function DeployExplorer({
                               onClick={handleCopyLogs}
                             >
                               {copiedLog ? (
-                                <IconCheck className="size-3 text-green-500" />
+                                <IconCheck className="size-3 text-success" />
                               ) : (
                                 <IconCopy className="size-3" />
                               )}
@@ -2598,7 +2598,7 @@ export function DeployExplorer({
                     <div className="h-full flex flex-col items-center justify-center text-center text-zinc-500 py-8">
                       <IconTerminal2 className="size-6 mb-1.5 opacity-40 stroke-1" />
                       <p className="text-[11px]">No execution output yet.</p>
-                      <p className="text-[9px] mt-0.5 opacity-70">
+                      <p className="text-[10px] mt-0.5 opacity-70">
                         Configure parameters on the left and click Run to start this stage.
                       </p>
                     </div>
@@ -2620,7 +2620,7 @@ export function DeployExplorer({
                             !isDone && !isError && !isDryRun && "border-transparent text-zinc-300"
                           )}
                         >
-                          <span className="text-zinc-500 text-[9px] shrink-0 select-none font-mono">
+                          <span className="text-zinc-500 text-[10px] shrink-0 select-none font-mono">
                             {entry.timestamp}
                           </span>
                           <span className="whitespace-pre-wrap break-all flex-1 text-[10px]">
@@ -2633,7 +2633,7 @@ export function DeployExplorer({
                 </div>
 
                 {/* Console Footer Status */}
-                <div className="flex items-center justify-between px-3 py-1 border-t bg-muted/20 text-[9px] text-muted-foreground font-mono">
+                <div className="flex items-center justify-between px-3 py-1 border-t bg-muted/20 text-[10px] text-muted-foreground font-mono">
                   <span>
                     {filteredLogs.length}{" "}
                     {filteredLogs.length === 1 ? "line" : "lines"}

@@ -324,7 +324,7 @@ export function TwxImport({ envs, workspaceRoot }: { envs: string[]; workspaceRo
             </label>
           ))}
         </div>
-        {rows.more && <p className="text-[0.7rem] text-muted-foreground">Showing the first {MAX_LISTED} matches. Filter to narrow down.</p>}
+        {rows.more && <p className="text-xs text-muted-foreground">Showing the first {MAX_LISTED} matches. Filter to narrow down.</p>}
         <div>
           <Button size="sm" onClick={() => void runPreview().catch(() => {})} disabled={picked.size === 0 || busy !== ""}>
             {busy === "preview" ? <Spinner /> : null}
@@ -369,7 +369,8 @@ export function TwxImport({ envs, workspaceRoot }: { envs: string[]; workspaceRo
                       onCheckedChange={(on) => setChosen((c) => toggle(c, item.path, on))}
                     />
                     <button
-                      className={cn("flex min-w-0 flex-1 items-center gap-1 text-left", !canDiff && "cursor-default")}
+                      type="button"
+                      className={cn("flex min-w-0 flex-1 items-center gap-1 rounded text-left focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none", !canDiff && "cursor-default")}
                       onClick={() => canDiff && setExpanded((x) => toggle(x, item.path, !open))}
                     >
                       {canDiff && (open ? <IconChevronDown className="size-3.5" /> : <IconChevronRight className="size-3.5" />)}

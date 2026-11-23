@@ -23,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   assistantUsageCalls,
   assistantUsageChat,
@@ -197,6 +198,7 @@ function ChatCalls({ chat, onClose }: { chat: ChatUsage; onClose: () => void }) 
         starts small again.
       </p>
       {error && <p className="text-destructive">{error}</p>}
+        {!data && !error && <Spinner className="mx-auto size-4 text-muted-foreground" />}
       {rows.length > 0 && (
         <>
           <div className="h-28">

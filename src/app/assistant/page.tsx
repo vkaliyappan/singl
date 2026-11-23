@@ -36,6 +36,7 @@ import { AssistantPanel, relativeTime } from "@/components/assistant/panel";
 import { isTauri } from "@/lib/clock-widget";
 import { errorMessage } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 import { useAssistantContext } from "@/lib/assistant/context";
 import {
   assistantChatDelete,
@@ -456,9 +457,7 @@ export default function AssistantPage() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
           {chats === null ? (
-            <p className="px-2 py-4 text-center text-[11px] text-muted-foreground">
-              Loading…
-            </p>
+            <div className="flex justify-center px-2 py-4 text-muted-foreground"><Spinner className="size-3.5" /></div>
           ) : chats.length === 0 ? (
             <p className="px-2 py-4 text-center text-[11px] text-muted-foreground">
               {query

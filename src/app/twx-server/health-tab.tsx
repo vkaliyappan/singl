@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { IconPlugConnected, IconRefresh } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { DataGrid, type GridColumn } from "@/components/data-grid"
 import { errorMessage } from "@/lib/settings"
 import { useAssistantContext } from "@/lib/assistant/context"
@@ -24,18 +25,18 @@ import { cn } from "@/lib/utils"
 type Level = "ok" | "warn" | "bad" | "none"
 
 const LEVEL: Record<Level, string> = {
-  ok: "border-emerald-500/40 bg-emerald-500/5",
-  warn: "border-amber-500/50 bg-amber-500/5",
-  bad: "border-red-500/50 bg-red-500/5",
+  ok: "border-success/30 bg-success/10",
+  warn: "border-warning/30 bg-warning/10",
+  bad: "border-destructive/30 bg-destructive/10",
   none: "border-border bg-card",
 }
 
 function Stat({ label, value, sub, level = "none" }: { label: string; value: string; sub?: string; level?: Level }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-0.5 rounded-xl border px-3.5 py-2.5", LEVEL[level])}>
-      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
       <span className="truncate text-base font-semibold tracking-tight">{value}</span>
-      {sub && <span className="truncate text-[11px] text-muted-foreground">{sub}</span>}
+      {sub && <span className="truncate text-xs text-muted-foreground">{sub}</span>}
     </div>
   )
 }
@@ -44,7 +45,7 @@ const n = (v: number | null | undefined) => (v == null ? "-" : v.toLocaleString(
 
 type Tests = Record<string, ConnectorTest | "running">
 
-const DOT = { ok: "bg-emerald-500", bad: "bg-red-500", warn: "bg-amber-500", none: "bg-muted-foreground/40" }
+const DOT = { ok: "bg-success", bad: "bg-destructive", warn: "bg-warning", none: "bg-muted-foreground/40" }
 
 /** What a connector's dot and label say: its test if run, else whether it is enabled. */
 function connectorStatus(c: ConnectorInfo, test: Tests[string] | undefined): { dot: keyof typeof DOT; label: string; title?: string } {
@@ -73,7 +74,7 @@ const SUBSYSTEM_COLS: GridColumn<Subsystem>[] = [
     width: 140,
     render: (s) => (
       <span className="inline-flex items-center gap-1.5">
-        <span className={cn("size-1.5 rounded-full", s.running ? "bg-emerald-500" : "bg-red-500")} />
+        <span className={cn("size-1.5 rounded-full", s.running ? "bg-success" : "bg-destructive")} />
         {s.state}
       </span>
     ),
@@ -106,8 +107,8 @@ function Connectors({ env }: { env: string }) {
       .catch((err) => setTests((t) => ({ ...t, [name]: { state: "failed", status: null, message: errorMessage(err), latencyMs: 0 } })))
   }
 
-  if (error) return <p className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-xs">Connectors: {error}</p>
-  if (!list) return <p className="text-xs text-muted-foreground">Loading connectors...</p>
+  if (error) return <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-xs">Connectors: {error}</p>
+  if (!list) return <p className="flex items-center gap-2 text-xs text-muted-foreground"><Spinner className="size-3.5" /> Loading connectors…</p>
   if (!list.length) return null
 
   const enabled = list.filter((c) => c.enabled !== false)
@@ -125,7 +126,7 @@ function Connectors({ env }: { env: string }) {
       render: (c) => (
         <span className="font-medium" title={c.error ?? c.template ?? undefined}>
           {c.name}
-          {c.error && <span className="ml-1.5 text-[11px] font-normal text-amber-600 dark:text-amber-400">partial</span>}
+          {c.error && <span className="ml-1.5 text-xs font-normal text-warning">partial</span>}
         </span>
       ),
     },
@@ -263,18 +264,18 @@ export function HealthTab({ env }: { env: string }) {
         </Button>
       </div>
 
-      {error && <p className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs">{error}</p>}
+      {error && <p className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-xs text-destructive">{error}</p>}
       {!data && !error && <p className="text-xs text-muted-foreground">Checking the server...</p>}
 
       {data && (
         <>
           {ping && !ping.ok && (
-            <p className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs">
+            <p className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-xs text-destructive">
               The server did not answer: {ping.error}
             </p>
           )}
           {data.health.errors.length > 0 && (
-            <ul className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-xs">
+            <ul className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-xs">
               {data.health.errors.map((e) => (
                 <li key={e}>{e}</li>
               ))}

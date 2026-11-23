@@ -41,9 +41,9 @@ function KindIcon({ node, state }: { node: FlowNode; state?: NodeRunState }) {
 
 const STATUS_TEXT: Record<string, string> = {
   running: "text-primary",
-  ok: "text-emerald-600 dark:text-emerald-400",
+  ok: "text-success",
   error: "text-destructive",
-  skipped: "text-amber-600 dark:text-amber-400",
+  skipped: "text-warning",
   disabled: "text-muted-foreground",
 };
 
@@ -255,15 +255,24 @@ export function LogPanel({
 
       {/* Header — the whole strip toggles, so the drawer is easy to flick open */}
       <div
-        className="flex h-[34px] shrink-0 cursor-pointer items-center gap-2 px-3 select-none hover:bg-accent/40"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        className="flex h-[34px] shrink-0 cursor-pointer items-center gap-2 px-3 select-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none focus-visible:ring-inset"
         onClick={() => onOpenChange(!open)}
+        onKeyDown={(e) => {
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onOpenChange(!open);
+          }
+        }}
       >
         {open ? (
           <IconChevronDown className="size-3.5 text-muted-foreground" />
         ) : (
           <IconChevronUp className="size-3.5 text-muted-foreground" />
         )}
-        <span className="text-[11px] font-semibold tracking-tight">Logs</span>
+        <span className="text-xs font-semibold tracking-tight">Logs</span>
 
         {running ? (
           <Spinner className="size-3" />
@@ -271,12 +280,12 @@ export function LogPanel({
           failed ? (
             <IconAlertTriangle className="size-3 text-destructive" />
           ) : (
-            <IconCheck className="size-3 text-emerald-600 dark:text-emerald-400" />
+            <IconCheck className="size-3 text-success" />
           )
         ) : null}
         <span
           className={cn(
-            "text-[11px] tabular-nums",
+            "text-xs tabular-nums",
             running
               ? "text-primary"
               : ran && failed
@@ -314,7 +323,7 @@ export function LogPanel({
           {/* Executed nodes, in run order */}
           <div className="w-56 shrink-0 overflow-auto border-r">
             {rows.length === 0 ? (
-              <p className="p-3 text-[11px] text-muted-foreground">
+              <p className="p-3 text-xs text-muted-foreground">
                 Run the flow to see each node’s input and output here.
               </p>
             ) : (
@@ -333,7 +342,7 @@ export function LogPanel({
                   <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
                     <KindIcon node={node} state={state} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px]">{node.label}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs">{node.label}</span>
                   {node.disabled && <IconEyeOff className="size-3 shrink-0 text-muted-foreground" />}
                   <span
                     className={cn(
@@ -351,7 +360,7 @@ export function LogPanel({
           {/* What the selected node saw, and what it produced */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {!selected ? (
-              <p className="p-3 text-[11px] text-muted-foreground">
+              <p className="p-3 text-xs text-muted-foreground">
                 Select a node on the left.
               </p>
             ) : (
@@ -360,7 +369,7 @@ export function LogPanel({
                   <span className="text-muted-foreground">
                     <KindIcon node={selected} state={selectedState} />
                   </span>
-                  <span className="truncate text-[11px] font-semibold">{selected.label}</span>
+                  <span className="truncate text-xs font-semibold">{selected.label}</span>
                   <span
                     className={cn(
                       "shrink-0 font-mono text-[10px]",
@@ -438,7 +447,7 @@ export function LogPanel({
                       )}
 
                       {!hasParamBody && (
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           Nothing was sent for this node.
                         </p>
                       )}
@@ -451,7 +460,7 @@ export function LogPanel({
                         "relative rounded-md border",
                         selectedState.status === "error"
                           ? "border-destructive/40 bg-destructive/5 text-destructive"
-                          : "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400"
+                          : "border-warning/40 bg-warning/5 text-warning"
                       )}
                     >
                       <CopyButton text={selectedState.error} className="absolute top-1 right-1" />
@@ -460,7 +469,7 @@ export function LogPanel({
                       </pre>
                     </div>
                   ) : selectedState?.result === undefined ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       This node produced no output.
                     </p>
                   ) : (

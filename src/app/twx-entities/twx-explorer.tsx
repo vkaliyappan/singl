@@ -128,7 +128,8 @@ import { ExportPicker } from "./components/export-picker";
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full text-muted-foreground text-xs font-mono">
+    <div className="flex items-center justify-center gap-2 h-full text-muted-foreground text-xs font-mono">
+      <Spinner className="size-3.5" />
       Loading editor…
     </div>
   ),
@@ -1234,7 +1235,7 @@ export function TwxExplorer({
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* ── Elevated Command Bar / Toolbar ───────────────────────────────────── */}
-      <div className="shrink-0 border-b bg-card/70 backdrop-blur px-4 py-2.5 flex flex-col gap-2">
+      <div className="shrink-0 border-b bg-card px-4 py-2.5 flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           {/* Left: Environment & Project Pickers */}
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -1247,8 +1248,8 @@ export function TwxExplorer({
                       className={cn(
                         "size-2 rounded-full shrink-0",
                         selectedEnvRecord?.hasAppKey
-                          ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
-                          : "bg-amber-500"
+                          ? "bg-success shadow-xs shadow-success/50"
+                          : "bg-warning"
                       )}
                     />
                     <SelectValue placeholder="Select Environment" />
@@ -1262,7 +1263,7 @@ export function TwxExplorer({
                         {e.hasAppKey ? (
                           <span className="text-[10px] text-muted-foreground">Connected</span>
                         ) : (
-                          <span className="text-[10px] text-amber-500">No App Key</span>
+                          <span className="text-[10px] text-warning">No App Key</span>
                         )}
                       </div>
                     </SelectItem>
@@ -1375,7 +1376,7 @@ export function TwxExplorer({
 
                   <div className="flex justify-between py-0.5">
                     <span className="text-muted-foreground">App Key:</span>
-                    <span className={cn("font-medium", selectedEnvRecord?.hasAppKey ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500")}>
+                    <span className={cn("font-medium", selectedEnvRecord?.hasAppKey ? "text-success" : "text-warning")}>
                       {selectedEnvRecord?.hasAppKey ? "Configured" : "Missing"}
                     </span>
                   </div>
@@ -1441,7 +1442,7 @@ export function TwxExplorer({
               )}
               {extractStatus === "extracting" ? "Extracting…" : "Extract"}
               {extractStale && extractStatus !== "extracting" && (
-                <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-amber-500 ring-2 ring-background" />
+                <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-warning ring-2 ring-background" />
               )}
             </button>
 
@@ -1491,7 +1492,7 @@ export function TwxExplorer({
 
         {/* Warning banner when no app key */}
         {selectedEnvRecord && !selectedEnvRecord.hasAppKey && (
-          <div className="flex items-center justify-between text-xs px-3 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400">
+          <div className="flex items-center justify-between text-xs px-3 py-1.5 rounded-md bg-warning/10 border border-warning/20 text-warning">
             <span>
               No App Key configured for &quot;{selectedEnv}&quot;. Exporting requires a valid ThingWorx App Key.
             </span>
@@ -1499,7 +1500,7 @@ export function TwxExplorer({
               size="xs"
               variant="link"
               onClick={() => router.push("/settings")}
-              className="text-xs text-amber-700 dark:text-amber-400 h-auto p-0 underline font-medium"
+              className="text-xs text-warning h-auto p-0 underline font-medium"
             >
               Add App Key →
             </Button>
@@ -2002,12 +2003,12 @@ export function TwxExplorer({
           /* ── Global Empty State / Guided Getting Started ──────────────────── */
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-radial from-muted/30 to-background">
             <div className="max-w-md w-full space-y-6">
-              <div className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/20 border border-primary/20 text-primary mx-auto shadow-sm">
+              <div className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary mx-auto">
                 <IconDeviceDesktopAnalytics className="size-8" />
               </div>
 
               <div className="space-y-2">
-                <h3 className="text-lg font-bold tracking-tight text-foreground">
+                <h3 className="text-lg font-semibold tracking-tight text-foreground">
                   ThingWorx Entity Explorer
                 </h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
@@ -2020,7 +2021,7 @@ export function TwxExplorer({
                   size="default"
                   onClick={() => handleExport()}
                   disabled={!canExport}
-                  className="h-10 text-xs font-medium gap-2 shadow-sm bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white border-0"
+                  className="h-10 text-xs font-medium gap-2"
                 >
                   <IconDownload className="size-4" />
                   Export from ThingWorx
@@ -2039,7 +2040,7 @@ export function TwxExplorer({
               </div>
 
               {envs.length === 0 && (
-                <div className="p-3 rounded-lg border bg-amber-500/10 border-amber-500/20 text-xs text-amber-700 dark:text-amber-400 flex items-center justify-between gap-2 text-left">
+                <div className="p-3 rounded-lg border bg-warning/10 border-warning/20 text-xs text-warning flex items-center justify-between gap-2 text-left">
                   <span>No environments configured yet.</span>
                   <Button
                     size="xs"

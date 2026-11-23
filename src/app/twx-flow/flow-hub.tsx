@@ -367,7 +367,7 @@ export function FlowHub({
             size="sm"
             onClick={() => setBlueprintsOpen(true)}
           >
-            <IconSparkles className="size-3.5 text-amber-500" />
+            <IconSparkles className="size-3.5 text-warning" />
             Blueprints
           </Button>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
@@ -441,12 +441,12 @@ export function FlowHub({
           }}
         >
           {/* Breadcrumb + toolbar */}
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b bg-background/95 px-4 py-2">
             <nav className="flex min-w-0 items-center gap-1 text-xs">
               <button
                 type="button"
                 onClick={() => selectFolder(null)}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 <IconStack2 className="size-3.5" />
                 All flows
@@ -471,7 +471,7 @@ export function FlowHub({
             </nav>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 {visibleFlows.length}{" "}
                 {visibleFlows.length === 1 ? "flow" : "flows"}
               </span>
@@ -748,7 +748,7 @@ export function FlowHub({
                     {tmpl.category}
                   </Badge>
                 </div>
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                <p className="text-xs leading-relaxed text-muted-foreground">
                   {tmpl.description}
                 </p>
                 <div className="mt-auto flex items-center justify-between pt-1">
@@ -874,7 +874,7 @@ function EmptyState({
         <p className="text-xs font-medium text-foreground">
           {hasFlows ? `Nothing in ${folderLabel}` : "No service flows yet"}
         </p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
+        <p className="mt-0.5 text-xs text-muted-foreground">
           {hasFlows
             ? "Drag a flow onto this pane to move it here, or create a new one."
             : "Create a canvas, or start from a blueprint."}
@@ -886,7 +886,7 @@ function EmptyState({
           New flow
         </Button>
         <Button size="sm" variant="outline" onClick={onBrowse}>
-          <IconSparkles className="size-3.5 text-amber-500" />
+          <IconSparkles className="size-3.5 text-warning" />
           Blueprints
         </Button>
       </div>
@@ -956,7 +956,7 @@ function FlowActionsMenu({
                 onClick={() => onMove(option.id)}
                 className="truncate"
               >
-                <IconFolder className="size-3.5 text-amber-500/90" />
+                <IconFolder className="size-3.5 text-warning/90" />
                 {option.label}
               </DropdownMenuItem>
             ))
@@ -1076,7 +1076,7 @@ function FlowCard({
       <div className="mt-auto flex items-center justify-between border-t pt-2">
         {folderLabel ? (
           <span className="flex items-center gap-1 truncate text-[10px] text-muted-foreground">
-            <IconFolder className="size-3 text-amber-500/80" />
+            <IconFolder className="size-3 text-warning/80" />
             {folderLabel}
           </span>
         ) : (
@@ -1084,9 +1084,9 @@ function FlowCard({
         )}
         <Link
           href={flowHref(flow.id)}
-          className="text-[11px] font-medium text-primary hover:underline"
+          className="text-xs font-medium text-primary hover:underline"
         >
-          Open canvas →
+          Open canvas <IconArrowRight className="inline size-3 align-[-2px]" />
         </Link>
       </div>
     </div>
@@ -1147,7 +1147,7 @@ function FlowTable({
       kind: "text",
       width: 140,
       value: (flow) => flow.environment || "—",
-      render: (flow) => <span className="font-mono text-[11px] text-muted-foreground">{flow.environment || "—"}</span>,
+      render: (flow) => <span className="font-mono text-xs text-muted-foreground">{flow.environment || "—"}</span>,
     },
     { key: "steps", label: "Steps", kind: "number", width: 80, value: (flow) => graphStats(flow.graph).nodes.length },
     { key: "wires", label: "Wires", kind: "number", width: 80, value: (flow) => graphStats(flow.graph).edges.length },

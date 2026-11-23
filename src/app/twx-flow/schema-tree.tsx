@@ -270,14 +270,14 @@ function TreeRow({
               <button
                 type="button"
                 onClick={() => setShown((n) => n + ARRAY_PAGE)}
-                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 Show {Math.min(ARRAY_PAGE, hidden)} more
               </button>
               <button
                 type="button"
                 onClick={() => setShown(kept.length)}
-                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 Show all {kept.length}
               </button>
@@ -347,7 +347,7 @@ export function SchemaTree({
                 type="button"
                 onClick={() => setFilter("")}
                 aria-label="Clear filter"
-                className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 <IconX className="size-3" />
               </button>

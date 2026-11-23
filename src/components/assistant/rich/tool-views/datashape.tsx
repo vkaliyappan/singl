@@ -59,12 +59,12 @@ export function asDataShapeMap(value: unknown): Record<string, ShapeField[]> | n
 
 function family(t: string): string {
   const u = t.toUpperCase();
-  if (/INTEGER|LONG|NUMBER/.test(u)) return "bg-sky-500/15 text-sky-700 dark:text-sky-300";
+  if (/INTEGER|LONG|NUMBER/.test(u)) return "bg-info/15 text-info";
   if (u === "BOOLEAN") return "bg-violet-500/15 text-violet-700 dark:text-violet-300";
-  if (u === "DATETIME" || u === "TIMESPAN") return "bg-amber-500/15 text-amber-700 dark:text-amber-300";
+  if (u === "DATETIME" || u === "TIMESPAN") return "bg-warning/15 text-warning";
   if (u === "INFOTABLE" || u === "JSON" || u === "TAGS") return "bg-rose-500/15 text-rose-700 dark:text-rose-300";
   if (/STRING|TEXT|HTML|XML|PASSWORD|LOCATION|IMAGE|GUID|NAME/.test(u))
-    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+    return "bg-success/15 text-success";
   return "bg-muted text-muted-foreground";
 }
 
@@ -86,7 +86,7 @@ const FIELD_COLUMNS: GridColumn<ShapeField & { n: number }>[] = [
         {f.primaryKey && (
           <span
             title="Primary key"
-            className="ml-1 rounded bg-amber-500/15 px-1 font-sans text-[9px] text-amber-700 dark:text-amber-300"
+            className="ml-1 rounded bg-warning/15 px-1 font-sans text-[9px] text-warning"
           >
             PK
           </span>

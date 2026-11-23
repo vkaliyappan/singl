@@ -115,7 +115,7 @@ export function RepoOutputDrawer({
   };
 
   return (
-    <div className="shrink-0 border-t bg-card/95 backdrop-blur shadow-md flex flex-col transition-colors select-none relative">
+    <div className="shrink-0 border-t bg-card shadow-md flex flex-col transition-colors select-none relative">
       {/* Top resize bar (when console is open) */}
       {isOpen && (
         <div
@@ -144,7 +144,7 @@ export function RepoOutputDrawer({
                 : status === "error"
                 ? "bg-destructive/20 text-destructive"
                 : status === "done"
-                ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                ? "bg-success/20 text-success"
                 : "bg-muted text-muted-foreground"
             )}
           >
@@ -167,7 +167,7 @@ export function RepoOutputDrawer({
           {status === "done" && (
             <Badge
               variant="outline"
-              className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px] h-4 px-1.5"
+              className="bg-success/10 text-success border-success/20 text-[10px] h-4 px-1.5"
             >
               Done
             </Badge>
@@ -192,7 +192,7 @@ export function RepoOutputDrawer({
           {warningCount > 0 && (
             <Badge
               variant="outline"
-              className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px] gap-1 px-1.5 py-0 h-4"
+              className="bg-warning/10 text-warning border-warning/30 text-[10px] gap-1 px-1.5 py-0 h-4"
             >
               <IconAlertTriangle className="size-2.5" />
               {warningCount} {warningCount === 1 ? "warn" : "warns"}
@@ -225,7 +225,7 @@ export function RepoOutputDrawer({
             title="Copy logs"
             className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
           >
-            {copied ? <IconCheck className="size-3 text-emerald-500" /> : <IconCopy className="size-3" />}
+            {copied ? <IconCheck className="size-3 text-success" /> : <IconCopy className="size-3" />}
           </Button>
 
           <Button
@@ -275,9 +275,9 @@ export function RepoOutputDrawer({
                   isError
                     ? "bg-destructive/10 text-destructive font-medium"
                     : isWarn
-                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    ? "bg-warning/10 text-warning"
                     : isDone
-                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium"
+                    ? "bg-success/10 text-success font-medium"
                     : "text-muted-foreground hover:bg-accent/40"
                 )}
               >
@@ -289,8 +289,8 @@ export function RepoOutputDrawer({
             );
           })}
           {status === "done" && (
-            <div className="text-emerald-600 dark:text-emerald-400 font-medium px-1.5 pt-1 text-[11px]">
-              ✓ Operation completed successfully.
+            <div className="text-success font-medium px-1.5 pt-1 text-[11px] flex items-center gap-1">
+              <IconCheck className="size-3" /> Operation completed successfully.
             </div>
           )}
         </div>

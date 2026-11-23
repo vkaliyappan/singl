@@ -11,6 +11,12 @@ fn launched_at_startup() -> bool {
   std::env::args().any(|a| a == AUTOSTART_ARG)
 }
 
+/// Turns this process into the Teams Presence Keeper when started as one
+/// (never returns then); otherwise does nothing. Call before [`run`].
+pub fn run_keeper_if_requested() {
+  commands::presence::run_keeper_if_requested();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()

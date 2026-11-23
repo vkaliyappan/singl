@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react"
 import {
-  IconArrowDown, IconArrowUp, IconChevronDown, IconChevronRight, IconLayoutRows, IconPlus, IconTrash,
+  IconArrowDown, IconArrowUp, IconChevronDown, IconChevronRight, IconGripVertical, IconLayoutRows, IconPlus, IconTrash,
 } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -11,6 +11,7 @@ import type { UiTestCase, UiTestStep } from "@/lib/ui-tests"
 import { cn } from "@/lib/utils"
 import { CaseStatusChip, formatMs, StepResultChip } from "./shared"
 import { askConfirm } from "@/lib/confirm"
+import { MdCell } from "./md-cell"
 
 const CELL = "border-b px-1.5 py-1 align-top"
 const EDIT =
@@ -32,15 +33,7 @@ function Cell({
   className?: string
 }) {
   if (multiline) {
-    return (
-      <textarea
-        rows={Math.min(8, Math.max(2, value.split("\n").length))}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(EDIT, className)}
-      />
-    )
+    return <MdCell value={value} placeholder={placeholder} onChange={onChange} className={className} />
   }
   return (
     <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={cn(EDIT, className)} />
@@ -48,6 +41,34 @@ function Cell({
 }
 
 const COMPACT_KEY = "appTests.compactRows"
+
+/** What is being dragged: a whole case, or one step of a case. */
+type Drag = { kind: "case"; ci: number } | { kind: "step"; ci: number; si: number }
+/** Where it would land: a case's row (si null) or a step row, above or below it. */
+type Over = { ci: number; si: number | null; after: boolean }
+
+const DROP_BEFORE = "[&>td]:shadow-[inset_0_2px_0_0_var(--primary)]"
+const DROP_AFTER = "[&>td]:shadow-[inset_0_-2px_0_0_var(--primary)]"
+
+function Grip({ title, onStart, onEnd }: { title: string; onStart: () => void; onEnd: () => void }) {
+  return (
+    <span
+      draggable
+      title={title}
+      onClick={(e) => e.stopPropagation()}
+      onDragStart={(e) => {
+        e.stopPropagation()
+        e.dataTransfer.effectAllowed = "move"
+        e.dataTransfer.setData("text/plain", "")
+        onStart()
+      }}
+      onDragEnd={onEnd}
+      className="inline-flex cursor-grab text-muted-foreground/60 hover:text-foreground active:cursor-grabbing"
+    >
+      <IconGripVertical className="size-3.5" />
+    </span>
+  )
+}
 
 const WIDTHS = [28, 70, 220, 90, 260, 260, 130, 120, 90, 110, 100, 100, 200, 130, 80, 70]
 
@@ -102,6 +123,58 @@ export function UiTestsGrid({
   }
   const allSelected = cases.length > 0 && cases.every((c) => selected.has(c.id))
 
+  // ---- drag and drop (native: Tauri's own file drop is off for this window) ----
+  const [drag, setDrag] = useState<Drag | null>(null)
+  const [over, setOver] = useState<Over | null>(null)
+  const endDrag = () => {
+    setDrag(null)
+    setOver(null)
+  }
+  /** Row handlers for case `ci`, step `si` (null = the case row). */
+  const dropTarget = (ci: number, si: number | null) => ({
+    onDragOver: (e: React.DragEvent<HTMLTableRowElement>) => {
+      if (!drag || (drag.kind === "case" && si !== null)) return
+      e.preventDefault()
+      const box = e.currentTarget.getBoundingClientRect()
+      const after = e.clientY > box.top + box.height / 2
+      if (over?.ci !== ci || over.si !== si || over.after !== after) setOver({ ci, si, after })
+    },
+    onDrop: (e: React.DragEvent<HTMLTableRowElement>) => {
+      e.preventDefault()
+      if (drag && over) drop(drag, over)
+      endDrag()
+    },
+  })
+  const dropClass = (ci: number, si: number | null) =>
+    over && over.ci === ci && over.si === si ? (over.after ? DROP_AFTER : DROP_BEFORE) : ""
+  const drop = (d: Drag, o: Over) => {
+    if (d.kind === "case") {
+      let to = o.ci + (o.after ? 1 : 0)
+      if (d.ci < to) to--
+      if (to === d.ci) return
+      const next = [...cases]
+      const [moved] = next.splice(d.ci, 1)
+      next.splice(to, 0, moved)
+      onChange(next)
+      return
+    }
+    // A step: the case row stands for step 1 in compact view, else for "first step".
+    const target = cases[o.ci]
+    const rowStep = o.si ?? (compact && target.steps.length > 0 ? 0 : null)
+    let to = rowStep === null ? 0 : rowStep + (o.after ? 1 : 0)
+    if (d.ci === o.ci && d.si < to) to--
+    if (d.ci === o.ci && to === d.si) return
+    const step = cases[d.ci].steps[d.si]
+    onChange(
+      cases.map((c, j) => {
+        let steps = c.steps
+        if (j === d.ci) steps = steps.filter((_, k) => k !== d.si)
+        if (j === o.ci) steps = [...steps.slice(0, to), step, ...steps.slice(to)]
+        return steps === c.steps ? c : { ...c, steps }
+      }),
+    )
+  }
+
   return (
     <div className="h-full min-h-0 overflow-auto">
       <table className="w-full min-w-[1500px] table-fixed border-separate border-spacing-0 text-xs">
@@ -144,15 +217,19 @@ export function UiTestsGrid({
             return (
               <Fragment key={c.id}>
                 <tr
-                  className={cn("cursor-default bg-muted/40", activeId === c.id && "bg-primary/10")}
+                  className={cn("cursor-default bg-muted/40", activeId === c.id && "bg-primary/10", drag?.kind === "case" && drag.ci === i && "opacity-50", dropClass(i, null))}
                   onClick={() => onActivate(c.id)}
+                  {...dropTarget(i, null)}
                 >
                   <td className={CELL}>
-                    <Checkbox
-                      checked={selected.has(c.id)}
-                      onCheckedChange={(on) => onSelect(toggle(selected, c.id, !!on))}
-                      aria-label="Select case"
-                    />
+                    <div className="flex items-center gap-0.5 pt-0.5">
+                      <Grip title="Drag to move this case" onStart={() => setDrag({ kind: "case", ci: i })} onEnd={endDrag} />
+                      <Checkbox
+                        checked={selected.has(c.id)}
+                        onCheckedChange={(on) => onSelect(toggle(selected, c.id, !!on))}
+                        aria-label="Select case"
+                      />
+                    </div>
                   </td>
                   <td className={CELL}>
                     <Cell
@@ -168,7 +245,7 @@ export function UiTestsGrid({
                     <div className="flex items-start gap-0.5">
                       <button
                         type="button"
-                        className="mt-1 text-muted-foreground hover:text-foreground"
+                        className="mt-1 rounded-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
                         aria-label={open ? "Collapse steps" : "Expand steps"}
                         onClick={() => setCollapsed((s) => toggle(s, c.id, open))}
                       >
@@ -181,6 +258,7 @@ export function UiTestsGrid({
                     <>
                       <td className={cn(CELL, "pt-2 text-muted-foreground")}>
                         <div className="flex items-center gap-1">
+                          <Grip title="Drag to move this step" onStart={() => setDrag({ kind: "step", ci: i, si: 0 })} onEnd={endDrag} />
                           1{c.steps.length > 1 && <span className="text-[10px]">/ {c.steps.length}</span>}
                           <StepResultChip result={c.stepResults.find((r) => r.step === 1)} />
                         </div>
@@ -219,7 +297,7 @@ export function UiTestsGrid({
                   <td className={cn(CELL, "pt-2 whitespace-nowrap text-muted-foreground")}>{formatMs(c.lastRunAt)}</td>
                   <td className={cn(CELL, "pt-2")}>
                     {c.chatId ? (
-                      <button type="button" className="text-primary hover:underline" onClick={() => onOpenTranscript(c.chatId)}>
+                      <button type="button" className="rounded-sm text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none" onClick={() => onOpenTranscript(c.chatId)}>
                         Open
                       </button>
                     ) : (
@@ -268,11 +346,20 @@ export function UiTestsGrid({
                     const edit = (part: Partial<UiTestStep>) =>
                       setSteps(i, c.steps.map((x, j) => (j === k ? { ...x, ...part } : x)))
                     return (
-                      <tr key={k}>
+                      <tr
+                        key={k}
+                        className={cn(drag?.kind === "step" && drag.ci === i && drag.si === k && "opacity-50", dropClass(i, k))}
+                        {...dropTarget(i, k)}
+                      >
                         <td className={CELL} />
                         <td className={CELL} />
                         <td className={CELL} />
-                        <td className={cn(CELL, "pt-2 text-muted-foreground")}>{k + 1}</td>
+                        <td className={cn(CELL, "pt-2 text-muted-foreground")}>
+                          <div className="flex items-center gap-1">
+                            <Grip title="Drag to move this step (also into another case)" onStart={() => setDrag({ kind: "step", ci: i, si: k })} onEnd={endDrag} />
+                            {k + 1}
+                          </div>
+                        </td>
                         <td className={CELL}>
                           <Cell multiline value={s.action} placeholder="Step action" onChange={(v) => edit({ action: v })} />
                         </td>

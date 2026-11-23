@@ -134,8 +134,8 @@ export const uiSessionCheck = (envId: string) => invoke<UiSessionStatus>("uitest
 export const uiSessionClear = (envId: string) => invoke<UiSessionStatus>("uitest_session_clear", { envId })
 
 /** Starts a background run; resolves to the runId. `mode` overrides per-case/suite mode. */
-export const runUiTests = (suiteId: string, caseIds: string[] | null, mode: UiTestMode | null) =>
-  invoke<string>("uitest_run", { suiteId, caseIds, mode })
+export const runUiTests = (suiteId: string, caseIds: string[] | null, mode: UiTestMode | null, instructions = "") =>
+  invoke<string>("uitest_run", { suiteId, caseIds, mode, instructions })
 export const cancelUiRun = (runId: string) => invoke<void>("uitest_run_cancel", { runId })
 export const activeUiRun = () => invoke<{ runId: string; suiteId: string } | null>("uitest_run_active")
 

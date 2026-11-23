@@ -40,9 +40,9 @@ const initials = (name: string) =>
 
 const STATUS_RING: Record<string, string> = {
   running: "border-primary ring-2 ring-primary/40",
-  ok: "border-emerald-500/70",
+  ok: "border-success/70",
   error: "border-destructive",
-  skipped: "border-amber-500/70",
+  skipped: "border-warning/70",
   disabled: "border-dashed border-muted-foreground/50",
 };
 
@@ -67,9 +67,9 @@ function chromeFor(node: FlowNode) {
 
 const PORT_TONE: Record<PortDef["tone"], string> = {
   neutral: "bg-primary",
-  positive: "bg-emerald-500",
-  negative: "bg-rose-500",
-  accent: "bg-indigo-500",
+  positive: "bg-success",
+  negative: "bg-destructive",
+  accent: "bg-primary",
 };
 
 /** What the footer says when the node has not run. */
@@ -229,7 +229,7 @@ export function NodeCard({
 
         {isBreakpoint && (
           <span
-            className="size-2 rounded-full bg-rose-500 ring-2 ring-rose-500/30 shrink-0"
+            className="size-2 rounded-full bg-destructive ring-2 ring-destructive/30 shrink-0"
             title="Breakpoint set"
           />
         )}
@@ -242,7 +242,7 @@ export function NodeCard({
             type="button"
             aria-label="Run only this node"
             title="Run only this node"
-            className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-emerald-500"
+            className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-success focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -260,7 +260,7 @@ export function NodeCard({
             title={isBreakpoint ? "Remove breakpoint" : "Add breakpoint"}
             className={cn(
               "shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100",
-              isBreakpoint ? "opacity-100 text-rose-500" : "text-muted-foreground hover:text-rose-500"
+              isBreakpoint ? "opacity-100 text-destructive" : "text-muted-foreground hover:text-destructive"
             )}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
@@ -276,7 +276,7 @@ export function NodeCard({
           type="button"
           aria-label="Edit node"
           title="Edit node"
-          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -290,7 +290,7 @@ export function NodeCard({
           type="button"
           aria-label="Delete node"
           title="Delete node"
-          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
           onPointerDown={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -303,7 +303,7 @@ export function NodeCard({
       </div>
 
       {/* Footer strip: declared output on the left, run outcome on the right */}
-      <div className="flex items-center gap-1.5 rounded-b-[9px] border-t bg-muted/40 px-2.5 py-1">
+      <div className="flex items-center gap-1.5 rounded-b-[9px] border-t bg-muted/40 px-2.5 py-1 tabular-nums">
         <span className="truncate font-mono text-[9px] text-muted-foreground" title={describeSchema(schema)}>
           {outputLine(node)}
         </span>
@@ -311,7 +311,7 @@ export function NodeCard({
           {status === "running" ? (
             <span className="text-primary">running…</span>
           ) : state?.status === "ok" ? (
-            <span className="text-emerald-600 dark:text-emerald-400">
+            <span className="text-success">
               {state.branch ? `${state.branch} · ` : ""}
               {state.iterations ? `×${state.iterations} · ` : ""}
               {state.rows !== undefined ? `${state.rows} rows · ` : ""}
@@ -320,7 +320,7 @@ export function NodeCard({
           ) : state?.status === "error" ? (
             <span className="text-destructive">failed</span>
           ) : state?.status === "skipped" ? (
-            <span className="text-amber-600 dark:text-amber-400">skipped</span>
+            <span className="text-warning">skipped</span>
           ) : (
             <span className="text-muted-foreground">{readiness(node)}</span>
           )}

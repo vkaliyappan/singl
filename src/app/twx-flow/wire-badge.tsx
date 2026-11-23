@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { IconDatabase, IconX } from "@tabler/icons-react";
+import { IconArrowRight, IconDatabase, IconX } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -51,7 +51,7 @@ export function WireBadge({
             setOpen(true);
           }}
           className={cn(
-            "flex h-6 w-full items-center justify-center gap-1 rounded-full border border-primary/30 bg-background/90 px-2 py-0.5 text-[10px] font-mono font-medium text-primary shadow-sm backdrop-blur-sm transition-all",
+            "flex h-6 w-full items-center justify-center gap-1 rounded-full border border-primary/30 bg-background/95 px-2 py-0.5 text-[10px] font-mono font-medium text-primary shadow-sm transition-all",
             "hover:scale-105 hover:border-primary hover:bg-primary/10 hover:shadow-md cursor-pointer"
           )}
           title={`View wire data: ${sourceLabel} -> ${targetLabel}`}
@@ -74,7 +74,7 @@ export function WireBadge({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-semibold">Wire Data Snapshot</p>
                 <p className="truncate text-[10px] text-muted-foreground font-mono">
-                  {sourceLabel} → {targetLabel}
+                  {sourceLabel} <IconArrowRight className="inline size-2.5" /> {targetLabel}
                 </p>
               </div>
               <Button

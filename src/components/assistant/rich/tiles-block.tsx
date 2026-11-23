@@ -54,10 +54,10 @@ const ICONS: Record<string, Icon> = {
 
 const TONES: Record<Tone, string> = {
   default: "",
-  good: "border-emerald-500/40 bg-emerald-500/5",
-  bad: "border-red-500/40 bg-red-500/5",
-  warn: "border-amber-500/40 bg-amber-500/5",
-  info: "border-blue-500/40 bg-blue-500/5",
+  good: "border-success/40 bg-success/5",
+  bad: "border-destructive/40 bg-destructive/5",
+  warn: "border-warning/40 bg-warning/5",
+  info: "border-info/40 bg-info/5",
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
@@ -120,8 +120,8 @@ function Tile({ it }: { it: Item }) {
     !it.trend || it.trend === "flat"
       ? "text-muted-foreground"
       : it.trend === it.good
-        ? "text-emerald-600 dark:text-emerald-400"
-        : "text-red-600 dark:text-red-400";
+        ? "text-success"
+        : "text-destructive";
   return (
     <div className={cn("min-w-0 rounded-md border bg-background/50 p-2.5", TONES[it.tone])}>
       <div className="flex items-center gap-1 text-[11px] text-muted-foreground">

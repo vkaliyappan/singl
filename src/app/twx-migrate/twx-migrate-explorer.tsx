@@ -533,7 +533,7 @@ export function TwxMigrateExplorer() {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background text-foreground">
       {/* ── TOP HEADER ── */}
-      <header className="px-5 py-3 border-b bg-card/60 backdrop-blur-xs flex items-center justify-between gap-4 flex-wrap shrink-0">
+      <header className="px-5 py-3 border-b bg-card flex items-center justify-between gap-4 flex-wrap shrink-0">
         <div className="flex items-center gap-3">
           <div className="size-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shadow-xs border border-primary/20">
             <IconArrowsExchange className="size-4" />
@@ -545,7 +545,7 @@ export function TwxMigrateExplorer() {
                 XML AST Engine
               </Badge>
             </div>
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-xs text-muted-foreground hidden sm:block">
               Transfer, rename, copy, or purge properties &amp; services across ThingWorx entity files.
             </p>
           </div>
@@ -555,7 +555,7 @@ export function TwxMigrateExplorer() {
         <div className="flex items-center gap-2 ml-auto">
           <div className="flex items-center gap-2 bg-muted/40 px-2.5 py-1 rounded-md border text-xs">
             <IconDatabase className="size-3.5 text-muted-foreground shrink-0" />
-            <span className="text-[11px] text-muted-foreground font-medium">Environment:</span>
+            <span className="text-xs text-muted-foreground font-medium">Environment:</span>
             <Select
               value={selectedEnv}
               onValueChange={(v) => {
@@ -618,15 +618,15 @@ export function TwxMigrateExplorer() {
       )}
 
       {successMsg && (
-        <div className="mx-4 mt-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between gap-3 shadow-xs">
+        <div className="mx-4 mt-3 rounded-lg border border-success/40 bg-success/10 p-3 text-xs text-success flex items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2">
-            <IconCheck className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <IconCheck className="size-4 shrink-0 text-success" />
             <span>{successMsg}</span>
           </div>
           <Button
             size="icon"
             variant="ghost"
-            className="size-5 shrink-0 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+            className="size-5 shrink-0 text-success hover:bg-success/20"
             onClick={() => setSuccessMsg(null)}
           >
             <IconX className="size-3" />
@@ -696,7 +696,7 @@ export function TwxMigrateExplorer() {
 
             {/* Source Entity Info Card */}
             {sourceFile && (
-              <div className="rounded-lg bg-background/80 border p-2 text-xs flex items-center justify-between gap-2">
+              <div className="rounded-lg bg-background/95 border p-2 text-xs flex items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-foreground truncate flex items-center gap-1.5">
                     <IconLayersLinked className="size-3.5 text-primary shrink-0" />
@@ -721,7 +721,7 @@ export function TwxMigrateExplorer() {
                   <IconSearch className="size-5 text-muted-foreground/60" />
                 </div>
                 <p className="text-xs font-medium text-foreground">Select a Source Entity</p>
-                <p className="text-[11px] text-muted-foreground max-w-56 mt-1">
+                <p className="text-xs text-muted-foreground max-w-56 mt-1">
                   Choose an entity to inspect and pick properties and services to migrate or delete.
                 </p>
               </div>
@@ -740,16 +740,16 @@ export function TwxMigrateExplorer() {
                     className="w-full"
                   >
                     <TabsList className="w-full grid grid-cols-4 h-7 p-0.5 bg-muted/60">
-                      <TabsTrigger value="all" className="text-[11px] h-6 px-1">
+                      <TabsTrigger value="all" className="text-xs h-6 px-1">
                         All ({allPropRows.length + allServiceRows.length})
                       </TabsTrigger>
-                      <TabsTrigger value="properties" className="text-[11px] h-6 px-1">
+                      <TabsTrigger value="properties" className="text-xs h-6 px-1">
                         Props ({allPropRows.length})
                       </TabsTrigger>
-                      <TabsTrigger value="services" className="text-[11px] h-6 px-1">
+                      <TabsTrigger value="services" className="text-xs h-6 px-1">
                         Services ({allServiceRows.length})
                       </TabsTrigger>
-                      <TabsTrigger value="selected" className="text-[11px] h-6 px-1 font-semibold">
+                      <TabsTrigger value="selected" className="text-xs h-6 px-1 font-semibold">
                         Staged ({selected.size})
                       </TabsTrigger>
                     </TabsList>
@@ -782,7 +782,7 @@ export function TwxMigrateExplorer() {
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-7 text-[11px] px-2 bg-background shrink-0"
+                      className="h-7 text-xs px-2 bg-background shrink-0"
                       disabled={visibleKeys.length === 0}
                       onClick={toggleAllVisible}
                     >
@@ -794,7 +794,7 @@ export function TwxMigrateExplorer() {
                         type="button"
                         size="sm"
                         variant="ghost"
-                        className="h-7 text-[11px] px-2 text-muted-foreground hover:text-foreground shrink-0"
+                        className="h-7 text-xs px-2 text-muted-foreground hover:text-foreground shrink-0"
                         onClick={clearSelection}
                       >
                         Clear
@@ -838,8 +838,8 @@ export function TwxMigrateExplorer() {
                               className={cn(
                                 "size-5 rounded flex items-center justify-center shrink-0 text-[10px]",
                                 isService
-                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                  : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                                  ? "bg-success/10 text-success"
+                                  : "bg-info/10 text-info"
                               )}
                               title={isService ? "Service" : "Property"}
                             >
@@ -891,7 +891,7 @@ export function TwxMigrateExplorer() {
                                 value={renameVal}
                                 placeholder={r.name}
                                 onChange={(e) => setRename(r.k, e.target.value)}
-                                className="h-6 text-[11px] font-mono bg-background flex-1"
+                                className="h-6 text-xs font-mono bg-background flex-1"
                                 autoFocus={isEditingRename}
                               />
                               {renameVal && (
@@ -937,7 +937,7 @@ export function TwxMigrateExplorer() {
 
             {/* Mode Switcher */}
             <div className="flex flex-col gap-1.5">
-              <Label className="text-[11px] text-muted-foreground font-medium">Operation Mode</Label>
+              <Label className="text-xs text-muted-foreground font-medium">Operation Mode</Label>
               <div className="grid grid-cols-2 gap-1 bg-muted/60 p-1 rounded-lg">
                 <button
                   type="button"
@@ -982,7 +982,7 @@ export function TwxMigrateExplorer() {
                       size="sm"
                       onClick={swapEntities}
                       disabled={!sourceRel && !targetRel}
-                      className="h-7 text-[11px] gap-1.5 px-2.5 bg-background shadow-2xs"
+                      className="h-7 text-xs gap-1.5 px-2.5 bg-background shadow-2xs"
                     />
                   }
                 >
@@ -994,7 +994,7 @@ export function TwxMigrateExplorer() {
 
             {/* Staged Transfer Stats */}
             <div className="rounded-lg bg-muted/30 border p-2.5 flex flex-col gap-1.5 text-xs">
-              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Staged Payload
               </div>
               <div className="flex items-center justify-between text-xs">
@@ -1008,7 +1008,7 @@ export function TwxMigrateExplorer() {
 
               {/* Pre-flight conflict callout */}
               {preflightConflicts.length > 0 && (
-                <div className="mt-1.5 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
+                <div className="mt-1.5 rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning flex items-start gap-1.5">
                   <IconAlertTriangle className="size-3.5 shrink-0 mt-0.5" />
                   <div>
                     <span className="font-semibold">{preflightConflicts.length} Conflict(s)</span> with target. Overwrites will be prompted.
@@ -1109,7 +1109,7 @@ export function TwxMigrateExplorer() {
 
             {/* Target Entity Info Card */}
             {targetFile && (
-              <div className="rounded-lg bg-background/80 border p-2 text-xs flex items-center justify-between gap-2">
+              <div className="rounded-lg bg-background/95 border p-2 text-xs flex items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-foreground truncate flex items-center gap-1.5">
                     <IconLayersLinked className="size-3.5 text-secondary-foreground shrink-0" />
@@ -1134,7 +1134,7 @@ export function TwxMigrateExplorer() {
                   <IconArrowRight className="size-5 text-muted-foreground/60" />
                 </div>
                 <p className="text-xs font-medium text-foreground">Select a Target Entity</p>
-                <p className="text-[11px] text-muted-foreground max-w-56 mt-1">
+                <p className="text-xs text-muted-foreground max-w-56 mt-1">
                   Choose an entity to receive the selected members from the source entity.
                 </p>
               </div>
@@ -1153,10 +1153,10 @@ export function TwxMigrateExplorer() {
                     className="w-full"
                   >
                     <TabsList className="w-full grid grid-cols-2 h-7 p-0.5 bg-muted/60">
-                      <TabsTrigger value="staged" className="text-[11px] h-6 px-1 font-medium">
+                      <TabsTrigger value="staged" className="text-xs h-6 px-1 font-medium">
                         Staged Inbound ({selectedItems.length})
                       </TabsTrigger>
-                      <TabsTrigger value="existing" className="text-[11px] h-6 px-1">
+                      <TabsTrigger value="existing" className="text-xs h-6 px-1">
                         Existing Members ({((targetMembers?.properties.length ?? 0) + (targetMembers?.services.length ?? 0))})
                       </TabsTrigger>
                     </TabsList>
@@ -1180,8 +1180,8 @@ export function TwxMigrateExplorer() {
                           <div
                             key={`${item.kind}:${item.name}`}
                             className={cn(
-                              "flex items-center justify-between gap-2 p-2 rounded-lg border text-xs bg-background/80 shadow-2xs",
-                              hasConflict ? "border-amber-500/40 bg-amber-500/5" : "border-border"
+                              "flex items-center justify-between gap-2 p-2 rounded-lg border text-xs bg-background/95 shadow-2xs",
+                              hasConflict ? "border-warning/40 bg-warning/5" : "border-border"
                             )}
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -1189,8 +1189,8 @@ export function TwxMigrateExplorer() {
                                 className={cn(
                                   "size-5 rounded flex items-center justify-center shrink-0 text-[10px]",
                                   isService
-                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                    : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                                    ? "bg-success/10 text-success"
+                                    : "bg-info/10 text-info"
                                 )}
                               >
                                 {isService ? <IconCode className="size-3.5" /> : <IconAdjustments className="size-3.5" />}
@@ -1208,11 +1208,11 @@ export function TwxMigrateExplorer() {
 
                             <div className="flex items-center gap-1.5 shrink-0">
                               {hasConflict ? (
-                                <Badge variant="outline" className="text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                                <Badge variant="outline" className="text-[9px] border-warning/50 text-warning bg-warning/10">
                                   Conflict
                                 </Badge>
                               ) : (
-                                <Badge variant="outline" className="text-[9px] border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                                <Badge variant="outline" className="text-[9px] border-success/40 text-success bg-success/10">
                                   <IconPlus className="size-2.5 mr-0.5" /> New
                                 </Badge>
                               )}
@@ -1225,11 +1225,11 @@ export function TwxMigrateExplorer() {
                     // Existing members view
                     <div className="flex flex-col gap-3">
                       <div>
-                        <div className="text-[11px] font-semibold text-muted-foreground mb-1.5">
+                        <div className="text-xs font-semibold text-muted-foreground mb-1.5">
                           Existing Properties ({targetMembers?.properties.length ?? 0})
                         </div>
                         {(targetMembers?.properties.length ?? 0) === 0 ? (
-                          <p className="text-[11px] text-muted-foreground/70">No existing properties.</p>
+                          <p className="text-xs text-muted-foreground/70">No existing properties.</p>
                         ) : (
                           <div className="flex flex-col gap-1">
                             {targetMembers?.properties.map((p) => (
@@ -1237,7 +1237,7 @@ export function TwxMigrateExplorer() {
                                 key={p}
                                 className="flex items-center gap-2 p-1.5 rounded-md bg-muted/20 border text-xs font-mono"
                               >
-                                <IconAdjustments className="size-3 text-indigo-500/70" />
+                                <IconAdjustments className="size-3 text-info/70" />
                                 <span className="truncate">{p}</span>
                               </div>
                             ))}
@@ -1246,11 +1246,11 @@ export function TwxMigrateExplorer() {
                       </div>
 
                       <div>
-                        <div className="text-[11px] font-semibold text-muted-foreground mb-1.5">
+                        <div className="text-xs font-semibold text-muted-foreground mb-1.5">
                           Existing Services ({targetMembers?.services.length ?? 0})
                         </div>
                         {(targetMembers?.services.length ?? 0) === 0 ? (
-                          <p className="text-[11px] text-muted-foreground/70">No existing services.</p>
+                          <p className="text-xs text-muted-foreground/70">No existing services.</p>
                         ) : (
                           <div className="flex flex-col gap-1">
                             {targetMembers?.services.map((s) => (
@@ -1259,7 +1259,7 @@ export function TwxMigrateExplorer() {
                                 className="flex items-center justify-between gap-2 p-1.5 rounded-md bg-muted/20 border text-xs font-mono"
                               >
                                 <div className="flex items-center gap-2 truncate">
-                                  <IconCode className="size-3 text-emerald-500/70" />
+                                  <IconCode className="size-3 text-success/70" />
                                   <span className="truncate">{s.name}</span>
                                 </div>
                                 {!s.hasImplementation && (
@@ -1296,7 +1296,7 @@ export function TwxMigrateExplorer() {
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground font-mono mt-1">
-              Source: <span className="font-semibold text-foreground">{sourceName}</span> ➔ Target:{" "}
+              Source: <span className="font-semibold text-foreground">{sourceName}</span> <IconArrowRight className="inline size-3 align-[-2px]" /> Target:{" "}
               <span className="font-semibold text-foreground">{targetName}</span>
             </DialogDescription>
           </DialogHeader>
@@ -1304,11 +1304,11 @@ export function TwxMigrateExplorer() {
           <div className="flex-1 flex flex-col min-h-0 gap-3 overflow-y-auto py-2">
             {/* Conflicts section */}
             {conflicts.length > 0 && (
-              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 shadow-xs shrink-0">
-                <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300 mb-2">
+              <div className="rounded-xl border border-warning/40 bg-warning/10 p-3.5 shadow-xs shrink-0">
+                <div className="flex items-center gap-2 text-xs font-semibold text-warning mb-2">
                   <IconAlertTriangle className="size-4 shrink-0" /> Target Name Conflicts Detected ({conflicts.length})
                 </div>
-                <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80 mb-2.5">
+                <p className="text-xs text-warning/80 mb-2.5">
                   Select which items should overwrite the existing target definition. Unchecked items will be skipped to preserve target content.
                 </p>
                 <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
@@ -1322,8 +1322,8 @@ export function TwxMigrateExplorer() {
                         className={cn(
                           "flex items-center gap-2.5 text-xs p-2 rounded-lg border cursor-pointer select-none transition-colors",
                           willOverwrite
-                            ? "bg-amber-500/20 border-amber-500/50"
-                            : "bg-background/80 border-border hover:bg-muted/40"
+                            ? "bg-warning/20 border-warning/50"
+                            : "bg-background/95 border-border hover:bg-muted/40"
                         )}
                       >
                         <Checkbox checked={willOverwrite} onCheckedChange={() => toggleOverwrite(k)} />
@@ -1333,10 +1333,10 @@ export function TwxMigrateExplorer() {
                         <span className="font-mono font-semibold">
                           {c.name}
                           {c.newName && c.newName !== c.name && (
-                            <span className="text-muted-foreground font-normal"> ➔ {c.newName}</span>
+                            <span className="text-muted-foreground font-normal"> <IconArrowRight className="inline size-3 align-[-2px]" /> {c.newName}</span>
                           )}
                         </span>
-                        <span className="text-muted-foreground text-[11px] ml-auto">
+                        <span className="text-muted-foreground text-xs ml-auto">
                           {willOverwrite ? "Will overwrite target" : "Will skip (keep target)"}
                         </span>
                       </label>
@@ -1348,8 +1348,8 @@ export function TwxMigrateExplorer() {
 
             {/* Warnings list */}
             {allWarnings.length > 0 && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 shrink-0 max-h-28 overflow-y-auto">
-                <div className="text-xs font-semibold mb-1 flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+              <div className="rounded-xl border border-warning/30 bg-warning/5 p-3 shrink-0 max-h-28 overflow-y-auto">
+                <div className="text-xs font-semibold mb-1 flex items-center gap-1.5 text-warning">
                   <IconInfoCircle className="size-3.5" /> Migration Warnings
                 </div>
                 <ul className="list-disc pl-4 text-xs text-muted-foreground flex flex-col gap-0.5">
@@ -1460,8 +1460,8 @@ export function TwxMigrateExplorer() {
             </div>
 
             {deleteWarnings.length > 0 && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 shrink-0 max-h-28 overflow-y-auto">
-                <div className="text-xs font-semibold mb-1 flex items-center gap-1 text-amber-700 dark:text-amber-400">
+              <div className="rounded-xl border border-warning/30 bg-warning/5 p-3 shrink-0 max-h-28 overflow-y-auto">
+                <div className="text-xs font-semibold mb-1 flex items-center gap-1 text-warning">
                   <IconAlertTriangle className="size-3.5" /> Warnings
                 </div>
                 <ul className="list-disc pl-4 text-xs text-muted-foreground flex flex-col gap-0.5">

@@ -68,6 +68,12 @@ pub fn session_file(data_dir: &Path, env_id: &str) -> PathBuf {
   sessions_dir(data_dir).join(format!("{}.json", file_stem(env_id)))
 }
 
+/// The environment's own Edge profile: keeps the identity provider's cookies,
+/// remembered user names and account picks between runs.
+pub fn profile_dir(data_dir: &Path, env_id: &str) -> PathBuf {
+  data_dir.join("uitest").join("profiles").join(file_stem(env_id))
+}
+
 fn meta_file(data_dir: &Path, env_id: &str) -> PathBuf {
   sessions_dir(data_dir).join(format!("{}.meta.json", file_stem(env_id)))
 }
@@ -177,13 +183,18 @@ pub fn extract_storage_state(text: &str) -> Option<Value> {
 
 // ---- the browser ------------------------------------------------------------
 
-/// The Playwright MCP server, as the transient `uitest` server.
-pub fn server_config(out_dir: &Path, storage: Option<&Path>, headless: bool) -> McpServerConfig {
-  let mut args: Vec<String> = ["-y", "@playwright/mcp@latest", "--isolated", "--browser", "msedge", "--output-dir"].map(String::from).to_vec();
+/// The Playwright MCP server, as the transient `uitest` server. With a profile the
+/// browser keeps its data there between starts; without one it starts clean.
+pub fn server_config(out_dir: &Path, profile: Option<&Path>, headless: bool) -> McpServerConfig {
+  let mut args: Vec<String> = ["-y", "@playwright/mcp@latest", "--browser", "msedge", "--output-dir"].map(String::from).to_vec();
   args.push(out_dir.to_string_lossy().into_owned());
-  if let Some(s) = storage {
-    args.push("--storage-state".into());
-    args.push(s.to_string_lossy().into_owned());
+  match profile {
+    Some(p) => {
+      let _ = std::fs::create_dir_all(p);
+      args.push("--user-data-dir".into());
+      args.push(p.to_string_lossy().into_owned());
+    }
+    None => args.push("--isolated".into()),
   }
   if headless {
     args.push("--headless".into());
@@ -210,6 +221,36 @@ pub async fn start_browser(a: &Arc<Assistant>, cfg: McpServerConfig) -> Result<V
 /// The exposed name of the server's tool whose own name starts with `prefix`.
 pub async fn tool_named(a: &Arc<Assistant>, servers: &[McpServerConfig], prefix: &str) -> Option<String> {
   a.mcp_clients.server_tools(servers).await.into_iter().find(|t| t.server == SERVER && t.original.starts_with(prefix)).map(|t| t.name)
+}
+
+/// Starts the environment's browser (its own profile) and adds the saved login's cookies.
+pub async fn start_env_browser(a: &Arc<Assistant>, data_dir: &Path, env_id: &str, out_dir: &Path, headless: bool) -> Result<Vec<McpServerConfig>> {
+  let cfg = server_config(out_dir, Some(&profile_dir(data_dir, env_id)), headless);
+  let servers = start_browser(a, cfg).await?;
+  restore_cookies(a, &servers, &session_file(data_dir, env_id)).await;
+  Ok(servers)
+}
+
+/// Best effort: a missing or unreadable file leaves the profile's own cookies.
+async fn restore_cookies(a: &Arc<Assistant>, servers: &[McpServerConfig], file: &Path) {
+  let Some(cookies) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("cookies").cloned()) else {
+    return;
+  };
+  if !cookies.as_array().is_some_and(|c| !c.is_empty()) {
+    return;
+  }
+  let Some(name) = tool_named(a, servers, "browser_run_code").await else { return };
+  let code = format!("async (page) => {{ await page.context().addCookies({cookies}); return 'ok'; }}");
+  if let Err(e) = a.mcp_clients.call(servers, &name, json!({ "code": code }), CODE_TIMEOUT).await {
+    crate::assistant::log_warn(&format!("uitest: could not restore the saved login: {e}"));
+  }
+}
+
+/// Saves the running browser's cookies as the environment's login (keeps the check result).
+pub async fn refresh_saved(a: &Arc<Assistant>, data_dir: &Path, env_id: &str) {
+  if let Ok(state) = capture_state(a).await {
+    let _ = std::fs::write(session_file(data_dir, env_id), serde_json::to_string(&state).unwrap_or_default());
+  }
 }
 
 /// Opens `url` in the running browser; returns the tool's text (with `Page URL:`).
@@ -244,8 +285,7 @@ fn busy_check(env_id: &str) -> Result<()> {
 pub async fn login_start(a: &Arc<Assistant>, data_dir: &Path, env_id: &str) -> Result<UiSessionStatus> {
   busy_check(env_id)?;
   let base = base_url(a, env_id).await?;
-  let cfg = server_config(&output_dir(data_dir, "login"), None, false);
-  let servers = start_browser(a, cfg).await?;
+  let servers = start_env_browser(a, data_dir, env_id, &output_dir(data_dir, "login"), false).await?;
   set_login(Some(env_id.to_string()));
   if let Err(e) = navigate(a, &servers, &landing_url(&base)).await {
     set_login(None);
@@ -315,9 +355,7 @@ pub fn record_check(data_dir: &Path, env_id: &str, valid: bool) -> Result<()> {
 /// The headless visit itself; leaves no browser running.
 pub async fn check_valid(a: &Arc<Assistant>, data_dir: &Path, env_id: &str) -> Result<bool> {
   let base = base_url(a, env_id).await?;
-  let file = session_file(data_dir, env_id);
-  let cfg = server_config(&output_dir(data_dir, "check"), Some(&file), true);
-  let servers = start_browser(a, cfg).await?;
+  let servers = start_env_browser(a, data_dir, env_id, &output_dir(data_dir, "check"), true).await?;
   let visit = navigate(a, &servers, &landing_url(&base)).await;
   a.remove_transient_mcp(SERVER).await;
   let text = visit?;
@@ -330,6 +368,7 @@ pub async fn clear(a: &Arc<Assistant>, data_dir: &Path, env_id: &str) -> Result<
   }
   let _ = std::fs::remove_file(session_file(data_dir, env_id));
   let _ = std::fs::remove_file(meta_file(data_dir, env_id));
+  let _ = std::fs::remove_dir_all(profile_dir(data_dir, env_id));
   Ok(status(data_dir, env_id, "Saved login removed."))
 }
 

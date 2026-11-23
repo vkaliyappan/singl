@@ -33,8 +33,11 @@ import {
   IconSpace,
   IconTextWrap,
   IconGitCompare,
+  IconArrowLeft,
+  IconArrowRight,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -55,7 +58,7 @@ import { clipText, PIN_LIMIT } from "@/lib/assistant/pin-utils";
 
 const editorLoading = () => (
   <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs">
-    <IconLoader2 className="size-5 animate-spin text-primary" />
+    <Spinner className="size-5 text-primary" />
     <span>Loading Monaco editor…</span>
   </div>
 );
@@ -116,20 +119,20 @@ function StatusBadge({ status, size = "sm" }: { status: NodeStatus; size?: "sm" 
     added: {
       label: "A",
       full: "Added",
-      className: "text-emerald-600 dark:text-emerald-400 font-bold",
-      bg: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+      className: "text-success font-bold",
+      bg: "bg-success/10 text-success border-success/30",
     },
     removed: {
       label: "D",
       full: "Deleted",
-      className: "text-rose-600 dark:text-rose-400 font-bold",
-      bg: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30",
+      className: "text-destructive font-bold",
+      bg: "bg-destructive/10 text-destructive border-destructive/30",
     },
     modified: {
       label: "M",
       full: "Modified",
-      className: "text-amber-600 dark:text-amber-400 font-bold",
-      bg: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+      className: "text-warning font-bold",
+      bg: "bg-warning/10 text-warning border-warning/30",
     },
   };
 
@@ -606,7 +609,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* ── Top Command Bar & Global Controls ─────────────────────────────────── */}
-      <header className="flex items-center justify-between gap-3 px-3 py-2 border-b bg-card/60 backdrop-blur shrink-0 flex-wrap">
+      <header className="flex items-center justify-between gap-3 px-3 py-2 border-b bg-card shrink-0 flex-wrap">
         {/* Left: Environment & Run Action */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
@@ -713,8 +716,8 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                 className={cn(
                   "flex items-center gap-1 px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer",
                   statusFilter === "modified"
-                    ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold"
-                    : "text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
+                    ? "bg-warning/20 text-warning font-semibold"
+                    : "text-warning hover:bg-warning/10"
                 )}
               >
                 <IconEdit className="size-3" />
@@ -728,8 +731,8 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                 className={cn(
                   "flex items-center gap-1 px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer",
                   statusFilter === "added"
-                    ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold"
-                    : "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                    ? "bg-success/20 text-success font-semibold"
+                    : "text-success hover:bg-success/10"
                 )}
               >
                 <IconPlus className="size-3" />
@@ -743,8 +746,8 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                 className={cn(
                   "flex items-center gap-1 px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer",
                   statusFilter === "removed"
-                    ? "bg-rose-500/20 text-rose-700 dark:text-rose-300 font-semibold"
-                    : "text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                    ? "bg-destructive/20 text-destructive font-semibold"
+                    : "text-destructive hover:bg-destructive/10"
                 )}
               >
                 <IconMinus className="size-3" />
@@ -878,7 +881,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
             {treeLoading && (
               <div className="flex flex-col items-center justify-center gap-2 p-6 text-xs text-muted-foreground my-auto">
-                <IconLoader2 className="size-6 animate-spin text-primary" />
+                <Spinner className="size-6 text-primary" />
                 <p className="font-medium text-foreground">Analyzing file differences…</p>
                 <p className="text-[11px] text-muted-foreground">Calculating SHA hashes</p>
               </div>
@@ -920,7 +923,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                 <div className="flex flex-col px-3 py-2 border-y gap-1 bg-muted/20 text-[11px]">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-foreground flex items-center gap-1">
-                      <span className="size-2 rounded-full bg-blue-500 inline-block" />
+                      <span className="size-2 rounded-full bg-info inline-block" />
                       Repo Root:
                     </span>
                     <button
@@ -937,7 +940,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
                   <div className="flex items-center justify-between mt-1 pt-1 border-t border-border/40">
                     <span className="font-semibold text-foreground flex items-center gap-1">
-                      <span className="size-2 rounded-full bg-emerald-500 inline-block" />
+                      <span className="size-2 rounded-full bg-success inline-block" />
                       TWX Root:
                     </span>
                     <button
@@ -999,7 +1002,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                         <FileIcon name={fileName} className="size-3.5 shrink-0" />
                         <span className="font-mono text-xs truncate max-w-[180px]">{fileName}</span>
                         <StatusBadge status={tab.node.status} />
-                        {tab.loading && <IconLoader2 className="size-3 animate-spin shrink-0 text-primary" />}
+                        {tab.loading && <Spinner className="size-3 shrink-0 text-primary" />}
 
                         <button
                           onClick={(e) => {
@@ -1043,7 +1046,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                       <StatusBadge status={activeTabData.node.status} size="md" />
 
                       {copiedPath === activeTab ? (
-                        <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        <span className="flex items-center gap-1 text-[10px] text-success font-medium">
                           <IconCheck className="size-3" /> Copied
                         </span>
                       ) : (
@@ -1076,7 +1079,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                         <span className={cn(baseIsRepo ? "font-semibold text-foreground" : "")}>
                           Left: {baseIsRepo ? "Repo" : "TWX"}
                         </span>
-                        <span>←</span>
+                        <IconArrowLeft className="size-3" />
                         <span className={cn(!baseIsRepo ? "font-semibold text-foreground" : "")}>
                           Right: {baseIsRepo ? "TWX" : "Repo"}
                         </span>
@@ -1168,7 +1171,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
                   {/* One-Sided File Warning Notice */}
                   {activeTabData.node.status === "added" && (
-                    <div className="px-3 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                    <div className="px-3 py-1.5 bg-success/10 border-b border-success/20 text-xs text-success flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <IconPlus className="size-4 shrink-0" />
                         <span>
@@ -1182,7 +1185,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                   )}
 
                   {activeTabData.node.status === "removed" && (
-                    <div className="px-3 py-1.5 bg-rose-500/10 border-b border-rose-500/20 text-xs text-rose-700 dark:text-rose-300 flex items-center justify-between">
+                    <div className="px-3 py-1.5 bg-destructive/10 border-b border-destructive/20 text-xs text-destructive flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <IconMinus className="size-4 shrink-0" />
                         <span>
@@ -1212,7 +1215,7 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
 
                   {activeTabData.loading && (
                     <div className="flex flex-col items-center justify-center flex-1 gap-2 text-xs text-muted-foreground">
-                      <IconLoader2 className="size-6 animate-spin text-primary" />
+                      <Spinner className="size-6 text-primary" />
                       <span>Loading file content…</span>
                     </div>
                   )}
@@ -1349,13 +1352,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                     >
                       <span className="text-[11px] text-muted-foreground flex items-center justify-between">
                         Modified
-                        <IconEdit className="size-3.5 text-amber-500" />
+                        <IconEdit className="size-3.5 text-warning" />
                       </span>
-                      <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                      <span className="text-2xl font-bold tabular text-warning">
                         {treeData.summary.modified}
                       </span>
-                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground">
-                        Files with diffs →
+                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground flex items-center gap-1">
+                        Files with diffs <IconArrowRight className="size-3" />
                       </span>
                     </button>
 
@@ -1365,13 +1368,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                     >
                       <span className="text-[11px] text-muted-foreground flex items-center justify-between">
                         Added
-                        <IconPlus className="size-3.5 text-emerald-500" />
+                        <IconPlus className="size-3.5 text-success" />
                       </span>
-                      <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                      <span className="text-2xl font-bold tabular text-success">
                         {treeData.summary.added}
                       </span>
-                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground">
-                        Only in TWX →
+                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground flex items-center gap-1">
+                        Only in TWX <IconArrowRight className="size-3" />
                       </span>
                     </button>
 
@@ -1381,13 +1384,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                     >
                       <span className="text-[11px] text-muted-foreground flex items-center justify-between">
                         Deleted
-                        <IconMinus className="size-3.5 text-rose-500" />
+                        <IconMinus className="size-3.5 text-destructive" />
                       </span>
-                      <span className="text-2xl font-bold text-rose-600 dark:text-rose-400">
+                      <span className="text-2xl font-bold tabular text-destructive">
                         {treeData.summary.removed}
                       </span>
-                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground">
-                        Only in Repo →
+                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground flex items-center gap-1">
+                        Only in Repo <IconArrowRight className="size-3" />
                       </span>
                     </button>
 
@@ -1397,13 +1400,13 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                     >
                       <span className="text-[11px] text-muted-foreground flex items-center justify-between">
                         Identical
-                        <IconEqual className="size-3.5 text-blue-500" />
+                        <IconEqual className="size-3.5 text-info" />
                       </span>
-                      <span className="text-2xl font-bold text-muted-foreground">
+                      <span className="text-2xl font-bold tabular text-muted-foreground">
                         {treeData.summary.identical}
                       </span>
-                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground">
-                        Matching files →
+                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground flex items-center gap-1">
+                        Matching files <IconArrowRight className="size-3" />
                       </span>
                     </button>
                   </div>
@@ -1437,8 +1440,8 @@ export function CompareExplorer({ envs }: CompareExplorerProps) {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-xl border bg-card/60 p-4 text-center text-xs text-muted-foreground">
-                      <IconCheck className="size-5 text-emerald-500 mx-auto mb-1" />
+                    <div className="rounded-xl border bg-card p-4 text-center text-xs text-muted-foreground">
+                      <IconCheck className="size-5 text-success mx-auto mb-1" />
                       <p className="font-semibold text-foreground">All files are identical</p>
                       <p className="text-[11px] mt-0.5">Repo and TWX entities are in sync for this environment.</p>
                     </div>

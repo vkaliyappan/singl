@@ -118,7 +118,7 @@ function SvcRow({ s, link }: { s: Svc; link: (s: Svc) => string | null }) {
                     <td className="py-0.5 pr-2 font-mono">
                       {p.name}
                       {p.required && (
-                        <span className="ml-1 font-sans text-[9px] text-red-600 dark:text-red-400" title="Required">
+                        <span className="ml-1 font-sans text-[9px] text-destructive" title="Required">
                           required
                         </span>
                       )}

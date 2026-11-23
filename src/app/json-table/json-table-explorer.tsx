@@ -14,11 +14,13 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconMessagePlus,
+  IconArrowRight,
 } from "@tabler/icons-react";
 
 import { useTheme } from "@/components/providers";
 import { addPins, usePinnables, type NewPin } from "@/lib/assistant/pins";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -56,8 +58,8 @@ import { takePendingJson } from "@/lib/json-handoff";
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full items-center justify-center text-[11px] text-muted-foreground">
-      Loading editor…
+    <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+      <Spinner className="size-3.5" /> Loading editor…
     </div>
   ),
 });
@@ -353,11 +355,11 @@ export function JsonTableExplorer() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* ── Command bar ─────────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between gap-3 px-3 py-2 border-b bg-card/60 backdrop-blur shrink-0 flex-wrap">
+      <header className="flex items-center justify-between gap-3 px-3 py-2 border-b bg-card shrink-0 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1.5">
             <IconTable className="size-4 text-primary shrink-0" />
-            <span className="font-semibold text-xs tracking-tight">JSON → Table</span>
+            <span className="inline-flex items-center gap-1 font-semibold text-xs tracking-tight">JSON <IconArrowRight className="size-3" /> Table</span>
           </div>
 
           <Select
@@ -546,7 +548,7 @@ export function JsonTableExplorer() {
               </>
             ) : parsed.ok === true ? (
               <>
-                <IconCheck className="size-3.5 shrink-0 mt-px text-emerald-500" />
+                <IconCheck className="size-3.5 shrink-0 mt-px text-success" />
                 <span>
                   Valid JSON · {sources.length} table{sources.length === 1 ? "" : "s"} found
                 </span>
@@ -556,7 +558,7 @@ export function JsonTableExplorer() {
                 <span className="mr-auto">Waiting for JSON…</span>
                 <button
                   type="button"
-                  className="underline underline-offset-2 hover:text-foreground"
+                  className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
                   onClick={() => setText(SAMPLE)}
                 >
                   Load sample

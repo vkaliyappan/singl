@@ -257,10 +257,10 @@ export function NodePanel({
   });
 
   const column = "flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden p-3";
-  const heading = "flex items-center gap-1.5 text-[11px] font-semibold tracking-tight";
+  const heading = "flex items-center gap-1.5 text-xs font-semibold tracking-tight";
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background/80">
       <div
         className="absolute inset-0"
         onClick={onClose}
@@ -286,7 +286,7 @@ export function NodePanel({
             onChange={(e) => onRename(node.id, e.target.value)}
             className="h-7 w-64 text-xs font-medium"
           />
-          <span className="truncate font-mono text-[11px] text-muted-foreground">
+          <span className="truncate font-mono text-xs text-muted-foreground">
             {subtitleOf(node)}
           </span>
           {graph.nodes.some((n) => n.id !== node.id && n.label === node.label) && (
@@ -419,7 +419,7 @@ export function NodePanel({
             </div>
 
             {upstream.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Nothing is wired into this node. Connect one, or address any node directly with{" "}
                 <code className="font-mono">{'$node["Label"]'}</code>.
               </p>
@@ -507,8 +507,8 @@ export function NodePanel({
                     filterPreview.error
                       ? "border-destructive/50 text-destructive"
                       : filterPreview.warning
-                        ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
-                        : "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
+                        ? "border-warning/50 text-warning"
+                        : "border-success/50 text-success"
                   )}
                   title={filterPreview.error ?? filterPreview.warning}
                 >
@@ -525,9 +525,9 @@ export function NodePanel({
                     preview.error
                       ? "border-destructive/50 text-destructive"
                       : preview.branch === "true"
-                        ? "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
+                        ? "border-success/50 text-success"
                         : preview.branch === undefined || preview.branch === "false"
-                          ? "border-rose-500/50 text-rose-600 dark:text-rose-400"
+                          ? "border-destructive/50 text-destructive"
                           : "border-primary/50 text-primary"
                   )}
                 >
@@ -552,7 +552,7 @@ export function NodePanel({
                   value={node.notes ?? ""}
                   onChange={(e) => onChange(node.id, { notes: e.target.value })}
                   placeholder="Notes — why this step exists…"
-                  className="min-h-9 shrink-0 text-[11px]"
+                  className="min-h-9 shrink-0 text-xs"
                 />
               </>
             ) : (
@@ -573,7 +573,7 @@ export function NodePanel({
                 ) : (
                   <>
                     {node.params.length === 0 && (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         This service takes no parameters.
                       </p>
                     )}
@@ -599,7 +599,7 @@ export function NodePanel({
                     value={node.notes ?? ""}
                     onChange={(e) => onChange(node.id, { notes: e.target.value })}
                     placeholder="Why this step exists…"
-                    className="min-h-12 text-[11px]"
+                    className="min-h-12 text-xs"
                   />
                 </div>
               </div>
@@ -646,7 +646,7 @@ export function NodePanel({
                 <span
                   className={cn(
                     "text-[10px] font-normal",
-                    state?.status === "ok" ? "text-emerald-600" : "text-destructive"
+                    state?.status === "ok" ? "text-success" : "text-destructive"
                   )}
                 >
                   {state?.status} · {state?.ms}ms
@@ -669,7 +669,7 @@ export function NodePanel({
             </div>
 
             {state?.status === "error" && (
-              <p className="flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive">
+              <p className="flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
                 <IconAlertCircle className="mt-0.5 size-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{state.error}</span>
                 <CopyButton text={state.error ?? ""} />

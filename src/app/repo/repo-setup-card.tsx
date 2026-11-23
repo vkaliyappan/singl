@@ -14,6 +14,8 @@ import {
   IconShieldCheck,
   IconShieldX,
   IconSearch,
+  IconBulb,
+  IconPackage,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -108,7 +110,7 @@ export function RepoSetupCard({
                 {hasPatToken ? (
                   <Badge
                     variant="outline"
-                    className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[11px] gap-1 px-2.5 py-1"
+                    className="bg-success/10 text-success border-success/30 text-[11px] gap-1 px-2.5 py-1"
                   >
                     <IconShieldCheck className="size-3.5" />
                     PAT Configured
@@ -116,7 +118,7 @@ export function RepoSetupCard({
                 ) : (
                   <Badge
                     variant="outline"
-                    className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[11px] gap-1 px-2.5 py-1"
+                    className="bg-warning/10 text-warning border-warning/30 text-[11px] gap-1 px-2.5 py-1"
                   >
                     <IconShieldX className="size-3.5" />
                     No PAT
@@ -128,7 +130,7 @@ export function RepoSetupCard({
 
           <CardContent className="space-y-5 pt-2">
             {!hasPatToken && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2.5">
+              <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning flex items-start gap-2.5">
                 <IconAlertCircle className="size-4 shrink-0 mt-0.5" />
                 <div>
                   <p className="font-medium">Authentication recommended for private repositories</p>
@@ -251,7 +253,7 @@ export function RepoSetupCard({
                           <div className="flex items-center gap-2">
                             <span>{b}</span>
                             {(b === "main" || b === "master") && (
-                              <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">
+                              <Badge variant="secondary" className="text-[10px] px-1 py-0 h-3.5">
                                 default
                               </Badge>
                             )}
@@ -303,13 +305,13 @@ export function RepoSetupCard({
         {/* Quick Tips */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-muted-foreground">
           <div className="p-3 rounded-lg border bg-card/60 space-y-1">
-            <p className="font-medium text-foreground">💡 Fast Branch Switching</p>
+            <p className="font-medium text-foreground flex items-center gap-1.5"><IconBulb className="size-3.5 text-warning" /> Fast Branch Switching</p>
             <p className="text-[11px] leading-relaxed">
               Once cloned, switch branches directly from the top toolbar without re-cloning.
             </p>
           </div>
           <div className="p-3 rounded-lg border bg-card/60 space-y-1">
-            <p className="font-medium text-foreground">📦 TWX Package Extraction</p>
+            <p className="font-medium text-foreground flex items-center gap-1.5"><IconPackage className="size-3.5 text-info" /> TWX Package Extraction</p>
             <p className="text-[11px] leading-relaxed">
               Extract XML entity packages with a single click to inspect services and mashups locally.
             </p>

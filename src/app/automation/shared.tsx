@@ -51,19 +51,19 @@ export function EnvPicker({
 
 export function PassIcon({ passed }: { passed: boolean }) {
   return passed ? (
-    <IconCheck className="size-4 text-emerald-600 dark:text-emerald-400" aria-label="passed" />
+    <IconCheck className="size-4 text-success" aria-label="passed" />
   ) : (
-    <IconX className="size-4 text-red-600 dark:text-red-400" aria-label="failed" />
+    <IconX className="size-4 text-destructive" aria-label="failed" />
   )
 }
 
 const TONES: Record<string, string> = {
-  passed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  ok: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  same: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  failed: "bg-red-500/15 text-red-700 dark:text-red-300",
-  error: "bg-red-500/15 text-red-700 dark:text-red-300",
-  drift: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  passed: "bg-success/15 text-success",
+  ok: "bg-success/15 text-success",
+  same: "bg-success/15 text-success",
+  failed: "bg-destructive/15 text-destructive",
+  error: "bg-destructive/15 text-destructive",
+  drift: "bg-warning/15 text-warning",
 }
 
 export function StatusPill({ status }: { status: string | null }) {

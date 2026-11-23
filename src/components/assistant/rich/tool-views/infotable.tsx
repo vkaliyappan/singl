@@ -85,11 +85,11 @@ export function CellValue({ value }: { value: unknown }) {
     return <span className="text-muted-foreground/70 italic">null</span>;
   if (typeof value === "boolean")
     return value ? (
-      <span className="text-emerald-600 dark:text-emerald-400" aria-label="yes">
+      <span className="text-success" aria-label="yes">
         ✓
       </span>
     ) : (
-      <span className="text-red-600 dark:text-red-400" aria-label="no">
+      <span className="text-destructive" aria-label="no">
         ✗
       </span>
     );

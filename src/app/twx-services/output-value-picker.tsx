@@ -168,7 +168,7 @@ export function OutputValuePicker({
     const result: OutputSource[] = [];
     if (liveOutput !== null) {
       result.push({
-        label: "⚡ Current Live Output",
+        label: "Current Live Output",
         outputType: liveOutput.type,
         rawOutput: JSON.stringify(liveOutput.data),
         isLive: true,

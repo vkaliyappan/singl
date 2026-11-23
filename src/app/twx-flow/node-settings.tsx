@@ -86,7 +86,7 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-1 border-b pb-2.5 last:border-b-0">
-      <p className="text-[11px] font-medium">{label}</p>
+      <p className="text-xs font-medium">{label}</p>
       {children}
       {hint && <p className="text-[10px] leading-snug text-muted-foreground">{hint}</p>}
     </div>
@@ -102,7 +102,7 @@ function InputOrder({ node, parents }: { node: FlowNode; parents: string[] }) {
         Inputs are taken in wire order. Use “Make $json” on the left to swap them round.
       </p>
       {names.map((name, index) => (
-        <p key={name} className="flex items-center gap-1.5 text-[11px]">
+        <p key={name} className="flex items-center gap-1.5 text-xs">
           <Badge variant="outline" className="text-[9px]">
             {name}
           </Badge>
@@ -269,7 +269,7 @@ function ConditionBuilder({
         Add condition
       </Button>
 
-      <label className="mt-1 flex items-center gap-2 text-[11px]">
+      <label className="mt-1 flex items-center gap-2 text-xs">
         <Switch
           checked={node.convertTypes}
           onCheckedChange={(checked) => onChange({ convertTypes: checked === true })}
@@ -308,7 +308,7 @@ function SwitchRules({
               value={rule.name}
               onChange={(e) => patch(rule.id, { name: e.target.value })}
               placeholder={`rule ${index + 1}`}
-              className="h-6 flex-1 text-[11px]"
+              className="h-6 flex-1 text-xs"
               aria-label={`Name of rule ${index + 1}`}
             />
             <Button
@@ -534,7 +534,7 @@ function AgentSettings({
       </Field>
 
       <div className="flex flex-col gap-1 border-b pb-2.5">
-        <label className="flex items-center gap-2 text-[11px]">
+        <label className="flex items-center gap-2 text-xs">
           <Checkbox
             checked={node.autoApprove === true}
             onCheckedChange={(checked) => onChange({ autoApprove: checked === true })}
@@ -549,7 +549,7 @@ function AgentSettings({
       </div>
 
       <div className="flex flex-col gap-1">
-        <p className="text-[11px] font-medium">Command</p>
+        <p className="text-xs font-medium">Command</p>
         <pre className="overflow-x-auto rounded-md border bg-muted/40 p-2 text-[10px] leading-snug">
           {preview}
         </pre>
@@ -605,7 +605,7 @@ export function NodeSettings({
           {/* Two ways to say the same thing, as in n8n: the builder, or one
               expression over the whole row. */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-medium">Conditions</span>
+            <span className="text-xs font-medium">Conditions</span>
             <div className="ml-auto flex overflow-hidden rounded-md border">
               {(["rules", "expression"] as const).map((mode) => (
                 <button
@@ -656,7 +656,7 @@ export function NodeSettings({
             ctx={ctx}
             onChange={(rules) => onChange({ rules })}
           />
-          <label className="flex items-center gap-2 text-[11px]">
+          <label className="flex items-center gap-2 text-xs">
             <Checkbox
               checked={node.fallback}
               onCheckedChange={(checked) => onChange({ fallback: checked === true })}

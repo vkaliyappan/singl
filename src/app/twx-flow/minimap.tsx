@@ -105,7 +105,7 @@ export function Minimap({
       data-canvas-ui
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
-        "absolute right-4 bottom-4 z-20 flex flex-col overflow-hidden rounded-lg border bg-background/95 shadow-lg backdrop-blur-md transition-all duration-200",
+        "absolute right-4 bottom-4 z-20 flex flex-col overflow-hidden rounded-lg border bg-background/95 shadow-lg transition-all duration-200",
         collapsed ? "h-8 w-8 items-center justify-center p-0" : "p-1.5",
         className
       )}
@@ -200,8 +200,8 @@ export function Minimap({
               y={viewport.y}
               width={viewport.width}
               height={viewport.height}
-              fill="rgba(59, 130, 246, 0.12)"
-              stroke="rgb(59, 130, 246)"
+              fill="var(--primary)" fillOpacity={0.12}
+              stroke="var(--primary)"
               strokeWidth={Math.max(1.5, bounds.width / 120)}
               rx={6}
               className="pointer-events-none transition-all duration-75"

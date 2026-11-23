@@ -8,7 +8,9 @@ import {
   IconBook2,
   IconChevronDown,
   IconChevronLeft,
+  IconCheck,
   IconChevronRight,
+  IconMinus,
   IconFolder,
   IconPaperclip,
   IconPhoto,
@@ -29,6 +31,7 @@ import {
 import { isTauri } from "@/lib/clock-widget";
 import { errorMessage } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 import {
   assistantSkills,
   assistantTools,
@@ -544,7 +547,7 @@ function TriCheck({
         state && "border-primary bg-primary",
       )}
     >
-      {state === "mixed" ? "–" : state ? "✓" : ""}
+      {state === "mixed" ? <IconMinus className="size-3" /> : state ? <IconCheck className="size-3" /> : null}
     </button>
   );
 }
@@ -706,7 +709,7 @@ function SkillsView({ extras }: { extras: ComposerExtras }) {
       <div className="max-h-72 overflow-y-auto" aria-label="Skills">
         {skillList === null && (
           <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-            Loading…
+            <Spinner className="mx-auto size-3.5" />
           </p>
         )}
         {skillList !== null && skillList.length === 0 && (

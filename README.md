@@ -20,6 +20,20 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Scripts
+
+The Rust scripts cover releases, ThingWorx login, singl-web server management,
+and reinstalling FSCapture112. See [the scripts guide](scripts/README.md) for
+usage.
+
+To reinstall FSCapture112 on Windows, run this command from the repository root.
+It deletes the existing folder before checking for the ZIP and removes the
+registry key after successful extraction. [Reinstall details](scripts/README.md#reinstall-from-zip)
+
+```powershell
+cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin reinstall-from-zip
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

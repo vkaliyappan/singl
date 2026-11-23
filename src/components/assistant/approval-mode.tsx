@@ -25,8 +25,8 @@ const LEGACY_KEY = "singl.assistant.approval";
 
 const MODE: Record<ApprovalMode, { label: string; icon: Icon; tint: string }> = {
   ask: { label: "Ask", icon: IconShieldCheck, tint: "" },
-  auto: { label: "Auto", icon: IconBolt, tint: "text-red-600 dark:text-red-400" },
-  readOnly: { label: "Read-only", icon: IconEye, tint: "text-sky-600 dark:text-sky-400" },
+  auto: { label: "Auto", icon: IconBolt, tint: "text-destructive" },
+  readOnly: { label: "Read-only", icon: IconEye, tint: "text-info" },
 };
 const ORDER: ApprovalMode[] = ["ask", "auto", "readOnly"];
 

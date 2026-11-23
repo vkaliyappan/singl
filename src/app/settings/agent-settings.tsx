@@ -71,15 +71,13 @@ export function AgentSettings() {
                     <span className="text-xs font-medium">{agent.title}</span>
                     {agent.installed ? (
                       <Badge
-                        variant="secondary"
-                        className="h-4 border-green-500/20 bg-green-500/10 py-0 text-[9px] font-normal text-green-600 dark:text-green-400"
+                        variant="success" className="h-4 py-0 text-[10px] font-normal"
                       >
                         Installed
                       </Badge>
                     ) : (
                       <Badge
-                        variant="secondary"
-                        className="h-4 border-amber-500/20 bg-amber-500/10 py-0 text-[9px] font-normal text-amber-600 dark:text-amber-400"
+                        variant="warning" className="h-4 py-0 text-[10px] font-normal"
                       >
                         Not found
                       </Badge>

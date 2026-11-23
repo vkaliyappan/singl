@@ -67,11 +67,11 @@ export function MashupsTab({ env, baseUrl }: { env: string; baseUrl: string }) {
     },
   )
 
-  if (error) return <p className="pt-2 text-xs text-red-700 dark:text-red-400">{error}</p>
+  if (error) return <p className="pt-2 text-xs text-destructive">{error}</p>
   if (!rows)
     return (
       <div className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
-        <Spinner /> Loading mashups...
+        <Spinner /> Loading mashups…
       </div>
     )
 

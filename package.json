@@ -1,6 +1,6 @@
 {
   "name": "singl",
-  "version": "1.1.0",
+  "version": "1.1.3",
   "private": true,
   "packageManager": "pnpm@12.16.1",
   "scripts": {
@@ -9,8 +9,14 @@
     "start": "next start",
     "lint": "eslint",
     "tauri": "tauri",
-    "release": "node scripts/release.mjs",
+    "release": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin singl-release --",
     "flow:engine": "node scripts/build-flow-engine.mjs",
+    "twx:auth:check": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin twx-auth -- check",
+    "twx:auth:login": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin twx-auth -- login",
+    "web:start": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin singl-web -- start",
+    "web:restart": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin singl-web -- restart",
+    "web:redeploy": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin singl-web -- redeploy",
+    "web:stop": "cargo run -q --manifest-path src-tauri/Cargo.toml -p singl-scripts --bin singl-web -- stop",
     "twx:mcp:build": "cargo build --manifest-path src-tauri/Cargo.toml -p singl-core --bin twx-mcp",
     "assistant:mcp:build": "cargo build --manifest-path src-tauri/Cargo.toml -p singl-core --bin singl-mcp"
   },

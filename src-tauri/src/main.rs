@@ -5,5 +5,6 @@
 #![windows_subsystem = "windows"]
 
 fn main() {
+  app_lib::run_keeper_if_requested();
   app_lib::run();
 }

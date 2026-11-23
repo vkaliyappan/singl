@@ -6,10 +6,9 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { UiTestCase, UiTestStep } from "@/lib/ui-tests"
 import { Field } from "../automation/shared"
+import { MdCell } from "./md-cell"
 import { CaseStatusChip, duration, formatMs, StepResultChip, TMP } from "./shared"
 
-const AREA =
-  "w-full resize-none rounded-md border border-input bg-input/20 px-2 py-1 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 dark:bg-input/30"
 
 /** Right panel: one case in full, its steps, and the outcome of its last run. */
 export function CaseDetail({
@@ -112,20 +111,8 @@ export function CaseDetail({
                     </Button>
                   </div>
                 </div>
-                <textarea
-                  rows={2}
-                  className={AREA}
-                  placeholder="Action"
-                  value={s.action}
-                  onChange={(e) => edit(k, { action: e.target.value })}
-                />
-                <textarea
-                  rows={2}
-                  className={AREA}
-                  placeholder="Expected result"
-                  value={s.expected}
-                  onChange={(e) => edit(k, { expected: e.target.value })}
-                />
+                <MdCell className="rounded-md border" placeholder="Action" value={s.action} onChange={(v) => edit(k, { action: v })} />
+                <MdCell className="rounded-md border" placeholder="Expected result" value={s.expected} onChange={(v) => edit(k, { expected: v })} />
                 {res?.note && <p className="text-[11px] text-muted-foreground">{res.note}</p>}
               </div>
             )
@@ -141,7 +128,7 @@ export function CaseDetail({
               {formatMs(c.lastRunAt)} · {duration(c.durationMs)}
             </span>
             {c.chatId && (
-              <button type="button" className="text-primary hover:underline" onClick={() => onOpenTranscript(c.chatId)}>
+              <button type="button" className="rounded-sm text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none" onClick={() => onOpenTranscript(c.chatId)}>
                 Open transcript
               </button>
             )}

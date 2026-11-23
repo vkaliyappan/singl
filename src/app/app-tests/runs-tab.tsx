@@ -127,10 +127,10 @@ export function RunsTab({
                 onCheckedChange={(on) => toggle(h.id, !!on)}
                 aria-label="Select run"
               />
-            <button type="button" onClick={() => setPicked(h.id)} className="min-w-0 flex-1 text-left text-xs">
+            <button type="button" onClick={() => setPicked(h.id)} className="min-w-0 flex-1 rounded-sm text-left text-xs focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none">
               <span className="flex items-center justify-between gap-2">
                 <span className="whitespace-nowrap font-medium">{formatTime(h.startedAt)}</span>
-                <span className={cn("text-[11px]", h.status === "passed" ? "text-emerald-700 dark:text-emerald-300" : "text-red-700 dark:text-red-300")}>
+                <span className={cn("text-[11px] tabular-nums", h.status === "passed" ? "text-success" : "text-destructive")}>
                   {h.status}
                 </span>
               </span>
@@ -143,7 +143,7 @@ export function RunsTab({
                 title="Delete this run"
                 disabled={deleting}
                 onClick={() => remove([h.id])}
-                className="invisible mt-0.5 text-muted-foreground group-hover:visible hover:text-destructive"
+                className="invisible mt-0.5 rounded-sm text-muted-foreground group-hover:visible hover:text-destructive focus-visible:visible focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 <IconTrash className="size-3.5" />
               </button>
@@ -157,10 +157,10 @@ export function RunsTab({
         {r && (
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="text-emerald-700 dark:text-emerald-300">{r.passed} passed</span>
-              <span className="text-red-700 dark:text-red-300">{r.failed} failed</span>
+              <span className="text-success">{r.passed} passed</span>
+              <span className="text-destructive">{r.failed} failed</span>
               <span className="text-muted-foreground">of {r.total}</span>
-              {r.cancelled && <span className="text-amber-700 dark:text-amber-300">Stopped early</span>}
+              {r.cancelled && <span className="text-warning">Stopped early</span>}
               <Button size="xs" variant="outline" className="ml-auto" onClick={() => onGenerate(activeId)}>
                 <IconFileText /> Generate document
               </Button>
@@ -173,7 +173,7 @@ export function RunsTab({
                   <CaseStatusChip status={c.status} />
                   <span className="text-[11px] text-muted-foreground">{duration(c.durationMs)}</span>
                   {c.chatId && (
-                    <button type="button" className="text-xs text-primary hover:underline" onClick={() => onOpenTranscript(c.chatId)}>
+                    <button type="button" className="rounded-sm text-xs text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none" onClick={() => onOpenTranscript(c.chatId)}>
                       Open transcript
                     </button>
                   )}

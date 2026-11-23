@@ -152,8 +152,8 @@ export function McpCallLog() {
                       className={cn(
                         "w-9 shrink-0 text-right",
                         e.error
-                          ? "text-red-600 dark:text-red-400"
-                          : "text-green-600 dark:text-green-400",
+                          ? "text-destructive"
+                          : "text-success",
                       )}
                     >
                       {e.error ? "error" : "ok"}

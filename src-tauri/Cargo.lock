@@ -3958,6 +3958,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "singl-scripts"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "singl-core",
+ "tempfile",
+ "tokio",
+ "zip",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

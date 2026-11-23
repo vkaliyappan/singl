@@ -262,7 +262,7 @@ export default function TwxLogsPage() {
         : ""
 
   return (
-    <div className="flex flex-col gap-4 p-8">
+    <div className="flex flex-col gap-5 p-8">
       <PageHeader
         title="ThingWorx logs"
         description="Search a server's logs, or tail them live."

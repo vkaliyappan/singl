@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { IconGitCompare, IconLoader2 } from "@tabler/icons-react"
+import { IconArrowRight, IconGitCompare, IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { DiffView } from "@/components/assistant/rich/diff-view"
 import { Button } from "@/components/ui/button"
@@ -60,10 +60,10 @@ function DriftList({ id, items, onDiff }: { id: string; items: DriftEntity[]; on
 
 function Groups({ report, onDiff }: { report: DriftReport; onDiff: (e: DriftEntity) => void }) {
   const groups: Group[] = [
-    { key: "a", title: `Only in ${report.envA}`, items: report.onlyA, tone: "text-amber-700 dark:text-amber-300" },
-    { key: "b", title: `Only in ${report.envB}`, items: report.onlyB, tone: "text-amber-700 dark:text-amber-300" },
-    { key: "d", title: "Different", items: report.different, tone: "text-red-700 dark:text-red-300", diff: true },
-    { key: "s", title: "Same", items: report.same, tone: "text-emerald-700 dark:text-emerald-300" },
+    { key: "a", title: `Only in ${report.envA}`, items: report.onlyA, tone: "text-warning" },
+    { key: "b", title: `Only in ${report.envB}`, items: report.onlyB, tone: "text-warning" },
+    { key: "d", title: "Different", items: report.different, tone: "text-destructive", diff: true },
+    { key: "s", title: "Same", items: report.same, tone: "text-success" },
     { key: "u", title: "Not compared", items: report.unchecked, tone: "text-muted-foreground" },
   ]
   return (
@@ -81,7 +81,7 @@ function Groups({ report, onDiff }: { report: DriftReport; onDiff: (e: DriftEnti
         ))}
       </div>
       {report.warnings.length > 0 && (
-        <details className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+        <details className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
           <summary className="cursor-pointer">{report.warnings.length} warnings</summary>
           {report.warnings.map((w, i) => (
             <p key={i} className="mt-1 break-words">
@@ -265,7 +265,7 @@ export function DriftTab({ envs }: { envs: string[] }) {
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>
-              {diff?.entity.name}: {report?.envA} → {report?.envB}
+              <span className="inline-flex items-center gap-1.5">{diff?.entity.name}: {report?.envA} <IconArrowRight className="size-3.5" /> {report?.envB}</span>
             </DialogTitle>
           </DialogHeader>
           {diff && <DiffView original={diff.a} modified={diff.b} path={`${diff.entity.name}.xml`} maxHeight="60vh" />}

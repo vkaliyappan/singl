@@ -71,13 +71,13 @@ const STYLES: Record<
 > = {
   note: {
     icon: IconInfoCircle,
-    box: "border-blue-500 bg-blue-500/10",
-    text: "text-blue-600 dark:text-blue-400",
+    box: "border-info bg-info/10",
+    text: "text-info",
   },
   tip: {
     icon: IconBulb,
-    box: "border-green-500 bg-green-500/10",
-    text: "text-green-600 dark:text-green-400",
+    box: "border-success bg-success/10",
+    text: "text-success",
   },
   important: {
     icon: IconMessageReport,
@@ -86,13 +86,13 @@ const STYLES: Record<
   },
   warning: {
     icon: IconAlertTriangle,
-    box: "border-amber-500 bg-amber-500/10",
-    text: "text-amber-600 dark:text-amber-400",
+    box: "border-warning bg-warning/10",
+    text: "text-warning",
   },
   caution: {
     icon: IconAlertOctagon,
-    box: "border-red-500 bg-red-500/10",
-    text: "text-red-600 dark:text-red-400",
+    box: "border-destructive bg-destructive/10",
+    text: "text-destructive",
   },
 };
 // Aliases a caller may pass directly to <Callout>.

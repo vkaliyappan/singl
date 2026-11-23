@@ -130,11 +130,11 @@ function DefaultCell({ value, kind, truncate }: { value: unknown; kind: GridKind
   if (kind === "boolean" || typeof value === "boolean") {
     const on = value === true || value === "true";
     return on ? (
-      <span className="text-emerald-600 dark:text-emerald-400" aria-label="yes">
+      <span className="text-success" aria-label="yes">
         ✓
       </span>
     ) : (
-      <span className="text-red-600 dark:text-red-400" aria-label="no">
+      <span className="text-destructive" aria-label="no">
         ✗
       </span>
     );

@@ -170,6 +170,25 @@ pub fn parse_verdict(answer: &str) -> Verdict {
   })
 }
 
+/// Adds the tester's instructions for this run ahead of the verdict format.
+fn with_instructions(prompt: String, instructions: &str) -> String {
+  let extra = instructions.trim();
+  if extra.is_empty() {
+    return prompt;
+  }
+  let block = format!(
+    "
+Instructions from the tester for this run (follow them; they take priority over the defaults above,      but still screenshot every step and end with the json block):
+{extra}
+"
+  );
+  match prompt.find("
+End your reply") {
+    Some(at) => format!("{}{block}{}", &prompt[..at], &prompt[at..]),
+    None => prompt + &block,
+  }
+}
+
 fn build_prompt(base: &str, case: &UiTestCase, case_no: usize) -> String {
   let mut p = format!(
     "You are running one UI test in a real browser with the browser_* tools.\n\
@@ -290,6 +309,7 @@ pub async fn start(
   suite_id: &str,
   case_ids: Option<Vec<String>>,
   mode: Option<String>,
+  instructions: String,
 ) -> Result<String> {
   let pool = a.pool().await;
   let suite = super::get_suite(&pool, suite_id).await?;
@@ -316,7 +336,7 @@ pub async fn start(
   let id = run_id.clone();
   tokio::spawn(async move {
     let _guard = ActiveGuard;
-    run(&a, &data_dir, &emit, &id, suite, cases, mode, cancel).await;
+    run(&a, &data_dir, &emit, &id, suite, cases, mode, instructions, cancel).await;
   });
   Ok(run_id)
 }
@@ -341,6 +361,7 @@ async fn run(
   suite: UiTestSuite,
   cases: Vec<UiTestCase>,
   mode: Option<String>,
+  instructions: String,
   cancel: CancellationToken,
 ) {
   let pool = a.pool().await;
@@ -429,9 +450,11 @@ async fn run(
       };
       let shots_dir = case_dir(data_dir, run_id, &case.id);
       if browser.as_ref().is_none_or(|(h, _)| *h != headless) {
-        let file = session::session_file(data_dir, &suite.env_id);
-        let cfg = session::server_config(&run_dir, Some(&file), headless);
-        match session::start_browser(a, cfg).await {
+        if browser.is_some() {
+          session::refresh_saved(a, data_dir, &suite.env_id).await;
+          a.remove_transient_mcp(session::SERVER).await;
+        }
+        match session::start_env_browser(a, data_dir, &suite.env_id, &run_dir, headless).await {
           Ok(s) => browser = Some((headless, s)),
           Err(e) => {
             browser = None;
@@ -447,7 +470,10 @@ async fn run(
       // the workspace root, not its output folder.
       let shot_prefix = format!("case-{}-step-", i + 1);
       let shots_fwd = shots_dir.to_string_lossy().replace('\\', "/");
-      let prompt = build_prompt(&base, case, i + 1).replace(&format!("\"{shot_prefix}"), &format!("\"{shots_fwd}/{shot_prefix}"));
+      let prompt = with_instructions(
+        build_prompt(&base, case, i + 1).replace(&format!("\"{shot_prefix}"), &format!("\"{shots_fwd}/{shot_prefix}")),
+        &instructions,
+      );
       let outcome = ask(a, &provider, &model, &chat_id, prompt, tools).await;
       // Fallback: screenshots that still landed in the workspace root.
       if let Some(root) = a.workspace_root() {
@@ -517,6 +543,9 @@ async fn run(
   }
   if cancel.is_cancelled() {
     cancelled = true;
+  }
+  if browser.is_some() {
+    session::refresh_saved(a, data_dir, &suite.env_id).await;
   }
   a.remove_transient_mcp(session::SERVER).await;
 
@@ -659,5 +688,14 @@ mod tests {
     };
     let p = build_prompt("https://x/Thingworx", &case, 2);
     assert!(p.contains("case-2-step-N.png") && p.contains("1. Open") && p.contains("Expected: Page") && p.contains("https://x/Thingworx"));
+  }
+
+  #[test]
+  fn run_instructions_go_before_the_verdict_format() {
+    let p = "Steps\n\nEnd your reply with json".to_string();
+    assert_eq!(with_instructions(p.clone(), "  "), p);
+    let out = with_instructions(p, "Use container Dresden");
+    let at = out.find("Use container Dresden").unwrap();
+    assert!(at < out.find("End your reply").unwrap());
   }
 }

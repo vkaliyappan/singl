@@ -243,7 +243,7 @@ export function StreamsTab({ env }: { env: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3">
-        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Source
           <NativeSelect value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
             <NativeSelectOption value="stream">Stream entries</NativeSelectOption>
@@ -252,10 +252,10 @@ export function StreamsTab({ env }: { env: string }) {
         </label>
 
         {mode === "stream" ? (
-          <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Stream
             <NativeSelect value={stream} onChange={(e) => setStream(e.target.value)}>
-              {!streams && <NativeSelectOption value="">Loading...</NativeSelectOption>}
+              {!streams && <NativeSelectOption value="">Loading…</NativeSelectOption>}
               {userStreams.length > 0 && (
                 <optgroup label="Streams">
                   {userStreams.map((s) => (
@@ -278,7 +278,7 @@ export function StreamsTab({ env }: { env: string }) {
           </label>
         ) : (
           <>
-            <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Thing
               <Input className="w-56" list="twx-things" placeholder="Thing name" value={thing} onChange={(e) => pickThing(e.target.value)} />
               <datalist id="twx-things">
@@ -287,7 +287,7 @@ export function StreamsTab({ env }: { env: string }) {
                 ))}
               </datalist>
             </label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Logged property
               <NativeSelect value={property} onChange={(e) => setProperty(e.target.value)} disabled={!properties.length}>
                 {!properties.length && <NativeSelectOption value="">{thing ? "No logged properties" : "Pick a thing"}</NativeSelectOption>}
@@ -301,7 +301,7 @@ export function StreamsTab({ env }: { env: string }) {
           </>
         )}
 
-        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Time range
           <NativeSelect value={range} onChange={(e) => setRange(e.target.value)}>
             {RANGES.map((r) => (
@@ -313,17 +313,17 @@ export function StreamsTab({ env }: { env: string }) {
         </label>
         {range === "custom" && (
           <>
-            <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               From
               <Input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
             </label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               To
               <Input type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} />
             </label>
           </>
         )}
-        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Max items
           <Input className="w-24" type="number" min={1} max={5000} value={maxItems} onChange={(e) => setMaxItems(e.target.value)} />
         </label>
@@ -335,7 +335,7 @@ export function StreamsTab({ env }: { env: string }) {
         </Button>
       </div>
 
-      {error && <p className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs">{error}</p>}
+      {error && <p className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-xs text-destructive">{error}</p>}
 
       {result && (
         <>

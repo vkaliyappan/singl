@@ -90,11 +90,12 @@ pub async fn uitest_run(
   suite_id: String,
   case_ids: Option<Vec<String>>,
   mode: Option<String>,
+  instructions: Option<String>,
 ) -> IpcResult<String> {
   let emit: uitest::runner::Emit = Arc::new(move |event, payload| {
     let _ = app.emit(event, payload);
   });
-  Ok(uitest::runner::start(&state.assistant, data_dir(&state), emit, &suite_id, case_ids, mode).await?)
+  Ok(uitest::runner::start(&state.assistant, data_dir(&state), emit, &suite_id, case_ids, mode, instructions.unwrap_or_default()).await?)
 }
 
 #[tauri::command]

@@ -70,8 +70,8 @@ export function SuiteList({
                 </span>
                 {st && st.total > 0 && (
                   <span className="mt-0.5 flex items-center gap-1.5 text-[11px]">
-                    <span className="text-emerald-700 dark:text-emerald-300">{st.passed} passed</span>
-                    {st.failed > 0 && <span className="text-red-700 dark:text-red-300">{st.failed} failed</span>}
+                    <span className="text-success">{st.passed} passed</span>
+                    {st.failed > 0 && <span className="text-destructive">{st.failed} failed</span>}
                   </span>
                 )}
               </button>

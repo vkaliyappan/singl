@@ -8,11 +8,11 @@ const CHIP = "inline-flex h-5 items-center gap-1 rounded-full px-2 text-[0.625re
 
 const STATUS: Record<UiCaseStatus, { label: string; tone: string }> = {
   notRun: { label: "Not run", tone: "bg-muted text-muted-foreground" },
-  running: { label: "Running", tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300" },
-  passed: { label: "Passed", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
-  failed: { label: "Failed", tone: "bg-red-500/15 text-red-700 dark:text-red-300" },
-  needsReview: { label: "Needs review", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
-  error: { label: "Error", tone: "bg-red-500/15 text-red-700 dark:text-red-300" },
+  running: { label: "Running", tone: "bg-info/15 text-info" },
+  passed: { label: "Passed", tone: "bg-success/15 text-success" },
+  failed: { label: "Failed", tone: "bg-destructive/15 text-destructive" },
+  needsReview: { label: "Needs review", tone: "bg-warning/15 text-warning" },
+  error: { label: "Error", tone: "bg-destructive/15 text-destructive" },
 }
 
 export function CaseStatusChip({ status }: { status: UiCaseStatus }) {
@@ -26,8 +26,8 @@ export function CaseStatusChip({ status }: { status: UiCaseStatus }) {
 }
 
 const STEP_TONE: Record<UiStepResult["status"], string> = {
-  passed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  failed: "bg-red-500/15 text-red-700 dark:text-red-300",
+  passed: "bg-success/15 text-success",
+  failed: "bg-destructive/15 text-destructive",
   skipped: "bg-muted text-muted-foreground",
 }
 

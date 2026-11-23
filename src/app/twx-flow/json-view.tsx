@@ -168,7 +168,7 @@ function Row({
           onClick={copy}
           aria-label="Copy value"
           title="Copy value"
-          className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/json:opacity-100 hover:text-foreground"
+          className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/json:opacity-100 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
         >
           <IconCopy className="size-3" />
         </button>
@@ -198,14 +198,14 @@ function Row({
               <button
                 type="button"
                 onClick={() => setShown((n) => n + ITEM_PAGE)}
-                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 Show {Math.min(ITEM_PAGE, hidden)} more
               </button>
               <button
                 type="button"
                 onClick={() => setShown((value as unknown[]).length)}
-                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+                className="rounded border px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 Show all {(value as unknown[]).length}
               </button>
@@ -268,11 +268,11 @@ export function JsonView({
         className
       )}
     >
-      <div className="sticky top-0 z-10 -mx-1.5 -mt-1.5 mb-1 flex items-center gap-1 border-b bg-background/80 px-1.5 py-1 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 -mx-1.5 -mt-1.5 mb-1 flex items-center gap-1 border-b bg-background/95 px-1.5 py-1">
         <button
           type="button"
           onClick={() => setAll("all")}
-          className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
         >
           <IconFoldDown className="size-3" />
           Expand all
@@ -280,7 +280,7 @@ export function JsonView({
         <button
           type="button"
           onClick={() => setAll("none")}
-          className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
         >
           <IconFoldUp className="size-3" />
           Collapse all
