@@ -225,7 +225,7 @@ fn build_text_prompt(input: &Value) -> String {
 async fn ask_texts(a: &Arc<Assistant>, suite: &UiTestSuite, prompt: String) -> Result<String> {
   let (provider, model) = super::runner::models(a, suite).await?;
   let pool = a.pool().await;
-  let chat = store::create(&pool).await?;
+  let chat = store::create_in(&pool, store::TEST_SCOPE).await?;
   let req = SendRequest {
     chat_id: Some(chat.id.clone()),
     provider,

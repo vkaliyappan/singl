@@ -186,3 +186,28 @@ export const newUiCase = (suiteId: string): UiTestCase => ({
   durationMs: null,
   updatedAt: 0,
 })
+
+/** A chat a test run left: the case conversation, tied back to its suite, case and run. */
+export interface UiTestChat {
+  chatId: string
+  title: string
+  messageCount: number
+  createdAt: number | null
+  updatedAt: number | null
+  /** Empty when no run or case points at the chat any more. */
+  suiteId: string
+  suiteName: string
+  caseId: string
+  caseTitle: string
+  /** History row of the run; empty while the run is still going. */
+  runId: string
+  runStartedAt: number | null
+  status: UiCaseStatus | ""
+  reason: string
+  durationMs: number | null
+}
+
+/** Test chats, newest first; `suiteId` null = every suite. They are not in the assistant's chat list. */
+export const listUiChats = (suiteId: string | null) => invoke<UiTestChat[]>("uitest_chats", { suiteId })
+/** Deletes test chats; resolves to how many went. */
+export const deleteUiChats = (chatIds: string[]) => invoke<number>("uitest_chats_delete", { chatIds })

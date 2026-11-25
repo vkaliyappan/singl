@@ -56,6 +56,9 @@ pub struct AssistantSettings {
   pub load_all_tools: bool,
   /// Summarise a chat's older part once its conversation passes this many KB; 0 = never.
   pub compact_after_kb: u32,
+  /// Let Claude Code chats use its own shell and file tools (Bash, PowerShell, Edit, Write).
+  /// They run without asking: print mode has no approval prompt.
+  pub allow_local_tools: bool,
 }
 
 impl Default for AssistantSettings {
@@ -81,6 +84,7 @@ impl Default for AssistantSettings {
       project_disabled_tools: HashMap::new(),
       load_all_tools: false,
       compact_after_kb: DEFAULT_COMPACT_AFTER_KB,
+      allow_local_tools: false,
     }
   }
 }
@@ -132,6 +136,7 @@ pub struct AssistantSettingsView {
   pub tool_timeout_minutes: u32,
   pub load_all_tools: bool,
   pub compact_after_kb: u32,
+  pub allow_local_tools: bool,
 }
 
 /// A partial update; `None` leaves a field alone. An empty key clears it.
@@ -154,6 +159,7 @@ pub struct AssistantSettingsPatch {
   pub tool_timeout_minutes: Option<u32>,
   pub load_all_tools: Option<bool>,
   pub compact_after_kb: Option<u32>,
+  pub allow_local_tools: Option<bool>,
   /// Makes a new MCP token, cutting off every client that holds the old one.
   pub regenerate_mcp_token: Option<bool>,
 }
@@ -180,6 +186,7 @@ impl AssistantSettings {
       tool_timeout_minutes: self.tool_timeout().as_secs() as u32 / 60,
       load_all_tools: self.load_all_tools,
       compact_after_kb: self.compact_after_kb,
+      allow_local_tools: self.allow_local_tools,
     }
   }
 
@@ -264,6 +271,9 @@ impl AssistantSettings {
     }
     if let Some(v) = patch.load_all_tools {
       self.load_all_tools = v;
+    }
+    if let Some(v) = patch.allow_local_tools {
+      self.allow_local_tools = v;
     }
     if let Some(v) = patch.compact_after_kb {
       self.compact_after_kb = if v == 0 { 0 } else { v.clamp(MIN_COMPACT_AFTER_KB, MAX_COMPACT_AFTER_KB) };

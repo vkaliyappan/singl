@@ -52,6 +52,21 @@ pub async fn uitest_export_csv(state: State<'_, AppState>, suite_id: String, cas
   Ok(uitest::export_csv(&state.db().await, &suite_id, case_ids.as_deref()).await?)
 }
 
+/// The chats test runs left (newest first); `suite_id` keeps one suite's.
+#[tauri::command]
+pub async fn uitest_chats(state: State<'_, AppState>, suite_id: Option<String>) -> IpcResult<Vec<uitest::chats::UiTestChat>> {
+  Ok(uitest::chats::list(&state.db().await, suite_id.as_deref()).await?)
+}
+
+/// Deletes test chats; returns how many went.
+#[tauri::command]
+pub async fn uitest_chats_delete(state: State<'_, AppState>, chat_ids: Vec<String>) -> IpcResult<usize> {
+  for id in &chat_ids {
+    state.assistant.end_live(id);
+  }
+  Ok(uitest::chats::delete(&state.db().await, &chat_ids).await?)
+}
+
 #[tauri::command]
 pub fn uitest_session_status(state: State<'_, AppState>, env_id: String) -> UiSessionStatus {
   session::status(&data_dir(&state), &env_id, "")

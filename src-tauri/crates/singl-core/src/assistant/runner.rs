@@ -403,14 +403,19 @@ impl Assistant {
   }
 
   /// The system prompt, plus the instructions of the skills picked for this turn.
-  fn system(&self, req: &SendRequest) -> Result<String> {
-    self.system_for(&req.skills)
+  async fn system(&self, req: &SendRequest) -> Result<String> {
+    self.system_for(&req.skills).await
   }
 
-  /// The system prompt with these skills' instructions.
-  pub(crate) fn system_for(&self, skills: &[String]) -> Result<String> {
+  /// The system prompt with the assistant's memory and these skills' instructions.
+  pub(crate) async fn system_for(&self, skills: &[String]) -> Result<String> {
     let skills = super::skills::prompt_section(self.workspace_root().as_deref(), skills)?;
-    Ok(prompt::system_prompt(&self.context.prompt_block(), &self.context.get()) + &skills)
+    let memories = super::memory::list(&self.pool().await).await?;
+    Ok(
+      prompt::system_prompt(&self.context.prompt_block(), &self.context.get())
+        + &super::memory::prompt_section(&memories)
+        + &skills,
+    )
   }
 
   async fn api_turn(self: &Arc<Self>, chat: &mut Chat, req: &SendRequest, cancel: &CancellationToken) -> Result<String> {
@@ -479,7 +484,7 @@ impl Assistant {
       let request = ApiRequest {
         api_key: api_key.clone(),
         model: job.model.clone(),
-        system: self.system_for(&job.skills)? + &job.system_extra,
+        system: self.system_for(&job.skills).await? + &job.system_extra,
         messages: sanitize(history.messages()),
         tools: job.tools.clone(),
         max_tokens: MAX_TOKENS,
@@ -574,23 +579,50 @@ impl Assistant {
     // Only Claude Code takes sub-agent settings: models as `--agents`, off as a denied tool.
     let claude_sub_agents =
       req.sub_agents.clone().filter(|_| req.provider == "claude").map(|s| s.normalized(&req.provider, &req.model));
+    let settings = self.settings().await.unwrap_or_default();
     Ok(CliRequest {
       provider: req.provider.clone(),
       model: req.model.clone(),
-      system: self.system(req)? + &claude_sub_agents.as_ref().map(subagents::claude_prompt_section).unwrap_or_default(),
+      system: self.system(req).await? + &claude_sub_agents.as_ref().map(subagents::claude_prompt_section).unwrap_or_default(),
       prompt,
       resume,
       mcp_url: endpoint.url,
       mcp_token: token.to_string(),
-      tool_timeout_secs: self.settings().await.map(|s| s.tool_timeout()).unwrap_or_default().as_secs(),
+      tool_timeout_secs: settings.tool_timeout().as_secs(),
       cwd: crate::agents::agent_root(self.workspace_root().as_deref()),
       effort: req.effort.clone(),
       read_only: req.approval == super::ApprovalMode::ReadOnly,
       foreign_mcp: Vec::new(),
       sub_agents: claude_sub_agents,
       agents_file: None,
+      local_tools: settings.allow_local_tools && req.approval != super::ApprovalMode::ReadOnly,
       images,
     })
+  }
+
+  /// Stops a chat's kept CLI process, if any, and retires its MCP token.
+  pub fn end_live(&self, chat_id: &str) {
+    let gone = self.live_cli.lock().unwrap_or_else(|e| e.into_inner()).remove(chat_id);
+    if let Some(gone) = gone {
+      self.drop_turn_token(&gone.token);
+    }
+  }
+
+  /// Keeps a chat's CLI process for its next turn; it is stopped after
+  /// [`LIVE_IDLE`] without one.
+  fn keep_live(self: &Arc<Self>, chat_id: &str, cli: providers::cli::Live, token: String) {
+    static STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let stamp = STAMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    self.live_cli.lock().unwrap_or_else(|e| e.into_inner()).insert(chat_id.to_string(), LiveChat { cli, token, stamp });
+    let (weak, chat_id) = (Arc::downgrade(self), chat_id.to_string());
+    tokio::spawn(async move {
+      tokio::time::sleep(LIVE_IDLE).await;
+      let Some(this) = weak.upgrade() else { return };
+      let idle = this.live_cli.lock().unwrap_or_else(|e| e.into_inner()).get(&chat_id).is_some_and(|l| l.stamp == stamp);
+      if idle {
+        this.end_live(&chat_id);
+      }
+    });
   }
 
   async fn cli_turn(self: &Arc<Self>, chat: &mut Chat, req: &SendRequest, cancel: &CancellationToken) -> Result<String> {
@@ -614,7 +646,12 @@ impl Assistant {
       format!("{}\n\n---\nNew message from the user:\n{latest}", transcript(&chat.messages[..prior as usize]))
     };
 
-    let token = self.turn_token(&chat.id);
+    // A kept process goes on with the token it was started with.
+    let live = self.live_cli.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat.id);
+    let (live, token) = match live {
+      Some(l) => (Some(l.cli), l.token),
+      None => (None, self.turn_token(&chat.id)),
+    };
     self.collected.lock().unwrap_or_else(|e| e.into_inner()).insert(chat.id.clone(), Vec::new());
     let chat_id = chat.id.clone();
     let this = self.clone();
@@ -681,7 +718,7 @@ impl Assistant {
         }
       }
     };
-    let result = providers::cli::run(
+    let (result, live) = providers::cli::run_live(
       &self.procs,
       request,
       &on_text,
@@ -690,9 +727,14 @@ impl Assistant {
       Some(&on_sub),
       Some(&take_steered),
       cancel,
+      live,
+      true,
     )
     .await;
-    self.drop_turn_token(&token);
+    match live {
+      Some(cli) => self.keep_live(&chat.id, cli, token),
+      None => self.drop_turn_token(&token),
+    }
     let calls = self.collected.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat.id).unwrap_or_default();
 
     let tag = |mut m: Message| {
@@ -720,6 +762,17 @@ impl Assistant {
     }
     Ok(reply.text)
   }
+}
+
+/// How long a chat's CLI process waits for its next turn before it is stopped.
+const LIVE_IDLE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// A chat's CLI process between turns, with the MCP token it was started with.
+pub(crate) struct LiveChat {
+  cli: providers::cli::Live,
+  token: String,
+  /// Which keep this is, so an older idle timer leaves a newer one alone.
+  stamp: u64,
 }
 
 fn no_mcp() -> CoreError {

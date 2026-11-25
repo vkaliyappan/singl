@@ -168,6 +168,8 @@ pub struct CliRequest {
   pub sub_agents: Option<super::subagents::SubAgentSettings>,
   /// The `--agents` file for claude (filled in by [`cli::run`]).
   pub agents_file: Option<PathBuf>,
+  /// Claude Code may use its own shell and file tools (Settings → AI). Ignored on read-only turns.
+  pub local_tools: bool,
 }
 
 #[derive(Debug, Clone)]

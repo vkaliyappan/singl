@@ -118,7 +118,7 @@ impl Assistant {
     let request = ApiRequest {
       api_key,
       model: req.model.clone(),
-      system: self.system_for(&req.skills)?,
+      system: self.system_for(&req.skills).await?,
       messages: sanitize(&messages),
       tools: self.tool_specs_for(&chat.id).await,
       max_tokens: SUMMARY_MAX_TOKENS,

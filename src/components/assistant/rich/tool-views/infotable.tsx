@@ -144,7 +144,7 @@ export function InfoTableView({
         ...c,
         // Nested values are searchable as JSON; the type tag stays in the header.
         header: (
-          <span className="flex items-center gap-1">
+          <span className="inline-flex items-center gap-1">
             {f.name}
             {f.baseType && <MiniBadge>{f.baseType}</MiniBadge>}
           </span>

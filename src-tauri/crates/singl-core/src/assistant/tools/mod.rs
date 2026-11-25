@@ -26,6 +26,7 @@ pub mod automation;
 pub mod apptests;
 pub mod undo;
 pub mod twx_events;
+pub mod memory;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -123,10 +124,11 @@ pub fn schema(props: Value, required: &[&str]) -> Value {
 
 /// Every built-in tool.
 pub fn builtin() -> Vec<Tool> {
-  let groups: [(&'static str, Vec<Tool>); 20] = [
+  let groups: [(&'static str, Vec<Tool>); 21] = [
     (catalog::CORE, app::tools()),
     (catalog::CORE, catalog::tools()),
     (catalog::CORE, outputs::tools()),
+    (catalog::CORE, memory::tools()),
     ("files", fs::tools()),
     ("files", compare::tools()),
     ("twx", twx::tools()),

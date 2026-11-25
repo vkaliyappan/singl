@@ -168,6 +168,8 @@ export type AssistantSettingsView = {
   loadAllTools: boolean;
   /** Summarise a chat once its conversation passes this many KB; 0 = never. */
   compactAfterKb: number;
+  /** Claude Code chats may use its own Bash/PowerShell/Edit/Write tools, without asking. */
+  allowLocalTools: boolean;
 };
 
 export type AssistantSettingsPatch = Partial<{
@@ -187,6 +189,7 @@ export type AssistantSettingsPatch = Partial<{
   toolTimeoutMinutes: number;
   loadAllTools: boolean;
   compactAfterKb: number;
+  allowLocalTools: boolean;
   regenerateMcpToken: boolean;
 }>;
 
@@ -445,3 +448,17 @@ export async function onAssistantEvent(
 ): Promise<() => void> {
   return listen<AssistantEvent>("assistant://event", (e) => cb(e.payload));
 }
+
+/** A fact the assistant saved with memory_save; all of them join every turn's system prompt. */
+export type Memory = {
+  id: string;
+  text: string;
+  /** Unix seconds. */
+  createdAt: number;
+  updatedAt: number;
+};
+export const assistantMemories = () => invoke<Memory[]>("assistant_memories");
+export const assistantMemoryUpdate = (id: string, text: string) =>
+  invoke<Memory>("assistant_memory_update", { id, text });
+export const assistantMemoryDelete = (id: string) =>
+  invoke<void>("assistant_memory_delete", { id });

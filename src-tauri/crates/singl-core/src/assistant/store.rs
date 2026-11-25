@@ -1,5 +1,6 @@
-//! Chat history in `assistant_chats` (scope `app`) and CLI session links in
-//! `assistant_sessions`. Rows from singl-web's older per-page assistants use
+//! Chat history in `assistant_chats` (scope `app`, plus `uitest` for App Tests
+//! case chats, which stay out of the assistant's chat list) and CLI session links
+//! in `assistant_sessions`. Rows from singl-web's older per-page assistants use
 //! other scopes and are left alone.
 
 use sqlx::SqlitePool;
@@ -10,6 +11,11 @@ use crate::db::now;
 use crate::{CoreError, Result};
 
 const SCOPE: &str = "app";
+/// Chats App Tests runs and reports create. Readable and writable like app chats,
+/// but listed only on the App Tests page.
+pub const TEST_SCOPE: &str = "uitest";
+/// Scopes `get`, `rename` and `delete` act on.
+const OWN_SCOPES: &str = "scope IN ('app', 'uitest')";
 const NEW_TITLE: &str = "New chat";
 
 pub async fn list(pool: &SqlitePool, limit: i64) -> Result<Vec<ChatSummary>> {
@@ -55,9 +61,8 @@ fn summary(row: AssistantChat) -> ChatSummary {
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> Result<Chat> {
-  let row: Option<AssistantChat> = sqlx::query_as("SELECT * FROM assistant_chats WHERE id = ?1 AND scope = ?2")
+  let row: Option<AssistantChat> = sqlx::query_as(&format!("SELECT * FROM assistant_chats WHERE id = ?1 AND {OWN_SCOPES}"))
     .bind(id)
-    .bind(SCOPE)
     .fetch_optional(pool)
     .await?;
   let row = row.ok_or_else(|| CoreError::NotFound(format!("No chat \"{id}\".")))?;
@@ -66,6 +71,11 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Chat> {
 }
 
 pub async fn create(pool: &SqlitePool) -> Result<Chat> {
+  create_in(pool, SCOPE).await
+}
+
+/// A new chat in `scope` (`app` or [`TEST_SCOPE`]).
+pub async fn create_in(pool: &SqlitePool, scope: &str) -> Result<Chat> {
   let id = uuid::Uuid::new_v4().to_string();
   let at = now();
   sqlx::query(
@@ -73,7 +83,7 @@ pub async fn create(pool: &SqlitePool) -> Result<Chat> {
      VALUES (?1, ?2, 'general', ?3, '[]', 0, ?4, ?4)",
   )
   .bind(&id)
-  .bind(SCOPE)
+  .bind(scope)
   .bind(NEW_TITLE)
   .bind(at)
   .execute(pool)
@@ -113,18 +123,17 @@ fn title_from(text: &str) -> String {
 pub async fn rename(pool: &SqlitePool, id: &str, title: &str) -> Result<()> {
   let title = title.trim();
   let title = if title.is_empty() { NEW_TITLE } else { title };
-  sqlx::query("UPDATE assistant_chats SET title = ?2, updatedAt = ?3 WHERE id = ?1 AND scope = ?4")
+  sqlx::query(&format!("UPDATE assistant_chats SET title = ?2, updatedAt = ?3 WHERE id = ?1 AND {OWN_SCOPES}"))
     .bind(id)
     .bind(title)
     .bind(now())
-    .bind(SCOPE)
     .execute(pool)
     .await?;
   Ok(())
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str) -> Result<()> {
-  sqlx::query("DELETE FROM assistant_chats WHERE id = ?1 AND scope = ?2").bind(id).bind(SCOPE).execute(pool).await?;
+  sqlx::query(&format!("DELETE FROM assistant_chats WHERE id = ?1 AND {OWN_SCOPES}")).bind(id).execute(pool).await?;
   sqlx::query("DELETE FROM assistant_sessions WHERE chatId = ?1").bind(id).execute(pool).await?;
   Ok(())
 }

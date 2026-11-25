@@ -62,6 +62,7 @@ import { RiskBadge } from "@/components/assistant/messages";
 import { McpCallLog } from "@/components/assistant/mcp/call-log";
 import { McpToolFilters } from "@/components/assistant/mcp/server-tools";
 import { UsageSettings } from "@/components/assistant/usage-meter";
+import { MemorySettings } from "@/components/assistant/memory-settings";
 import { errorMessage } from "@/lib/settings";
 import {
   type ApprovalMode,
@@ -655,6 +656,8 @@ export function AiSettings() {
 
       <UsageSettings />
 
+      <MemorySettings />
+
       <SectionCard
         title="Token saving"
         description="Every model call re-sends the tool list and the whole chat so far. These keep both small."
@@ -709,6 +712,21 @@ export function AiSettings() {
           />
           In Ask mode, run write actions (changes that can be undone) without
           asking
+        </label>
+        <label className="flex items-start gap-3 text-xs">
+          <Switch
+            checked={s.allowLocalTools}
+            onCheckedChange={(on) => void save({ allowLocalTools: on })}
+            aria-label="Let Claude Code use Bash and file writes"
+          />
+          <span>
+            Let Claude Code chats use its own Bash, PowerShell, Edit and Write
+            tools.{" "}
+            <span className="text-destructive">
+              They run without asking, on any file or command.
+            </span>{" "}
+            Read-only chats stay read-only.
+          </span>
         </label>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Label htmlFor="ai-tool-timeout" className="w-32 text-xs font-normal">

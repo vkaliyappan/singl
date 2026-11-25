@@ -16,6 +16,7 @@ pub mod context;
 pub mod events;
 pub mod files;
 pub mod mcp;
+pub mod memory;
 pub mod prompt;
 pub mod providers;
 pub mod runner;
@@ -192,6 +193,8 @@ pub struct Assistant {
   running: Mutex<HashMap<String, CancellationToken>>,
   /// Per-turn MCP tokens handed to agent CLIs, mapped to their chat.
   turn_tokens: Mutex<HashMap<String, String>>,
+  /// Agent CLI processes kept running between a chat's turns, by chat.
+  live_cli: Mutex<HashMap<String, runner::LiveChat>>,
   /// Tool calls made over MCP during a CLI turn, by chat, so the turn can store them.
   collected: Mutex<HashMap<String, Vec<(Block, Block)>>>,
   /// Approval mode of a chat's running turn.
@@ -226,6 +229,7 @@ impl Assistant {
       tools: tools::builtin(),
       running: Mutex::new(HashMap::new()),
       turn_tokens: Mutex::new(HashMap::new()),
+      live_cli: Mutex::new(HashMap::new()),
       collected: Mutex::new(HashMap::new()),
       turn_tools: Mutex::new(HashMap::new()),
       turn_modes: Mutex::new(HashMap::new()),
@@ -758,6 +762,9 @@ impl Assistant {
 
   /// Stops a chat's running turn. False when none runs.
   pub fn cancel(&self, chat_id: &str) -> bool {
+    // An idle kept CLI goes too (the chat may be on its way out); a running
+    // turn holds its own and drops it when cancelled.
+    self.end_live(chat_id);
     match self.running.lock().unwrap_or_else(|e| e.into_inner()).get(chat_id) {
       Some(token) => {
         token.cancel();
@@ -836,6 +843,7 @@ impl Assistant {
     for token in self.running.lock().unwrap_or_else(|e| e.into_inner()).values() {
       token.cancel();
     }
+    self.live_cli.lock().unwrap_or_else(|e| e.into_inner()).clear();
     self.mcp_clients.shutdown_all().await;
   }
 }

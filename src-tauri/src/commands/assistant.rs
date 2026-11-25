@@ -328,3 +328,24 @@ pub fn assistant_mcp_call_log() -> Vec<singl_core::assistant::mcp::host::CallLog
 pub fn assistant_mcp_call_log_clear() {
   singl_core::assistant::mcp::host::clear_call_log();
 }
+
+// ---- Memory: facts the assistant keeps across chats ------------------------
+
+#[tauri::command]
+pub async fn assistant_memories(state: State<'_, AppState>) -> IpcResult<Vec<singl_core::assistant::memory::Memory>> {
+  Ok(singl_core::assistant::memory::list(&state.assistant.pool().await).await?)
+}
+
+#[tauri::command]
+pub async fn assistant_memory_update(
+  state: State<'_, AppState>,
+  id: String,
+  text: String,
+) -> IpcResult<singl_core::assistant::memory::Memory> {
+  Ok(singl_core::assistant::memory::update(&state.assistant.pool().await, &id, &text).await?)
+}
+
+#[tauri::command]
+pub async fn assistant_memory_delete(state: State<'_, AppState>, id: String) -> IpcResult<()> {
+  Ok(singl_core::assistant::memory::delete(&state.assistant.pool().await, &id).await?)
+}

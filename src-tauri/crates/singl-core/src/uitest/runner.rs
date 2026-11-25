@@ -427,7 +427,7 @@ async fn run(
       if case.steps.is_empty() {
         break 'case ("error".into(), "This test case has no steps.".into(), Vec::new());
       }
-      match store::create(&pool).await {
+      match store::create_in(&pool, store::TEST_SCOPE).await {
         Ok(chat) => chat_id = chat.id,
         Err(e) => break 'case ("error".into(), e.to_string(), Vec::new()),
       }

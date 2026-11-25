@@ -32,6 +32,8 @@ const AGY_MAX_PROMPT_CHARS: usize = 16_000;
 /// Built-in claude tools that change the machine. The app's own tools go through
 /// the assistant's approval flow instead.
 const CLAUDE_DENIED: &str = "Bash,PowerShell,Edit,Write,MultiEdit,NotebookEdit";
+/// Claude Code's own tools when Settings → AI unlocks them (they run without asking).
+const CLAUDE_LOCAL: &str = "Bash,PowerShell,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep";
 
 /// Temp files holding secrets or long text, removed when dropped (so also on errors and cancel).
 #[derive(Default)]
@@ -66,6 +68,56 @@ impl Drop for TempFiles {
       let _ = std::fs::remove_file(p);
     }
   }
+}
+
+/// A claude or agy process kept running between a chat's turns: the next
+/// message goes to its open stdin instead of starting the CLI (and its MCP
+/// connection) again. Dropping it kills the process.
+pub struct Live {
+  procs: ProcRegistry,
+  proc_id: String,
+  /// [`live_key`] of the launch: a turn with other settings starts afresh.
+  key: u64,
+  /// The CLI's session after the last turn; the store resumes the same one.
+  session: Option<String>,
+  events: tokio::sync::mpsc::UnboundedReceiver<ProcEvent>,
+  _files: TempFiles,
+}
+
+impl Drop for Live {
+  fn drop(&mut self) {
+    self.procs.kill(&self.proc_id);
+  }
+}
+
+impl Live {
+  /// Throws away output printed between turns; false when the process is gone.
+  fn drain_alive(&mut self) -> bool {
+    use tokio::sync::mpsc::error::TryRecvError;
+    loop {
+      match self.events.try_recv() {
+        Ok(ProcEvent::Exit { .. }) | Err(TryRecvError::Disconnected) => return false,
+        Ok(_) => {}
+        Err(TryRecvError::Empty) => return true,
+      }
+    }
+  }
+}
+
+/// CLIs that read one message after another from a stdin left open.
+/// codex (`exec`) and copilot (`-p`) take a single prompt per process.
+pub fn keeps_alive(provider: &str) -> bool {
+  matches!(provider, "claude" | "antigravity")
+}
+
+/// Everything that goes into a launch's argv, environment or temp files.
+fn live_key(req: &CliRequest) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut h = std::collections::hash_map::DefaultHasher::new();
+  (&req.provider, &req.model, &req.system, &req.mcp_url, &req.mcp_token, req.tool_timeout_secs).hash(&mut h);
+  (&req.cwd, &req.effort, req.read_only, req.local_tools).hash(&mut h);
+  serde_json::to_string(&req.sub_agents).unwrap_or_default().hash(&mut h);
+  h.finish()
 }
 
 /// What to start.
@@ -134,11 +186,19 @@ pub fn build_launch(req: &CliRequest, mcp_file: Option<&Path>, system_file: Opti
       l.args.extend(["--append-system-prompt-file".into(), path_str(system_file)]);
       // `=` keeps each variadic flag from swallowing what follows. Print mode has no
       // approval prompt: a tool missing here is denied outright. Web tools only read.
-      l.args.push(format!("--allowedTools=mcp__{SERVER},WebSearch,WebFetch"));
-      match &req.sub_agents {
-        // Sub-agents off: deny the tool that starts them (`Agent`, `Task` in older releases).
-        Some(s) if !s.enabled => l.args.push(format!("--disallowedTools={CLAUDE_DENIED},Agent,Task")),
-        _ => l.args.push(format!("--disallowedTools={CLAUDE_DENIED}")),
+      let local = req.local_tools && !req.read_only;
+      if local {
+        l.args.push(format!("--allowedTools=mcp__{SERVER},WebSearch,WebFetch,{CLAUDE_LOCAL}"));
+      } else {
+        l.args.push(format!("--allowedTools=mcp__{SERVER},WebSearch,WebFetch"));
+      }
+      // Sub-agents off: deny the tool that starts them (`Agent`, `Task` in older releases).
+      let no_agents = matches!(&req.sub_agents, Some(s) if !s.enabled);
+      match (local, no_agents) {
+        (true, true) => l.args.push("--disallowedTools=Agent,Task".into()),
+        (true, false) => {}
+        (false, true) => l.args.push(format!("--disallowedTools={CLAUDE_DENIED},Agent,Task")),
+        (false, false) => l.args.push(format!("--disallowedTools={CLAUDE_DENIED}")),
       }
       if let Some(file) = &req.agents_file {
         l.args.extend(["--agents".into(), file.to_string_lossy().into_owned()]);
@@ -288,8 +348,9 @@ pub struct Parser {
   soft_error: Option<String>,
   /// Activity line not yet reported (see `take_status`).
   status: Option<String>,
-  /// claude: `result` events seen; a steered message read too late for the
-  /// turn gets a turn (and result) of its own.
+  /// claude and agy: `result` events seen. A steered message read too late
+  /// for the turn gets a turn (and result) of its own; a kept process's turn
+  /// ends at its result.
   pub results: usize,
   /// claude: sub-agents started and not finished (their tool call ids).
   sub_agents: HashSet<String>,
@@ -599,6 +660,7 @@ impl Parser {
         }
       }
       "result" => {
+        self.results += 1;
         let r = &ev["result"];
         self.set_session(r["conversation_id"].as_str());
         if r["status"].as_str().is_some_and(|s| s != "SUCCESS") {
@@ -700,9 +762,85 @@ pub type SteerSource<'a> = &'a (dyn Fn() -> Vec<String> + Send + Sync);
 /// How often a running claude turn checks for steered messages.
 const STEER_POLL: std::time::Duration = std::time::Duration::from_millis(300);
 
-/// Runs one turn. `steer` (claude only) feeds messages into the running turn
-/// over its open stdin; claude reads them before its next step.
+/// Runs one turn in a process of its own. `steer` (claude only) feeds messages
+/// into the running turn over its open stdin; claude reads them before its next step.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
+  procs: &ProcRegistry,
+  req: CliRequest,
+  on_text: TextSink<'_>,
+  on_thinking: TextSink<'_>,
+  on_status: TextSink<'_>,
+  on_sub: Option<SubSink<'_>>,
+  steer: Option<SteerSource<'_>>,
+  cancel: &CancellationToken,
+) -> Result<CliReply> {
+  run_live(procs, req, on_text, on_thinking, on_status, on_sub, steer, cancel, None, false).await.0
+}
+
+/// Runs one turn like [`run`]. With `keep` and a CLI that [`keeps_alive`], the
+/// process stays up after its answer and comes back with the reply. Passed in
+/// as `live` next turn, it gets the new message on its stdin when it was
+/// started the same way and holds the session `req.resume` names; otherwise it
+/// is stopped and a new process starts (resuming as usual).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_live(
+  procs: &ProcRegistry,
+  req: CliRequest,
+  on_text: TextSink<'_>,
+  on_thinking: TextSink<'_>,
+  on_status: TextSink<'_>,
+  on_sub: Option<SubSink<'_>>,
+  steer: Option<SteerSource<'_>>,
+  cancel: &CancellationToken,
+  live: Option<Live>,
+  keep: bool,
+) -> (Result<CliReply>, Option<Live>) {
+  let keep = keep && keeps_alive(&req.provider);
+  let key = live_key(&req);
+  let reused = live
+    .filter(|l| keep && l.key == key && l.session.is_some() && l.session == req.resume)
+    .and_then(|mut l| l.drain_alive().then_some(l));
+  match turn(procs, req, on_text, on_thinking, on_status, on_sub, steer, cancel, reused, keep, key).await {
+    Ok((reply, live)) => (Ok(reply), live),
+    Err(e) => (Err(e), None),
+  }
+}
+
+/// Starts the CLI for `req`, with the temp files it reads kept as long as it runs.
+async fn start(procs: &ProcRegistry, req: &mut CliRequest, images: &[PathBuf], keep_stdin: bool, key: u64) -> Result<Live> {
+  req.foreign_mcp = foreign_mcp_servers(procs, &req.provider).await?;
+  let mut files = TempFiles::default();
+  let mcp_file = match req.provider.as_str() {
+    "claude" | "copilot" => Some(files.write("json", &mcp_config_json(req, req.provider == "copilot"))?),
+    _ => None,
+  };
+  let system_file = (req.provider == "claude").then(|| files.write("md", &req.system)).transpose()?;
+  if let Some(s) = req.sub_agents.as_ref().filter(|s| req.provider == "claude" && s.enabled && !s.models.is_empty()) {
+    req.agents_file = Some(files.write("json", &crate::assistant::subagents::claude_agents_json(s))?);
+  }
+  let launch = build_launch(req, mcp_file.as_deref(), system_file.as_deref(), images)?;
+  let (tx, events) = tokio::sync::mpsc::unbounded_channel();
+  let sink: Sink = Arc::new(move |e| {
+    let _ = tx.send(e);
+  });
+  let proc_id = procs.spawn(
+    SpawnSpec {
+      provider: req.provider.clone(),
+      args: launch.args,
+      stdin: Some(launch.stdin),
+      keep_stdin,
+      env: launch.env,
+      timeout_ms: None,
+    },
+    &req.cwd,
+    sink,
+  )?;
+  Ok(Live { procs: procs.clone(), proc_id, key, session: None, events, _files: files })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn turn(
   procs: &ProcRegistry,
   mut req: CliRequest,
   on_text: TextSink<'_>,
@@ -711,22 +849,16 @@ pub async fn run(
   on_sub: Option<SubSink<'_>>,
   steer: Option<SteerSource<'_>>,
   cancel: &CancellationToken,
-) -> Result<CliReply> {
+  reused: Option<Live>,
+  keep: bool,
+  key: u64,
+) -> Result<(CliReply, Option<Live>)> {
   check_cancel(cancel)?;
   // Names the binary or the variable to set when it is missing.
   crate::agents::resolve_command(&req.provider)?;
-  req.foreign_mcp = foreign_mcp_servers(procs, &req.provider).await?;
 
-  let mut files = TempFiles::default();
-  let mcp_file = match req.provider.as_str() {
-    "claude" | "copilot" => Some(files.write("json", &mcp_config_json(&req, req.provider == "copilot"))?),
-    _ => None,
-  };
-  let system_file = (req.provider == "claude").then(|| files.write("md", &req.system)).transpose()?;
-  if let Some(s) = req.sub_agents.as_ref().filter(|s| req.provider == "claude" && s.enabled && !s.models.is_empty()) {
-    req.agents_file = Some(files.write("json", &crate::assistant::subagents::claude_agents_json(s))?);
-  }
-  // Claude takes images inline; the other CLIs read them from files.
+  // Claude takes images inline; the other CLIs read them from files, needed for this turn only.
+  let mut turn_files = TempFiles::default();
   let image_files = if req.provider == "claude" {
     Vec::new()
   } else {
@@ -737,48 +869,46 @@ pub async fn run(
         .decode(&i.data)
         .map_err(|_| CoreError::Invalid(format!("{} could not be read.", i.name)))?;
       let ext = i.media_type.strip_prefix("image/").unwrap_or("png").replace("jpeg", "jpg");
-      out.push(files.write_bytes(&ext, &bytes)?);
+      out.push(turn_files.write_bytes(&ext, &bytes)?);
     }
     out
   };
-  let launch = build_launch(&req, mcp_file.as_deref(), system_file.as_deref(), &image_files)?;
   let steer = steer.filter(|_| req.provider == "claude");
 
-  let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-  let sink: Sink = Arc::new(move |e| {
-    let _ = tx.send(e);
-  });
-  let id = procs.spawn(
-    SpawnSpec {
-      provider: req.provider.clone(),
-      args: launch.args,
-      stdin: Some(launch.stdin),
-      keep_stdin: steer.is_some(),
-      env: launch.env,
-      timeout_ms: None,
-    },
-    &req.cwd,
-    sink,
-  )?;
-  let mut stdin_open = steer.is_some();
+  // A kept process takes the message as its next stdin line; if it died since, start over.
+  let mut live = None;
+  if let Some(l) = reused {
+    let line = build_launch(&req, None, None, &image_files)?.stdin;
+    if procs.write(&l.proc_id, &line).await.is_ok() {
+      live = Some(l);
+    }
+  }
+  let mut live = match live {
+    Some(l) => l,
+    None => start(procs, &mut req, &image_files, keep || steer.is_some(), key).await?,
+  };
+  let pid = live.proc_id.clone();
+
+  let mut stdin_open = keep || steer.is_some();
+  let mut steered = false;
   let mut poll = tokio::time::interval(STEER_POLL);
   poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
   let mut parser = Parser::new(&req.provider);
   let mut stderr: VecDeque<String> = VecDeque::new();
+  let tail = |stderr: &VecDeque<String>| stderr.iter().cloned().collect::<Vec<_>>().join("\n");
   let mut code = None;
   loop {
     tokio::select! {
-      () = cancel.cancelled() => {
-        procs.kill(&id);
-        return Err(CoreError::Cancelled);
-      }
-      _ = poll.tick(), if stdin_open => {
+      // Dropping `live` kills the process.
+      () = cancel.cancelled() => return Err(CoreError::Cancelled),
+      _ = poll.tick(), if stdin_open && steer.is_some() => {
         for text in steer.map(|f| f()).unwrap_or_default() {
-          let _ = procs.write(&id, &claude_user_line(&text, &[])).await;
+          steered = true;
+          let _ = procs.write(&pid, &claude_user_line(&text, &[])).await;
         }
       }
-      event = rx.recv() => match event {
+      event = live.events.recv() => match event {
         Some(ProcEvent::Stdout { line }) => {
           let results = parser.results;
           parser.feed_line(&line, on_text, on_thinking);
@@ -790,11 +920,18 @@ pub async fn run(
               f(e);
             }
           }
-          // The answer is in: end the input so the CLI exits. Anything it already
-          // took still gets answered first; later messages wait for the next turn.
           if stdin_open && parser.results > results {
+            // A kept process waits for the next turn. One that took steered
+            // messages may still owe them an answer, so it ends like a one-off.
+            if keep && !steered {
+              let reply = parser.finish(None, &tail(&stderr))?;
+              live.session = reply.session_id.clone();
+              return Ok((reply, Some(live)));
+            }
+            // The answer is in: end the input so the CLI exits. Anything it already
+            // took still gets answered first; later messages wait for the next turn.
             stdin_open = false;
-            procs.close_stdin(&id).await;
+            procs.close_stdin(&pid).await;
           }
         }
         Some(ProcEvent::Stderr { line }) => {
@@ -811,7 +948,7 @@ pub async fn run(
       }
     }
   }
-  parser.finish(code, &stderr.into_iter().collect::<Vec<_>>().join("\n"))
+  Ok((parser.finish(code, &tail(&stderr))?, None))
 }
 
 fn default_model() -> ModelInfo {
@@ -1035,7 +1172,22 @@ mod tests {
       images: Vec::new(),
       sub_agents: None,
       agents_file: None,
+      local_tools: false,
     }
+  }
+
+  #[test]
+  fn claude_local_tools_flag() {
+    let mut r = req("claude");
+    r.local_tools = true;
+    let a = build_launch(&r, None, None, &[]).unwrap().args;
+    assert!(a.iter().any(|x| x.starts_with("--allowedTools=") && x.contains(",Bash,") && x.contains("Write")));
+    assert!(!a.iter().any(|x| x.starts_with("--disallowedTools=")));
+    // Read-only turns keep them denied.
+    r.read_only = true;
+    let a = build_launch(&r, None, None, &[]).unwrap().args;
+    assert!(a.iter().any(|x| x.starts_with("--disallowedTools=Bash,")));
+    assert!(!a.iter().any(|x| x.starts_with("--allowedTools=") && x.contains("Bash")));
   }
 
   fn parse(provider: &str, lines: &[&str]) -> (Parser, String) {
@@ -1381,6 +1533,38 @@ Second.");
     assert!(reply.text.to_lowercase().contains("pong"));
     assert!(reply.session_id.is_some());
     assert!(models(&procs, "claude").await.unwrap().len() >= 4);
+  }
+
+  /// The second turn goes to the process the first one kept, which remembers it:
+  /// `cargo test -p singl-core real_cli_live -- --ignored --nocapture`.
+  #[tokio::test(flavor = "multi_thread")]
+  #[ignore]
+  async fn real_cli_live() {
+    for (provider, model) in [("claude", "haiku"), ("antigravity", "")] {
+      let procs = ProcRegistry::default();
+      let (none, cancel) = (|_: &str| {}, CancellationToken::new());
+      let mut r = req(provider);
+      r.model = model.into();
+      r.foreign_mcp = Vec::new();
+      r.prompt = "Reply with exactly the word: kiwi".into();
+      let t = std::time::Instant::now();
+      let (first, live) = run_live(&procs, r, &none, &none, &none, None, None, &cancel, None, true).await;
+      let first = first.unwrap();
+      let live = live.expect("process kept");
+      let (pid, first_ms) = (live.proc_id.clone(), t.elapsed().as_millis());
+
+      let mut r = req(provider);
+      r.model = model.into();
+      r.foreign_mcp = Vec::new();
+      r.resume = first.session_id.clone();
+      r.prompt = "Which fruit did you just name? One word.".into();
+      let t = std::time::Instant::now();
+      let (second, live) = run_live(&procs, r, &none, &none, &none, None, None, &cancel, Some(live), true).await;
+      let second = second.unwrap();
+      println!("{provider}: first {first_ms} ms, second {} ms: {}", t.elapsed().as_millis(), second.text);
+      assert_eq!(live.expect("still kept").proc_id, pid, "same process");
+      assert!(second.text.to_lowercase().contains("kiwi"), "{}", second.text);
+    }
   }
 
   /// A steered message reaches the running turn, and the run still ends:

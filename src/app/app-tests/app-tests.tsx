@@ -27,6 +27,7 @@ import { AgentPanel, runInstructions } from "./agent-panel"
 import { UiTestsGrid } from "./cases-grid"
 import { SuiteHeader, type RunState } from "./header"
 import { ReportDialog } from "./report-dialog"
+import { ChatsTab } from "./chats-tab"
 import { RunsTab } from "./runs-tab"
 import { SettingsTab } from "./settings-tab"
 import { countStatuses, formatMs, TMP } from "./shared"
@@ -70,6 +71,8 @@ export function AppTests({ envs }: { envs: string[] }) {
     } catch {}
   }
   const [tab, setTab] = useState("cases")
+  /** Chat the Chats tab shows. */
+  const [pickedChat, setPickedChat] = useState("")
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<string>("all")
   const [stats, setStats] = useState<Record<string, SuiteStats>>({})
@@ -86,7 +89,7 @@ export function AppTests({ envs }: { envs: string[] }) {
       cancelled = true
     }
   }, [suiteProvider])
-  const [runMode, setRunMode] = useState<"" | UiTestMode>("")
+  const [runMode, setRunMode] = useState<"" | UiTestMode>("headed")
   const [run, setRun] = useState<RunState | null>(null)
   const [history, setHistory] = useState<RunRow[]>([])
   const [pendingCsv, setPendingCsv] = useState<{ name: string; text: string } | null>(null)
@@ -446,7 +449,12 @@ export function AppTests({ envs }: { envs: string[] }) {
     if (run) cancelUiRun(run.runId).catch(fail)
   }
 
+  /** Test chats stay out of the assistant's list; read them in the Chats tab. */
   const openTranscript = (chatId: string) => {
+    setPickedChat(chatId)
+    setTab("chats")
+  }
+  const openInAssistant = (chatId: string) => {
     void chat.openChat(chatId)
     router.push("/assistant")
   }
@@ -593,6 +601,7 @@ export function AppTests({ envs }: { envs: string[] }) {
                 <TabsList>
                   <TabsTrigger value="cases" disabled={!saved}>Cases</TabsTrigger>
                   <TabsTrigger value="runs" disabled={!saved}>Runs{history.length > 0 ? ` (${history.length})` : ""}</TabsTrigger>
+                  <TabsTrigger value="chats" disabled={!saved}>Chats</TabsTrigger>
                   <TabsTrigger value="settings">Settings</TabsTrigger>
                 </TabsList>
               </div>
@@ -703,6 +712,16 @@ export function AppTests({ envs }: { envs: string[] }) {
                   onReload={() => loadHistory(suite.id)}
                   onOpenTranscript={openTranscript}
                   onGenerate={(runId) => setReport({ runId })}
+                />
+              </TabsContent>
+
+              <TabsContent value="chats" className="min-h-0 flex-1">
+                <ChatsTab
+                  suiteId={suite.id}
+                  version={`${history[0]?.id ?? ""}:${run?.runId ?? ""}:${run?.index ?? ""}`}
+                  picked={pickedChat}
+                  onPick={setPickedChat}
+                  onOpenInAssistant={openInAssistant}
                 />
               </TabsContent>
 

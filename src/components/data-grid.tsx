@@ -250,6 +250,8 @@ const CLASS_NAMES = {
   columnMenuButton: cn(shadcnClassNames.columnMenuButton, "h-7 px-2 text-xs"),
   exportCsvButton: cn(shadcnClassNames.exportCsvButton, "h-7 px-2 text-xs"),
   table: cn(shadcnClassNames.table, "text-xs"),
+  // One line per header: caption, sort glyph and filter funnel side by side.
+  headerCell: cn(shadcnClassNames.headerCell, "whitespace-nowrap"),
   footer: cn(shadcnClassNames.footer, "p-1.5 text-xs"),
   pageNumber: cn(shadcnClassNames.pageNumber, "h-6 min-w-6 text-xs"),
   rowsPerPage: cn(shadcnClassNames.rowsPerPage, "h-7 text-xs"),

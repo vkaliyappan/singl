@@ -1,7 +1,9 @@
 //! UI tests: AI-driven browser test cases, in the Azure DevOps test case layout.
 //! `csv` reads and writes Azure's CSV, `session` keeps a saved ThingWorx login
-//! per environment, `runner` has the assistant drive Playwright MCP through the steps.
+//! per environment, `runner` has the assistant drive Playwright MCP through the steps,
+//! `chats` lists the chats those runs leave.
 
+pub mod chats;
 pub mod csv;
 pub mod report;
 pub mod runner;
